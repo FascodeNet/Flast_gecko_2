@@ -1,0 +1,2241 @@
+ 0:01.46 Clobber not needed.
+ 0:01.46 c:\Users\kokki\.mozbuild\_virtualenvs\mach\Scripts\python.exe d:/fireox\configure.py
+ 0:01.83 Re-executing in the virtualenv
+ 0:02.30 Adding configure options from d:\fireox\mozconfig
+ 0:02.30   --target=x86_64-w64-mingw32
+ 0:02.30   --host=x86_64-w64-mingw32
+ 0:02.30   _VSPATH=c:/vc2022p
+ 0:02.30   WINDOWSSDKDIR=c:/Program Files (x86)/Windows Kits/10/
+ 0:02.30   LIBPATH=c:\Program Files (x86)\Windows Kits\10\Lib\10.0.22000.0\um\x64;c:\vc2022p\vc\Tools\MSVC\14.30.30423\lib;c:\vc2022p\vc\Tools\MSVC\14.30.30423\atlmfc\lib;c:\tools\sdks\dx10\lib
+ 0:02.30   LIB=c:\Program Files (x86)\Windows Kits\8.1\Lib\10.0.22000.0\um\x64;c:\vc2022p\vc\Tools\MSVC\14.30.30423\lib;c:\vc2022p\vc\Tools\MSVC\14.30.30423\atlmfc\lib;c:\tools\sdks\dx10\lib
+ 0:02.30   INCLUDE=c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared;c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um;c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\winrt;c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\winrt\wrl;c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\winrt\wrl\wrappers;c:\vc2022p\vc\Tools\MSVC\14.30.30423\include;c:\vc2022p\vc\Tools\MSVC\14.30.30423\atlmfc\include;c:\tools\sdks\dx10\include
+ 0:02.30   PATH=c:\Program Files (x86)\Windows Kits\10\bin\10.0.22000.0\x64;c:\vc2022p\Common7\IDE;c:\vc2022p\VC\Tools\MSVC\14.30.30423\BIN\hostx64\x64;c:\vc2022p\VC\Tools\MSVC\14.30.30423\BIN\hostx64\x64;c:\vc2022p\Common7\Tools;c:\vc2022p\VC\VCPackages;c:\mozilla-build\moztools;c:\MSVCX64;C:\mozilla-build\msys\local\bin;c:\mozilla-build\bin;c:\mozilla-build\kdiff3;c:\Users\kokki\.mozbuild\git-cinnabar;c:\mozilla-build\nsis-3.01;c:\mozilla-build\python;c:\mozilla-build\python\Scripts;c:\mozilla-build\python3;c:\mozilla-build\python3\Scripts;.;C:\mozilla-build\msys\local\bin;C:\mozilla-build\msys\mingw\bin;C:\mozilla-build\msys\bin;c:\WINDOWS\System32;c:\WINDOWS;c:\WINDOWS\System32\Wbem;c:\msys64\usr\bin\
+ 0:02.30 checking for vcs source checkout... git
+ 0:02.35 checking for a shell... C:/mozilla-build/msys/bin/sh.exe
+ 0:02.52 checking for host system type... x86_64-w64-mingw32
+ 0:02.69 checking for target system type... x86_64-w64-mingw32
+ 0:03.08 checking whether cross compiling... no
+ 0:03.21 checking for Python 3... d:/fireox/obj-x86_64-w64-mingw32/_virtualenvs/common/Scripts/python.exe (3.7.4)
+ 0:03.21 checking for git... c:/msys64/usr/bin/git.exe
+ 0:03.28 checking for Git version... 2.32.0
+ 0:03.31 checking for sparse checkout... no
+ 0:03.31 checking for wget... c:/mozilla-build/bin/wget.exe
+ 0:03.57 checking for ccache... not found
+ 0:03.57 checking for the target C compiler... c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe
+ 0:04.16 checking whether the target C compiler can be used... yes
+ 0:04.16 checking the target C compiler version... 12.0.0
+ 0:04.33 checking the target C compiler works... yes
+ 0:04.33 checking for the target C++ compiler... c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe
+ 0:04.59 checking whether the target C++ compiler can be used... yes
+ 0:04.59 checking the target C++ compiler version... 12.0.0
+ 0:04.75 checking the target C++ compiler works... yes
+ 0:04.75 checking for the host C compiler... c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe
+ 0:05.01 checking whether the host C compiler can be used... yes
+ 0:05.01 checking the host C compiler version... 12.0.0
+ 0:05.16 checking the host C compiler works... yes
+ 0:05.16 checking for the host C++ compiler... c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe
+ 0:05.43 checking whether the host C++ compiler can be used... yes
+ 0:05.43 checking the host C++ compiler version... 12.0.0
+ 0:05.58 checking the host C++ compiler works... yes
+ 0:05.72 checking for 64-bit OS... yes
+ 0:05.86 checking for Windows SDK... 0x0a00 in 'c:/Program Files (x86)/Windows Kits/10/'
+ 0:05.86 checking for Universal CRT SDK... 10.0.22000.0 in 'c:/Program Files (x86)/Windows Kits/10/'
+ 0:05.86 checking for the Debug Interface Access SDK... c:\vc2022p\DIA SDK
+ 0:05.87 checking for linker... c:/Users/kokki/.mozbuild/clang/bin/lld-link.exe
+ 0:05.88 checking for host_linker... c:/Users/kokki/.mozbuild/clang/bin/lld-link.exe
+ 0:05.88 checking for the assembler... c:/vc2022p/VC/Tools/MSVC/14.30.30423/BIN/hostx64/x64/ml64.exe
+ 0:05.88 checking for rc... c:/Users/kokki/.mozbuild/clang/bin/llvm-rc.exe
+ 0:05.89 checking for ar... c:/Users/kokki/.mozbuild/clang/bin/llvm-lib.exe
+ 0:05.90 checking for pkg_config... not found
+ 0:06.07 checking for stdint.h... yes
+ 0:06.22 checking for inttypes.h... yes
+ 0:06.37 checking for malloc.h... yes
+ 0:06.53 checking for alloca.h... no
+ 0:06.66 checking for sys/byteorder.h... no
+ 0:06.80 checking for getopt.h... no
+ 0:06.95 checking for unistd.h... no
+ 0:07.10 checking for nl_types.h... no
+ 0:07.24 checking for cpuid.h... yes
+ 0:07.38 checking for fts.h... no
+ 0:07.52 checking for sys/statvfs.h... no
+ 0:07.66 checking for sys/statfs.h... no
+ 0:07.80 checking for sys/vfs.h... no
+ 0:07.94 checking for sys/mount.h... no
+ 0:08.08 checking for sys/quota.h... no
+ 0:08.23 checking for sys/queue.h... no
+ 0:08.39 checking for sys/types.h... yes
+ 0:08.53 checking for netinet/in.h... no
+ 0:08.67 checking for byteswap.h... no
+ 0:08.83 checking for memfd_create in sys/mman.h... no
+ 0:08.97 checking for perf_event_open system call... no
+ 0:09.00 checking for llvm_profdata... c:/Users/kokki/.mozbuild/clang/bin/llvm-profdata.exe
+ 0:09.02 checking for rustc... c:/Users/kokki/.cargo/bin/rustc.exe
+ 0:09.03 checking for cargo... c:/Users/kokki/.cargo/bin/cargo.exe
+ 0:09.20 Actually using 'C:\Users\kokki\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\rustc.exe'
+ 0:09.31 Actually using 'C:\Users\kokki\.rustup\toolchains\stable-x86_64-pc-windows-msvc\bin\cargo.exe'
+ 0:09.33 checking rustc version... 1.54.0
+ 0:09.34 checking cargo version... 1.54.0
+ 0:09.96 checking for rust host triplet... x86_64-pc-windows-msvc
+ 0:10.04 checking for rust target triplet... x86_64-pc-windows-msvc
+ 0:10.05 checking for rustdoc... c:/Users/kokki/.cargo/bin/rustdoc.exe
+ 0:10.15 checking for cbindgen... c:/Users/kokki/.mozbuild/cbindgen/cbindgen.exe
+ 0:10.15 checking for rustfmt... c:/Users/kokki/.cargo/bin/rustfmt.exe
+ 0:10.58 checking for clang for bindgen... c:/Users/kokki/.mozbuild/clang/bin/clang.exe
+ 0:10.72 checking for libclang for bindgen... c:/Users/kokki/.mozbuild/clang/bin/libclang.dll
+ 0:10.93 checking that libclang is new enough... yes
+ 0:10.93 checking bindgen cflags... -x c++ -fno-sized-deallocation -fno-aligned-new -DTRACING=1 -DIMPL_LIBXUL -DMOZILLA_INTERNAL_API -DRUST_BINDGEN -DOS_WIN=1 -DWIN32=1 -D_CRT_USE_BUILTIN_OFFSETOF -DHAVE_VISIBILITY_HIDDEN_ATTRIBUTE=1 -std=gnu++17
+ 0:11.26 checking for nodejs... c:\Users\kokki\.mozbuild\node\node.EXE (12.22.1)
+ 0:11.27 checking for tar... C:/mozilla-build/msys/bin/tar.exe
+ 0:11.28 checking for unzip... c:/mozilla-build/bin/unzip.exe
+ 0:11.28 checking for zip... c:/mozilla-build/bin/zip.exe
+ 0:11.28 checking for gn... not found
+ 0:11.28 checking for the Mozilla API key... no
+ 0:11.28 checking for the Google Location Service API key... no
+ 0:11.28 checking for the Google Safebrowsing API key... no
+ 0:11.28 checking for the Bing API key... no
+ 0:11.28 checking for the Adjust SDK key... no
+ 0:11.28 checking for the Leanplum SDK key... no
+ 0:11.28 checking for the Pocket API key... no
+ 0:11.29 checking for midl... c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe
+ 0:11.29 checking for llvm-dlltool... c:/Users/kokki/.mozbuild/clang/bin/llvm-dlltool.exe
+ 0:11.29 checking for fxc... c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe
+ 0:11.31 checking for nasm... c:/Users/kokki/.mozbuild/nasm/nasm.exe
+ 0:11.33 checking nasm version... 2.15.05
+ 0:11.34 checking for D3D compiler DLL... c:/Program Files (x86)/Windows Kits/10/Redist\D3D\x64\d3dcompiler_47.dll
+ 0:11.35 checking for dump_syms... c:/Users/kokki/.mozbuild/dump_syms/dump_syms.exe
+ 0:11.35 checking for pdbstr... not found
+ 0:11.36 checking for winchecksec... not found
+ 0:11.36 checking for awk... C:/mozilla-build/msys/bin/gawk.exe
+ 0:11.37 checking for perl... C:/mozilla-build/msys/bin/perl.exe
+ 0:11.44 checking for minimum required perl version >= 5.006... 5.008008
+ 0:11.49 checking for full perl installation... yes
+ 0:11.50 checking for gmake... c:/mozilla-build/bin/mozmake.exe
+ 0:11.54 checking for watchman... c:/mozilla-build/bin/watchman.exe
+ 0:11.54 checking for watchman version... 4.9.1
+ 0:11.55 checking for xargs... C:/mozilla-build/msys/bin/xargs.exe
+ 0:11.55 checking for makensisu... c:/mozilla-build/nsis-3.01/makensis-3.01.exe
+ 0:11.71 checking for NSIS version... 3.01
+ 0:11.71 checking for 32-bit NSIS... yes
+ 0:11.71 checking for 7z... c:/mozilla-build/bin/7z.exe
+ 0:11.71 checking for upx... c:/mozilla-build/bin/upx.exe
+ 0:11.86 checking for llvm-objdump... c:/Users/kokki/.mozbuild/clang/bin/llvm-objdump.exe
+ 0:11.87 checking for m4... C:/mozilla-build/msys/bin/m4.exe
+ 0:12.34 creating cache ./config.cache
+ 0:13.34 checking host system type... x86_64-w64-mingw32
+ 0:13.70 checking target system type... x86_64-w64-mingw32
+ 0:14.04 checking build system type... x86_64-w64-mingw32
+ 0:14.52 checking for Cygwin environment... no
+ 0:15.00 checking for mingw32 environment... no
+ 0:15.90 checking for executable suffix... no
+ 0:15.91 checking for gcc... (cached) c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99
+ 0:15.92 checking whether the C compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99   ) works... (cached) yes
+ 0:15.92 checking whether the C compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99   ) is a cross-compiler... no
+ 0:15.93 checking whether we are using GNU C... (cached) no
+ 0:15.94 checking whether c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99 accepts -g... (cached) no
+ 0:18.01 checking for c++... (cached) c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17
+ 0:18.02 checking whether the C++ compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17   ) works... (cached) yes
+ 0:18.02 checking whether the C++ compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17   ) is a cross-compiler... no
+ 0:18.03 checking whether we are using GNU C++... (cached) no
+ 0:18.04 checking whether c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17 accepts -g... (cached) no
+ 0:18.05 checking for c:/vc2022p/VC/Tools/MSVC/14.30.30423/BIN/hostx64/x64/ml64.exe... c:/vc2022p/VC/Tools/MSVC/14.30.30423/BIN/hostx64/x64/ml64.exe
+ 0:18.08 checking for strip... strip
+ 0:18.10 checking for otool... no
+ 0:20.70 checking for X... no
+ 0:22.15 checking for malloc.h... yes
+ 0:22.68 checking for strndup... no
+ 0:23.09 checking for posix_memalign... no
+ 0:23.52 checking for memalign... no
+ 0:23.93 checking for malloc_usable_size... no
+ 0:24.22 checking whether malloc_usable_size definition can use const argument... yes
+ 0:24.60 checking for valloc in malloc.h... no
+ 0:24.89 checking for valloc in unistd.h... no
+ 0:25.28 checking for _aligned_malloc in malloc.h... yes
+ 0:25.79 checking if app-specific confvars.sh exists... d:/fireox/browser/confvars.sh
+ 0:27.17 checking for fdatasync... no
+ 0:27.51 checking for valid C compiler optimization flags... yes
+ 0:28.39 checking what kind of list files are supported by the linker... list
+ 0:30.10 checking for d3d10.h... yes
+ 0:31.48 checking for posix_fadvise... no
+ 0:31.99 checking for posix_fallocate... no
+ 0:32.31 updating cache ./config.cache
+ 0:32.38 creating ./config.data
+ 0:32.75 js/src> Refreshing d:/fireox/js/src/old-configure with d:/fireox\build\autoconf\autoconf.sh
+ 0:34.31 js/src> loading cache ./config.cache
+ 0:34.90 js/src> checking host system type... x86_64-w64-mingw32
+ 0:35.23 js/src> checking target system type... x86_64-w64-mingw32
+ 0:35.58 js/src> checking build system type... x86_64-w64-mingw32
+ 0:35.68 js/src> checking for Cygwin environment... (cached) no
+ 0:35.68 js/src> checking for mingw32 environment... (cached) no
+ 0:35.69 js/src> checking for executable suffix... (cached) no
+ 0:35.70 js/src> checking for gcc... (cached) c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99
+ 0:35.71 js/src> checking whether the C compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99   ) works... (cached) yes
+ 0:35.71 js/src> checking whether the C compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99   ) is a cross-compiler... no
+ 0:35.72 js/src> checking whether we are using GNU C... (cached) no
+ 0:35.73 js/src> checking whether c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=gnu99 accepts -g... (cached) no
+ 0:35.73 js/src> checking for c++... (cached) c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17
+ 0:35.74 js/src> checking whether the C++ compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17   ) works... (cached) yes
+ 0:35.74 js/src> checking whether the C++ compiler (c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17   ) is a cross-compiler... no
+ 0:35.75 js/src> checking whether we are using GNU C++... (cached) no
+ 0:35.76 js/src> checking whether c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17 accepts -g... (cached) no
+ 0:35.77 js/src> checking for c:/vc2022p/VC/Tools/MSVC/14.30.30423/BIN/hostx64/x64/ml64.exe... (cached) c:/vc2022p/VC/Tools/MSVC/14.30.30423/BIN/hostx64/x64/ml64.exe
+ 0:35.78 js/src> checking for strip... (cached) strip
+ 0:37.28 js/src> checking for _getc_nolock... yes
+ 0:37.44 js/src> checking for sb-conf... no
+ 0:37.46 js/src> checking for ve... no
+ 0:37.51 js/src> checking for X... (cached) no
+ 0:39.38 js/src> checking for valid optimization flags... yes
+ 0:39.86 js/src> checking what kind of list files are supported by the linker... list
+ 0:39.93 js/src> checking for posix_fadvise... (cached) no
+ 0:39.95 js/src> checking for posix_fallocate... (cached) no
+ 0:40.02 js/src> checking for malloc.h... (cached) yes
+ 0:40.13 js/src> checking for strndup... (cached) no
+ 0:40.15 js/src> checking for posix_memalign... (cached) no
+ 0:40.17 js/src> checking for memalign... (cached) no
+ 0:40.19 js/src> checking for malloc_usable_size... (cached) no
+ 0:40.48 js/src> checking whether malloc_usable_size definition can use const argument... yes
+ 0:40.96 js/src> checking for valloc in malloc.h... no
+ 0:41.33 js/src> checking for valloc in unistd.h... no
+ 0:41.71 js/src> checking for _aligned_malloc in malloc.h... yes
+ 0:42.03 js/src> updating cache ./config.cache
+ 0:42.09 js/src> creating ./config.data
+ 0:42.52 Creating config.status
+ 0:42.92 Reticulating splines...
+ 0:44.67  0:01.80 File already read. Skipping: d:/fireox/intl/components/moz.build
+ 0:45.59  0:02.71 File already read. Skipping: d:/fireox/gfx/angle/targets/angle_common/moz.build
+ 0:45.59  0:02.71 File already read. Skipping: d:/fireox/gfx/angle/targets/angle_common/moz.build
+ 0:45.65  0:02.78 File already read. Skipping: d:/fireox/gfx/angle/targets/angle_common/moz.build
+ 0:45.66  0:02.78 File already read. Skipping: d:/fireox/gfx/angle/targets/angle_common/moz.build
+ 0:45.66  0:02.78 File already read. Skipping: d:/fireox/gfx/angle/targets/angle_common/moz.build
+ 0:45.66  0:02.79 File already read. Skipping: d:/fireox/gfx/angle/targets/translator/moz.build
+ 0:45.66  0:02.79 File already read. Skipping: d:/fireox/gfx/angle/targets/libGLESv2/moz.build
+ 1:04.47 Finished reading 1818 moz.build files in 5.29s
+ 1:04.47 Read 62 gyp files in parallel contributing 0.00s to total wall time
+ 1:04.47 Processed into 11254 build config descriptors in 6.77s
+ 1:04.47 RecursiveMake backend executed in 6.12s
+ 1:04.47   3832 total backend files; 3832 created; 0 updated; 0 unchanged; 0 deleted; 32 -> 1447 Makefile
+ 1:04.47 FasterMake backend executed in 0.61s
+ 1:04.47   13 total backend files; 13 created; 0 updated; 0 unchanged; 0 deleted
+ 1:04.47 VisualStudio backend executed in 1.96s
+ 1:04.47 Generated Visual Studio solution at d:/fireox/obj-x86_64-w64-mingw32\msvc\mozilla.sln
+ 1:04.47 Total wall time: 21.60s; CPU time: 17.62s; Efficiency: 82%; Untracked: 0.84s
+ 1:05.09 Adding make options from d:\fireox\mozconfig
+    MOZ_OBJDIR=d:/fireox/obj-x86_64-w64-mingw32
+    OBJDIR=d:/fireox/obj-x86_64-w64-mingw32
+    FOUND_MOZCONFIG=d:/fireox/mozconfig
+    export FOUND_MOZCONFIG
+ 1:05.09 c:/mozilla-build/bin/mozmake.exe -f client.mk -s
+ 1:05.77 Elapsed: 0.00s; From dist/private: Kept 0 existing; Added/updated 0; Removed 0 files and 0 directories.
+ 1:05.78 Elapsed: 0.00s; From dist/public: Kept 0 existing; Added/updated 0; Removed 0 files and 0 directories.
+ 1:05.91 Elapsed: 0.15s; From dist/xpi-stage: Kept 0 existing; Added/updated 94; Removed 0 files and 0 directories.
+ 1:06.80 Elapsed: 1.03s; From _tests: Kept 0 existing; Added/updated 1255; Removed 0 files and 0 directories.
+ 1:07.20 Elapsed: 1.43s; From dist/bin: Kept 0 existing; Added/updated 2646; Removed 0 files and 0 directories.
+ 1:07.83 Elapsed: 2.07s; From dist/include: Kept 0 existing; Added/updated 6519; Removed 0 files and 0 directories.
+ 1:08.09 ./mozilla-config.h.stub
+ 1:08.10 ./buildid.h.stub
+ 1:08.11 ./source-repo.h.stub
+ 1:08.56 ./stl.sentinel.stub
+ 1:08.57 ./windows.h.stub
+ 1:08.58 ./AccessibleEventId.h.stub
+ 1:08.58 ./AccessibleRole.h.stub
+ 1:08.58 ./AccessibleStates.h.stub
+ 1:08.58 ./IA2CommonTypes.h.stub
+ 1:08.59 ./ntdll_freestanding.lib.stub
+ 1:08.59 ./application.ini.stub
+ 1:08.59 ./fficonfig.h.stub
+ 1:08.89 Executing:Executing:  c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -Oicf d:/fireox/other-licenses/ia2/AccessibleEventId.idlc:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -Oicf d:/fireox/other-licenses/ia2/AccessibleStates.idl
+ 1:08.89 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -Oicf d:/fireox/other-licenses/ia2/AccessibleRole.idl
+ 1:08.91 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -Oicf d:/fireox/other-licenses/ia2/IA2CommonTypes.idl
+ 1:08.93 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:08.93 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:08.93 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:08.93 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:08.94 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:08.94 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:08.94 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:08.94 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:08.95 ./ffi.h.stub
+ 1:08.98 ./UseCounterList.h.stub
+ 1:08.99 ./UseCounterWorkerList.h.stub
+ 1:09.00 64 bit Processing d:\fireox\other-licenses\ia2\IA2CommonTypes.idl
+ 1:09.00 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleEventId.idl
+ 1:09.00 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleRole.idl
+ 1:09.01 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleStates.idl
+ 1:09.16 ./ServoCSSPropList.py.stub
+ 1:09.25 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:09.28 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:09.31 ./cbindgen-metadata.json.stub
+ 1:09.33 ./CompositorD3D11Shaders.h.stub
+ 1:09.33 ./encodingsgroups.properties.h.stub
+ 1:09.36 ./BaseChars.h.stub
+ 1:09.37 ./js-confdefs.h.stub
+ 1:09.41 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:09.41 #include "objidlbase.idl"
+ 1:09.41          ^~~~~~~~~~~~~~~~
+ 1:09.41          "objidlbase.Idl"
+ 1:09.41 1 warning generated.
+ 1:09.42 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:09.42 #include "objidlbase.idl"
+ 1:09.42          ^~~~~~~~~~~~~~~~
+ 1:09.42          "objidlbase.Idl"
+ 1:09.42 1 warning generated.
+ 1:09.53 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:09.55 ./js-config.h.stub
+ 1:09.55 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:09.65 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerQuadVS -VnLayerQuadVS -Vi -DVERTEX_SHADER -Fhtmpk2i01wkb
+ 1:09.69 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl,(28,10)10: ): warning: warningnon-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:09.69 : non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:09.69 #include "unknwnbase.idl"
+ 1:09.69 #include "unknwnbase.idl"
+ 1:09.69          ^~~~~~~~~~~~~~~~         ^~~~~~~~~~~~~~~~
+ 1:09.69          "Unknwnbase.Idl"         "Unknwnbase.Idl"
+ 1:09.69 1 warning generated.
+ 1:09.69 1 warning generated.
+ 1:09.70 ./selfhosted.out.h.stub
+ 1:09.84 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:09.85 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:09.94 ./ReservedWordsGenerated.h.stub
+ 1:09.95 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerDynamicVS -VnLayerDynamicVS -Vi -DVERTEX_SHADER -Fhtmprnr4eg38
+ 1:10.00 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerQuadMaskVS -VnLayerQuadMaskVS -Vi -DVERTEX_SHADER -Fhtmpga715avs
+ 1:10.09 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerDynamicMaskVS -VnLayerDynamicMaskVS -Vi -DVERTEX_SHADER -Fhtmpat_dln_u
+ 1:10.12 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:10.12 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:10.13 ./StatsPhasesGenerated.h.stub
+ 1:10.16 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerQuadBlendVS -VnLayerQuadBlendVS -Vi -DVERTEX_SHADER -Fhtmp3sx_xn2r
+ 1:10.22 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerQuadBlendMaskVS -VnLayerQuadBlendMaskVS -Vi -DVERTEX_SHADER -Fhtmpeljb0644
+ 1:10.27 c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -Xclang -std=c++17 -P -Fiself-hosting-preprocessed.pp -Qunused-arguments -DCROSS_COMPILE= -DHAVE_64BIT_BUILD=1 -D_WINDOWS=1 -DWIN32=1 -DXP_WIN=1 -DMOZ_BUILD_APP=browser -DRELEASE_OR_BETA=1 -DMOZILLA_VERSION="91.0.2" -DMOZILLA_VERSION_U=91.0.2 -DMOZILLA_UAVERSION="91.0" -DMOZ_UPDATE_CHANNEL=default -DENABLE_TESTS=1 -DGTEST_HAS_RTTI=0 -DMOZ_MEMORY=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DSTDC_HEADERS=1 -DHAVE_MALLOC_H=1 -DHAVE_CPUID_H=1 -DHAVE_SYS_TYPES_H=1 -DMOZ_DLL_PREFIX="" -DMOZ_DLL_SUFFIX=".dll" -DMOZ_GECKO_PROFILER=1 -DMOZ_PROFILER_MEMORY=1 -DJS_64BIT=1 -DJS_PUNBOX64=1 -DSTATIC_JS_API=1 -DMOZ_STATIC_JS=1 -DJS_CODEGEN_X64=1 -DMOZ_AARCH64_JSCVT=0 -DBUILD_CTYPES=1 -DJS_HAS_CTYPES=1 -DENABLE_SHARED_MEMORY=1 -DENABLE_WASM_SIMD=1 -DENABLE_WASM_SIMD_WORMHOLE=1 -DJS_DEFAULT_JITREPORT_GRANULARITY=3 -DJS_HAS_INTL_API=1 -DU_USING_ICU_NAMESPACE=0 -DU_STATIC_IMPLEMENTATION=1 -DMOZ_INSTRUMENT_EVENT_LOOP=1 -DMOZ_WMF=1 -DMOZ_DAV1D_ASM=1 -DMOZ_AV1=1 -DMOZ_FMP4=1 -DMOZ_SAMPLE_TYPE_FLOAT32=1 -DMOZ_VORBIS=1 -DMOZ_PLACES=1 -DMOZ_SERVICES_HEALTHREPORT=1 -DMOZ_NORMANDY=1 -DMOZ_DEDICATED_PROFILES=1 -DMOZ_BLOCK_PROFILE_DOWNGRADE=1 -DNS_PRINTING=1 -DNS_PRINT_PREVIEW=1 -DMOZ_WEBSPEECH=1 -DMOZ_WEBSPEECH_TEST_BACKEND=1 -DMOZ_ENABLE_SKIA=1 -DUSE_SKIA=1 -DENABLE_WEBDRIVER=1 -DMOZ_WEBRTC=1 -DMOZ_SCTP=1 -DMOZ_SRTP=1 -DMOZ_WEBRTC_SIGNALING=1 -DMOZ_PEERCONNECTION=1 -DMOZ_WEBRTC_ASSERT_ALWAYS=1 -DMOZ_RAW=1 -DMOZ_PROXY_DIRECT_FAILOVER=1 -DACCESSIBILITY=1 -DMOZ_REQUIRE_SIGNING=1 -DMOZ_LAUNCHER_PROCESS=1 -DMOZ_BITS_DOWNLOAD=1 -DMOZ_BUNDLED_FONTS=1 -DMOZ_LIBAV_FFT=1 -DMOZ_FFVPX=1 -DMOZ_HAS_REMOTE=1 -DMOZ_VERIFY_MAR_SIGNATURE=1 -DMOZ_MAINTENANCE_SERVICE=1 -D_CRT_SECURE_NO_WARNINGS=1 -D_CRT_NONSTDC_NO_WARNINGS=1 -D_USE_MATH_DEFINES=1 -DHAVE_SEH_EXCEPTIONS=1 -DWINVER=0x601 -D_WIN32_WINNT=0x601 -D_WIN32_IE=0x0800 -DHAVE_IO_H=1 -DHAVE_ISATTY=1 -DX_DISPLAY_MISSING=1 -DWIN32_LEAN_AND_MEAN=1 -DNOMINMAX=1 -D_AMD64_=1 -DMALLOC_H=<malloc.h> -DMALLOC_USABLE_SIZE_CONST_PTR=const -DHAVE_ALIGNED_MALLOC=1 -DTARGET_XPCOM_ABI="x86_64-msvc" -DHAVE_FORCEINLINE=1 -DHAVE_LOCALECONV=1 -DMOZ_DISTRIBUTION_ID="org.mozilla" -DMOZ_WEBM_ENCODER=1 -DENABLE_SYSTEM_EXTENSION_DIRS=1 -DMOZ_CRASHREPORTER=1 -DMOZ_UPDATER=1 -DMOZ_SANDBOX=1 -DMOZ_LOGGING=1 -DFORCE_PR_LOG=1 -DMOZ_USER_DIR="Mozilla" -DMOZ_TREE_PIXMAN=1 -DMOZ_TREE_CAIRO=1 -DHAVE_UINT64_T=1 -DMOZ_XUL=1 -DNECKO_WIFI=1 -DMOZ_MACBUNDLE_ID=org.mozilla.nightly -DMOZ_APP_UA_NAME="" -DMOZ_APP_UA_VERSION="91.0.2" -DBROWSER_CHROME_URL=chrome://browser/content/browser.xhtml -DBROWSER_CHROME_URL_QUOTED="chrome://browser/content/browser.xhtml" -DMOZ_DATA_REPORTING=1 -DNO_NSPR_10_SUPPORT=1 -DNDEBUG=1 -DTRIMMED=1 self-hosting-cpp-input.cpp
+ 1:10.29 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerDynamicBlendVS -VnLayerDynamicBlendVS -Vi -DVERTEX_SHADER -Fhtmp_37ze6jn
+ 1:10.36 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tvs_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ELayerDynamicBlendMaskVS -VnLayerDynamicBlendMaskVS -Vi -DVERTEX_SHADER -Fhtmpdcgb30gl
+ 1:10.39 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:10.40 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:10.43 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ESolidColorShader -VnSolidColorShader -Vi -DPIXEL_SHADER -Fhtmpxh88ib11
+ 1:10.50 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ERGBShader -VnRGBShader -Vi -DPIXEL_SHADER -Fhtmpwjsabrr2
+ 1:10.54 ./MIROpsGenerated.h.stub
+ 1:10.54 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ERGBAShader -VnRGBAShader -Vi -DPIXEL_SHADER -Fhtmp8c64uvg8
+ 1:10.58 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -EComponentAlphaShader -VnComponentAlphaShader -Vi -DPIXEL_SHADER -Fhtmp5_g3dodh
+ 1:10.63 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -EYCbCrShader -VnYCbCrShader -Vi -DPIXEL_SHADER -Fhtmpd2t9_eyg
+ 1:10.68 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ENV12Shader -VnNV12Shader -Vi -DPIXEL_SHADER -Fhtmpxtc5yipc
+ 1:10.68 ./LOpcodesGenerated.h.stub
+ 1:10.69 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:10.69 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:10.73 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ESolidColorShaderMask -VnSolidColorShaderMask -Vi -DPIXEL_SHADER -Fhtmpf653q3j3
+ 1:10.78 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ERGBShaderMask -VnRGBShaderMask -Vi -DPIXEL_SHADER -Fhtmpmra13mnq
+ 1:10.83 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ERGBAShaderMask -VnRGBAShaderMask -Vi -DPIXEL_SHADER -Fhtmpzarfti2b
+ 1:10.93 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -EYCbCrShaderMask -VnYCbCrShaderMask -Vi -DPIXEL_SHADER -Fhtmpbg1qp6lr
+ 1:11.02 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -ENV12ShaderMask -VnNV12ShaderMask -Vi -DPIXEL_SHADER -Fhtmp4srlmuxj
+ 1:11.05 ./CacheIROpsGenerated.h.stub
+ 1:11.06 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -EComponentAlphaShaderMask -VnComponentAlphaShaderMask -Vi -DPIXEL_SHADER -Fhtmp48izoebe
+ 1:11.16 c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/fxc.exe -nologo -Tps_4_0_level_9_3 ..\gfx\layers\d3d11\CompositorD3D11.hlsl -EBlendShader -VnBlendShader -Vi -DPIXEL_SHADER -Fhtmpp06hh5u_
+ 1:11.16 ./FrameIdList.h.stub
+ 1:11.27 ./FrameTypeList.h.stub
+ 1:11.51 ./ExampleStylesheet.h.stub
+ 1:11.56 ./CountedUnknownProperties.h.stub
+ 1:11.59 ./WindowsDllBlocklistA11yDefs.h.stub
+ 1:11.73 ./metrics.rs.stub
+ 1:11.90 ./GleanMetrics.h.stub
+ 1:11.94 ./GleanJSMetricsLookup.h.stub
+ 1:12.00 ./pings.rs.stub
+ 1:12.04 ./GleanPings.h.stub
+ 1:12.10 ./GleanJSPingsLookup.h.stub
+ 1:12.18 ./EventGIFFTMap.h.stub
+ 1:13.32 ./HistogramGIFFTMap.h.stub
+ 1:13.34 ./ScalarGIFFTMap.h.stub
+ 1:13.43 ./TelemetryScalarData.h.stub
+ 1:13.90 ./TelemetryScalarEnums.h.stub
+ 1:13.91 ./TelemetryEventData.h.stub
+ 1:13.93 ./TelemetryEventEnums.h.stub
+ 1:14.95 ./TelemetryProcessEnums.h.stub
+ 1:15.07 ./TelemetryProcessData.h.stub
+ 1:15.08 ./TelemetryUserInteractionData.h.stub
+ 1:15.15 ./TelemetryUserInteractionNameMap.h.stub
+ 1:15.24 ./CrashAnnotations.h.stub
+ 1:15.49 ./dep1Cert.h.stub
+ 1:15.51 ./dep2Cert.h.stub
+ 1:15.51 ./primaryCert.h.stub
+ 1:15.57 ./secondaryCert.h.stub
+ 1:15.58 ./xpcshellCert.h.stub
+ 1:15.62 ./xpcom-config.h.stub
+ 1:15.87 ./ErrorList.h.stub
+ 1:15.90 ./ErrorNamesInternal.h.stub
+ 1:15.94 ./error_list.rs.stub
+ 1:15.94 ./Services.h.stub
+ 1:15.96 ./services.rs.stub
+ 1:15.99 ./nsGkAtomList.h.stub
+ 1:16.00 ./nsGkAtomConsts.h.stub
+ 1:16.22 ./xpidl.stub.stub
+ 1:16.27 ./application.ini.h.stub
+ 1:16.31 ./CSS2Properties.webidl.stub
+ 1:16.66 ./nsCSSPropertyID.h.stub
+ 1:16.83 ./ServoCSSPropList.h.stub
+ 1:16.87 ./CompositorAnimatableProperties.h.stub
+ 1:17.36 modules/libpref/StaticPrefListAll.h.stub
+ 1:17.40 ./TelemetryHistogramEnums.h.stub
+ 1:17.41 ./TelemetryHistogramNameMap.h.stub
+ 1:17.83 accessible/interfaces/gecko/IGeckoCustom.h.stub
+ 1:17.85 accessible/interfaces/ia2/Accessible2.h.stub
+ 1:17.86 accessible/interfaces/ia2/Accessible2_2.h.stub
+ 1:18.06 accessible/interfaces/ia2/Accessible2_3.h.stub
+ 1:18.11 accessible/interfaces/ia2/AccessibleAction.h.stub
+ 1:18.18 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/Accessible2_dlldata.c -Oicf d:/fireox/other-licenses/ia2/Accessible2.idl
+ 1:18.19 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/gecko/IGeckoCustom_dlldata.c -Oicf d:/fireox/accessible/interfaces/gecko/IGeckoCustom.idl
+ 1:18.19 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:18.20 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:18.22 64 bit Processing d:\fireox\accessible\interfaces\gecko\IGeckoCustom.idl
+ 1:18.23 WARNING: mkdir -dot- requested by c:/mozilla-build/bin/mozmake.exe -C d:/fireox/obj-x86_64-w64-mingw32/config/makefiles/xpidl xpidl
+ 1:18.23 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:18.23 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:18.26 64 bit Processing d:\fireox\other-licenses\ia2\Accessible2.idl
+ 1:18.26 config/makefiles/xpidl/AboutThirdParty.xpt
+ 1:18.27 config/makefiles/xpidl/Bits.xpt
+ 1:18.36 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/Accessible2_2_dlldata.c -Oicf d:/fireox/other-licenses/ia2/Accessible2_2.idl
+ 1:18.37 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:18.37 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:18.39 64 bit Processing d:\fireox\other-licenses\ia2\Accessible2_2.idl
+ 1:18.40 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/Accessible2_3_dlldata.c -Oicf d:/fireox/other-licenses/ia2/Accessible2_3.idl
+ 1:18.42 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:18.42 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:18.44 64 bit Processing d:\fireox\other-licenses\ia2\Accessible2_3.idl
+ 1:18.49 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:18.55 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:18.66 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:18.66 #include "objidlbase.idl"
+ 1:18.66          ^~~~~~~~~~~~~~~~
+ 1:18.66          "objidlbase.Idl"
+ 1:18.66 1 warning generated.
+ 1:18.69 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:18.75 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:18.75 #include "objidlbase.idl"
+ 1:18.75          ^~~~~~~~~~~~~~~~
+ 1:18.75          "objidlbase.Idl"
+ 1:18.75 1 warning generated.
+ 1:18.75 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:18.79 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:18.82 config/makefiles/xpidl/accessibility.xpt
+ 1:18.85 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:18.85 #include "objidlbase.idl"
+ 1:18.85          ^~~~~~~~~~~~~~~~
+ 1:18.85          "objidlbase.Idl"
+ 1:18.85 1 warning generated.
+ 1:18.88 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:18.90 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:18.90 #include "objidlbase.idl"
+ 1:18.90          ^~~~~~~~~~~~~~~~
+ 1:18.90          "objidlbase.Idl"
+ 1:18.90 1 warning generated.
+ 1:18.93 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:18.94 #include "unknwnbase.idl"
+ 1:18.94          ^~~~~~~~~~~~~~~~
+ 1:18.94          "Unknwnbase.Idl"
+ 1:18.94 1 warning generated.
+ 1:18.97 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:19.03 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:19.04 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:19.06 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:19.06 #include "unknwnbase.idl"
+ 1:19.06          ^~~~~~~~~~~~~~~~
+ 1:19.06          "Unknwnbase.Idl"
+ 1:19.06 1 warning generated.
+ 1:19.14 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:19.14 #include "unknwnbase.idl"
+ 1:19.14          ^~~~~~~~~~~~~~~~
+ 1:19.14          "Unknwnbase.Idl"
+ 1:19.14 1 warning generated.
+ 1:19.17 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:19.17 #include "unknwnbase.idl"
+ 1:19.17          ^~~~~~~~~~~~~~~~
+ 1:19.17          "Unknwnbase.Idl"
+ 1:19.17 1 warning generated.
+ 1:19.17 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:19.26 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:19.27 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:19.34 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:19.39 config/makefiles/xpidl/alerts.xpt
+ 1:19.55 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:19.56 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:19.57 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:19.71 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:19.82 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:19.82 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:19.83 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:19.97 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:20.06 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:20.06 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:20.10 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:20.25 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:20.33 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:20.38 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:20.38 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:20.55 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:20.63 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:20.69 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:20.70 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:20.76 config/makefiles/xpidl/appshell.xpt
+ 1:21.01 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2.idl
+ 1:21.08 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2_2.idl
+ 1:21.10 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:21.23 config/makefiles/xpidl/appstartup.xpt
+ 1:21.32 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:21.35 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2.idl
+ 1:21.35 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:21.45 accessible/interfaces/ia2/AccessibleApplication.h.stub
+ 1:21.56 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:21.60 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:21.61 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:21.71 config/makefiles/xpidl/autocomplete.xpt
+ 1:21.71 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleAction_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleAction.idl
+ 1:21.73 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:21.73 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:21.77 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleAction.idl
+ 1:21.83 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:21.87 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:21.87 accessible/interfaces/ia2/AccessibleComponent.h.stub
+ 1:21.88 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:22.08 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:22.09 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:22.11 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:22.18 config/makefiles/xpidl/autoplay.xpt
+ 1:22.19 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleApplication_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleApplication.idl
+ 1:22.21 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:22.21 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:22.22 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:22.22 #include "objidlbase.idl"
+ 1:22.22          ^~~~~~~~~~~~~~~~
+ 1:22.22          "objidlbase.Idl"
+ 1:22.22 1 warning generated.
+ 1:22.24 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleApplication.idl
+ 1:22.34 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:22.37 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:22.38 accessible/interfaces/msaa/ISimpleDOM.h.stub
+ 1:22.51 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:22.51 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:22.51 #include "unknwnbase.idl"
+ 1:22.51          ^~~~~~~~~~~~~~~~
+ 1:22.51          "Unknwnbase.Idl"
+ 1:22.51 1 warning generated.
+ 1:22.53 config/makefiles/xpidl/backgroundhangmonitor.xpt
+ 1:22.62 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:22.64 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:22.64 #include "objidlbase.idl"
+ 1:22.64          ^~~~~~~~~~~~~~~~
+ 1:22.64          "objidlbase.Idl"
+ 1:22.64 1 warning generated.
+ 1:22.67 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -I d:/fireox/accessible/interfaces/msaa -robust -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/msaa/ISimpleDOM_dlldata.c -Oicf d:/fireox/accessible/interfaces/msaa/ISimpleDOM.idl
+ 1:22.69 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:22.69 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:22.73 64 bit Processing d:\fireox\accessible\interfaces\msaa\ISimpleDOM.idl
+ 1:22.77 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:22.79 accessible/ipc/win/handler/HandlerData.h.stub
+ 1:22.90 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:22.90 accessible/interfaces/ia2/AccessibleDocument.h.stub
+ 1:22.94 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:22.94 #include "unknwnbase.idl"
+ 1:22.94          ^~~~~~~~~~~~~~~~
+ 1:22.94          "Unknwnbase.Idl"
+ 1:22.94 1 warning generated.
+ 1:22.99 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:23.01 config/makefiles/xpidl/browser-element.xpt
+ 1:23.04 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:23.10 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -DUSE_LOCAL_UUID -I d:/fireox/obj-x86_64-w64-mingw32 -I d:/fireox/obj-x86_64-w64-mingw32/dist/include -I d:/fireox/other-licenses/ia2 -I d:/fireox/accessible/ipc/win/handler -acf d:/fireox/accessible/ipc/win/handler/HandlerData.acf -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/ipc/win/handler/HandlerData_dlldata.c -Oicf d:/fireox/accessible/ipc/win/handler/HandlerData.idl
+ 1:23.12 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:23.12 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:23.13 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:23.13 #include "objidlbase.idl"
+ 1:23.13          ^~~~~~~~~~~~~~~~
+ 1:23.13          "objidlbase.Idl"
+ 1:23.13 1 warning generated.
+ 1:23.15 64 bit Processing d:\fireox\accessible\ipc\win\handler\HandlerData.idl
+ 1:23.16 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:23.20 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleComponent_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleComponent.idl
+ 1:23.21 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:23.21 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:23.24 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:23.25 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleComponent.idl
+ 1:23.31 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:23.40 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:23.41 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2_3.idl
+ 1:23.44 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:23.44 #include "unknwnbase.idl"
+ 1:23.44          ^~~~~~~~~~~~~~~~
+ 1:23.44          "Unknwnbase.Idl"
+ 1:23.44 1 warning generated.
+ 1:23.54 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:23.54 config/makefiles/xpidl/browser-newtab.xpt
+ 1:23.56 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:23.59 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:23.66 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:23.69 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:23.69 #include "objidlbase.idl"
+ 1:23.69          ^~~~~~~~~~~~~~~~
+ 1:23.69          "objidlbase.Idl"
+ 1:23.70 1 warning generated.
+ 1:23.73 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:23.80 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:23.80 #include "objidlbase.idl"
+ 1:23.80          ^~~~~~~~~~~~~~~~
+ 1:23.80          "objidlbase.Idl"
+ 1:23.80 1 warning generated.
+ 1:23.81 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:23.82 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:23.84 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:23.92 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:23.96 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:23.96 #include "unknwnbase.idl"
+ 1:23.96          ^~~~~~~~~~~~~~~~
+ 1:23.96          "Unknwnbase.Idl"
+ 1:23.96 1 warning generated.
+ 1:24.02 config/makefiles/xpidl/browsercompsbase.xpt
+ 1:24.02 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:24.06 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:24.07 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:24.09 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:24.09 #include "unknwnbase.idl"
+ 1:24.09          ^~~~~~~~~~~~~~~~
+ 1:24.09          "Unknwnbase.Idl"
+ 1:24.09 1 warning generated.
+ 1:24.13 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:24.19 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:24.31 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:24.32 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:24.39 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:24.40 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:24.46 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:24.47 config/makefiles/xpidl/caps.xpt
+ 1:24.59 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:24.60 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:24.72 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:24.79 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:24.86 accessible/xpcom/xpcAccEvents.h.stub
+ 1:24.87 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:24.89 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:24.96 config/makefiles/xpidl/captivedetect.xpt
+ 1:25.02 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:25.14 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:25.23 config/makefiles/xpidl/cascade_bindings.xpt
+ 1:25.31 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:25.44 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:25.60 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:25.67 accessible/interfaces/ia2/AccessibleEditableText.h.stub
+ 1:25.72 config/makefiles/xpidl/chrome.xpt
+ 1:25.77 accessible/interfaces/ia2/AccessibleHyperlink.h.stub
+ 1:25.83 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:25.91 config/makefiles/xpidl/commandhandler.xpt
+ 1:25.95 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleDocument_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleDocument.idl
+ 1:25.96 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2_2.idl
+ 1:25.99 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:25.99 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:26.04 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleDocument.idl
+ 1:26.06 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleEditableText_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleEditableText.idl
+ 1:26.08 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:26.08 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:26.13 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleEditableText.idl
+ 1:26.20 accessible/interfaces/ia2/AccessibleHypertext.h.stub
+ 1:26.24 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2.idl
+ 1:26.31 config/makefiles/xpidl/commandlines.xpt
+ 1:26.35 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:26.40 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:26.41 accessible/interfaces/ia2/AccessibleHypertext2.h.stub
+ 1:26.47 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleHyperlink_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleHyperlink.idl
+ 1:26.48 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:26.48 #include "objidlbase.idl"
+ 1:26.48          ^~~~~~~~~~~~~~~~
+ 1:26.48          "objidlbase.Idl"
+ 1:26.49 1 warning generated.
+ 1:26.49 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:26.49 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:26.51 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:26.53 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleHyperlink.idl
+ 1:26.54 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:26.54 #include "objidlbase.idl"
+ 1:26.54          ^~~~~~~~~~~~~~~~
+ 1:26.54          "objidlbase.Idl"
+ 1:26.54 1 warning generated.
+ 1:26.60 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:26.66 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:26.67 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleHypertext_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleHypertext.idl
+ 1:26.69 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:26.69 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:26.72 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleHypertext.idl
+ 1:26.75 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:26.75 #include "unknwnbase.idl"
+ 1:26.75          ^~~~~~~~~~~~~~~~
+ 1:26.75          "Unknwnbase.Idl"
+ 1:26.75 1 warning generated.
+ 1:26.76 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:26.78 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:26.80 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:26.80 #include "unknwnbase.idl"
+ 1:26.80          ^~~~~~~~~~~~~~~~
+ 1:26.80          "Unknwnbase.Idl"
+ 1:26.80 1 warning generated.
+ 1:26.85 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:26.90 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:26.94 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:26.94 #include "objidlbase.idl"
+ 1:26.94          ^~~~~~~~~~~~~~~~
+ 1:26.94          "objidlbase.Idl"
+ 1:26.94 1 warning generated.
+ 1:26.99 config/makefiles/xpidl/composer.xpt
+ 1:26.99 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:27.01 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:27.07 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:27.11 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:27.14 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:27.14 #include "objidlbase.idl"
+ 1:27.14          ^~~~~~~~~~~~~~~~
+ 1:27.14          "objidlbase.Idl"
+ 1:27.15 1 warning generated.
+ 1:27.19 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:27.22 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:27.22 #include "unknwnbase.idl"
+ 1:27.22          ^~~~~~~~~~~~~~~~
+ 1:27.22          "Unknwnbase.Idl"
+ 1:27.22 1 warning generated.
+ 1:27.28 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\ocidl.idl
+ 1:27.32 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:27.35 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:27.42 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:27.44 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:27.49 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:27.49 #include "unknwnbase.idl"
+ 1:27.49          ^~~~~~~~~~~~~~~~
+ 1:27.49          "Unknwnbase.Idl"
+ 1:27.49 1 warning generated.
+ 1:27.58 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleidl.idl
+ 1:27.60 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:27.61 config/makefiles/xpidl/content_events.xpt
+ 1:27.65 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:27.72 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:27.72 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:27.93 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\servprov.idl
+ 1:27.94 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:28.01 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:28.07 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:28.08 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:28.15 config/makefiles/xpidl/content_geckomediaplugins.xpt
+ 1:28.25 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:28.28 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\urlmon.idl
+ 1:28.30 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:28.43 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:28.45 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:28.53 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:28.63 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:28.67 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\msxml.idl
+ 1:28.71 config/makefiles/xpidl/content_html.xpt
+ 1:28.83 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:28.87 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\msxml.idl(19,10): warning: non-portable path to file '"MsXmlDId.h"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:28.87 #include "msxmldid.h"
+ 1:28.87          ^~~~~~~~~~~~
+ 1:28.87          "MsXmlDId.h"
+ 1:28.87 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:28.87 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\msxml.idl(62,10): warning: non-portable path to file '"XmlDom.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:28.87 #include "xmldom.idl"
+ 1:28.87          ^~~~~~~~~~~~
+ 1:28.87          "XmlDom.Idl"
+ 1:28.88 In file included from c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\msxml.idl:62:
+ 1:28.88 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um/xmldom.idl(26,10): warning: non-portable path to file '"XmlDomDid.h"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:28.88 #include "xmldomdid.h"
+ 1:28.88          ^~~~~~~~~~~~~
+ 1:28.88          "XmlDomDid.h"
+ 1:28.90 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:28.91 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\msxml.idl(63,10): warning: non-portable path to file '"XmlDso.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:28.91 #include "xmldso.idl"
+ 1:28.91          ^~~~~~~~~~~~
+ 1:28.91          "XmlDso.Idl"
+ 1:28.92 In file included from c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\msxml.idl:63:
+ 1:28.92 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um/xmldso.idl(27,10): warning: non-portable path to file '"XmlDsodid.h"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:28.92 #include "xmldsodid.h"
+ 1:28.92          ^~~~~~~~~~~~~
+ 1:28.92          "XmlDsodid.h"
+ 1:28.92 5 warnings generated.
+ 1:28.94 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:29.12 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHypertext2.idl
+ 1:29.15 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:29.17 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:29.32 config/makefiles/xpidl/docshell.xpt
+ 1:29.36 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleAction.idl
+ 1:29.38 config/makefiles/xpidl/dom.xpt
+ 1:29.44 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHypertext.idl
+ 1:29.55 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleText.idl
+ 1:29.64 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:29.75 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleText.idl
+ 1:29.83 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:29.87 accessible/interfaces/ia2/AccessibleImage.h.stub
+ 1:30.04 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHyperlink.idl
+ 1:30.07 config/makefiles/xpidl/dom_audiochannel.xpt
+ 1:30.12 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHyperlink.idl
+ 1:30.15 ./audioipc_client_ffi_generated.h.stub
+ 1:30.17 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleHypertext2_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleHypertext2.idl
+ 1:30.20 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:30.20 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:30.23 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleHypertext2.idl
+ 1:30.36 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleAction.idl
+ 1:30.40 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleAction.idl
+ 1:30.49 accessible/interfaces/ia2/AccessibleRelation.h.stub
+ 1:30.51 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:30.68 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:30.68 #include "objidlbase.idl"
+ 1:30.68          ^~~~~~~~~~~~~~~~
+ 1:30.68          "objidlbase.Idl"
+ 1:30.68 1 warning generated.
+ 1:30.69 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:30.69 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleTable.idl
+ 1:30.79 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleImage_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleImage.idl
+ 1:30.80 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:30.81 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:30.81 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:30.85 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleImage.idl
+ 1:30.96 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:30.96 #include "unknwnbase.idl"
+ 1:30.96          ^~~~~~~~~~~~~~~~
+ 1:30.96          "Unknwnbase.Idl"
+ 1:30.96 1 warning generated.
+ 1:30.97 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleTable2.idl
+ 1:31.08 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:31.13 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:31.20 ./audioipc_server_ffi_generated.h.stub
+ 1:31.27 config/makefiles/xpidl/dom_base.xpt
+ 1:31.28 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleTableCell.idl
+ 1:31.28 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:31.28 #include "objidlbase.idl"
+ 1:31.28          ^~~~~~~~~~~~~~~~
+ 1:31.28          "objidlbase.Idl"
+ 1:31.28 1 warning generated.
+ 1:31.35 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:31.43 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:31.58 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:31.60 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:31.60 #include "unknwnbase.idl"
+ 1:31.60          ^~~~~~~~~~~~~~~~
+ 1:31.60          "Unknwnbase.Idl"
+ 1:31.60 1 warning generated.
+ 1:31.67 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:31.72 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:31.78 config/makefiles/xpidl/dom_bindings.xpt
+ 1:31.82 accessible/interfaces/ia2/AccessibleTable.h.stub
+ 1:31.88 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\ocidl.acf
+ 1:31.94 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:32.00 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:32.14 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleRelation_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleRelation.idl
+ 1:32.17 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:32.17 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:32.19 64 bit Processing d:\fireox\accessible\ipc\win\handler\HandlerData.acf
+ 1:32.22 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleRelation.idl
+ 1:32.28 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:32.29 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:32.51 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:32.57 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:32.60 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:32.68 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:32.69 #include "objidlbase.idl"
+ 1:32.69          ^~~~~~~~~~~~~~~~
+ 1:32.69          "objidlbase.Idl"
+ 1:32.69 1 warning generated.
+ 1:32.80 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:32.87 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:32.96 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:32.96 #include "unknwnbase.idl"
+ 1:32.96          ^~~~~~~~~~~~~~~~
+ 1:32.96          "Unknwnbase.Idl"
+ 1:32.96 1 warning generated.
+ 1:33.03 config/makefiles/xpidl/dom_events.xpt
+ 1:33.03 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHypertext.idl
+ 1:33.07 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:33.21 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:33.23 accessible/interfaces/ia2/AccessibleTable2.h.stub
+ 1:33.32 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleText.idl
+ 1:33.38 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:33.56 config/makefiles/xpidl/dom_geolocation.xpt
+ 1:33.56 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleTable_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleTable.idl
+ 1:33.58 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:33.59 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:33.59 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:33.62 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleTable.idl
+ 1:33.65 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:33.67 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:33.85 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHyperlink.idl
+ 1:33.89 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:33.93 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:33.94 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:34.07 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:34.07 #include "objidlbase.idl"
+ 1:34.07          ^~~~~~~~~~~~~~~~
+ 1:34.07          "objidlbase.Idl"
+ 1:34.07 1 warning generated.
+ 1:34.09 config/makefiles/xpidl/dom_html.xpt
+ 1:34.13 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleAction.idl
+ 1:34.21 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:34.25 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:34.37 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:34.37 #include "unknwnbase.idl"
+ 1:34.37          ^~~~~~~~~~~~~~~~
+ 1:34.37          "Unknwnbase.Idl"
+ 1:34.37 1 warning generated.
+ 1:34.42 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:34.42 ./webrender_ffi_generated.h.stub
+ 1:34.49 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:34.54 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:34.66 config/makefiles/xpidl/dom_indexeddb.xpt
+ 1:34.79 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:34.90 ./wgpu_ffi_generated.h.stub
+ 1:34.95 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:34.99 config/makefiles/xpidl/dom_localstorage.xpt
+ 1:35.10 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:35.21 accessible/interfaces/ia2/AccessibleTableCell.h.stub
+ 1:35.39 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:35.44 ./mapped_hyph.h.stub
+ 1:35.47 config/makefiles/xpidl/dom_media.xpt
+ 1:35.52 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleTable2_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleTable2.idl
+ 1:35.56 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:35.56 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:35.60 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleTable2.idl
+ 1:35.75 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:36.03 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:36.13 config/makefiles/xpidl/dom_network.xpt
+ 1:36.18 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:36.23 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:36.23 #include "objidlbase.idl"
+ 1:36.23          ^~~~~~~~~~~~~~~~
+ 1:36.23          "objidlbase.Idl"
+ 1:36.23 1 warning generated.
+ 1:36.43 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:36.74 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:36.74 #include "unknwnbase.idl"
+ 1:36.74          ^~~~~~~~~~~~~~~~
+ 1:36.74          "Unknwnbase.Idl"
+ 1:36.74 1 warning generated.
+ 1:36.79 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2.idl
+ 1:36.87 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:36.87 accessible/interfaces/ia2/AccessibleText.h.stub
+ 1:36.95 config/makefiles/xpidl/dom_notification.xpt
+ 1:37.08 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:37.18 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:37.22 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleTableCell_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleTableCell.idl
+ 1:37.24 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:37.24 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:37.28 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleTableCell.idl
+ 1:37.40 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:37.49 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:37.53 config/makefiles/xpidl/dom_payments.xpt
+ 1:37.64 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:37.71 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:37.77 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:37.84 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:37.84 #include "objidlbase.idl"
+ 1:37.84          ^~~~~~~~~~~~~~~~
+ 1:37.84          "objidlbase.Idl"
+ 1:37.84 1 warning generated.
+ 1:38.00 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:38.01 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:38.06 config/makefiles/xpidl/dom_power.xpt
+ 1:38.07 accessible/interfaces/ia2/AccessibleText2.h.stub
+ 1:38.11 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:38.16 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:38.16 #include "unknwnbase.idl"
+ 1:38.16          ^~~~~~~~~~~~~~~~
+ 1:38.16          "Unknwnbase.Idl"
+ 1:38.16 1 warning generated.
+ 1:38.32 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:38.36 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleText_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleText.idl
+ 1:38.39 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:38.39 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:38.44 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:38.46 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleText.idl
+ 1:38.54 config/makefiles/xpidl/dom_push.xpt
+ 1:38.62 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:38.75 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:38.86 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2.idl
+ 1:38.91 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:38.91 #include "objidlbase.idl"
+ 1:38.91          ^~~~~~~~~~~~~~~~
+ 1:38.91          "objidlbase.Idl"
+ 1:38.91 1 warning generated.
+ 1:38.93 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:39.04 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:39.14 ./fluent_ffi_generated.h.stub
+ 1:39.18 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:39.21 config/makefiles/xpidl/dom_quota.xpt
+ 1:39.21 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:39.24 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:39.24 #include "unknwnbase.idl"
+ 1:39.24          ^~~~~~~~~~~~~~~~
+ 1:39.24          "Unknwnbase.Idl"
+ 1:39.24 1 warning generated.
+ 1:39.40 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:39.57 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:39.62 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:39.74 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:39.82 accessible/interfaces/ia2/AccessibleValue.h.stub
+ 1:39.88 config/makefiles/xpidl/dom_security.xpt
+ 1:39.90 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:39.96 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:40.04 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:40.13 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleText2_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleText2.idl
+ 1:40.15 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:40.15 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:40.19 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleText2.idl
+ 1:40.23 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:40.36 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:40.39 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2.idl
+ 1:40.51 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:40.54 config/makefiles/xpidl/dom_serializers.xpt
+ 1:40.68 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:40.70 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:40.71 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:40.71 #include "objidlbase.idl"
+ 1:40.71          ^~~~~~~~~~~~~~~~
+ 1:40.71          "objidlbase.Idl"
+ 1:40.72 1 warning generated.
+ 1:40.82 ./fluent_langneg_ffi_generated.h.stub
+ 1:40.90 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:41.07 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:41.07 #include "unknwnbase.idl"
+ 1:41.07          ^~~~~~~~~~~~~~~~
+ 1:41.07          "Unknwnbase.Idl"
+ 1:41.07 1 warning generated.
+ 1:41.15 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:41.17 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:41.19 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:41.33 config/makefiles/xpidl/dom_sidebar.xpt
+ 1:41.44 accessible/interfaces/ia2/IA2Typelib.h.stub
+ 1:41.55 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:41.61 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:41.78 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:41.78 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -dlldata d:/fireox/obj-x86_64-w64-mingw32/accessible/interfaces/ia2/AccessibleValue_dlldata.c -Oicf d:/fireox/other-licenses/ia2/AccessibleValue.idl
+ 1:41.80 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:41.80 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:41.81 64 bit Processing d:\fireox\other-licenses\ia2\AccessibleValue.idl
+ 1:41.86 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:41.91 config/makefiles/xpidl/dom_simpledb.xpt
+ 1:41.98 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:42.08 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:42.12 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:42.32 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:42.32 #include "objidlbase.idl"
+ 1:42.32          ^~~~~~~~~~~~~~~~
+ 1:42.32          "objidlbase.Idl"
+ 1:42.32 1 warning generated.
+ 1:42.35 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:42.45 ./unic_langid_ffi_generated.h.stub
+ 1:42.50 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:42.51 config/makefiles/xpidl/dom_storage.xpt
+ 1:42.65 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:42.65 #include "unknwnbase.idl"
+ 1:42.65          ^~~~~~~~~~~~~~~~
+ 1:42.65          "Unknwnbase.Idl"
+ 1:42.65 1 warning generated.
+ 1:42.73 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:42.78 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:42.98 config/makefiles/xpidl/dom_system.xpt
+ 1:43.11 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:43.28 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:43.44 config/makefiles/xpidl/dom_webauthn.xpt
+ 1:43.56 Executing: c:/PROGRA~2/WI3CF2~1/10/bin/10.0.22000.0/x64/midl.exe -env x64 -cpp_cmd c:/Users/kokki/.mozbuild/clang/bin/clang-cl.exe -app_config -I d:/fireox/other-licenses/ia2 -D _MIDL_DECLARE_WIREM_HANDLE -Oicf d:/fireox/accessible/interfaces/ia2/IA2Typelib.idl
+ 1:43.62 Microsoft (R) 32b/64b MIDL Compiler Version 8.01.0626
+ 1:43.62 Copyright (c) Microsoft Corporation. All rights reserved.
+ 1:43.63 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:43.65 64 bit Processing d:\fireox\accessible\interfaces\ia2\IA2Typelib.idl
+ 1:43.66 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:43.81 config/makefiles/xpidl/dom_webspeechrecognition.xpt
+ 1:43.83 config/makefiles/xpidl/dom_webspeechsynth.xpt
+ 1:43.95 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleText.idl
+ 1:44.05 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:44.09 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2.idl
+ 1:44.24 config/makefiles/xpidl/dom_workers.xpt
+ 1:44.27 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:44.39 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:44.40 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl
+ 1:44.40 config/makefiles/xpidl/dom_xslt.xpt
+ 1:44.43 ./ServoStyleConsts.h.stub
+ 1:44.48 config/makefiles/xpidl/dom_xul.xpt
+ 1:44.59 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\objidl.idl(67,10): warning: non-portable path to file '"objidlbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:44.59 #include "objidlbase.idl"
+ 1:44.59          ^~~~~~~~~~~~~~~~
+ 1:44.59          "objidlbase.Idl"
+ 1:44.59 1 warning generated.
+ 1:44.74 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:44.78 ./mp4parse_ffi_generated.h.stub
+ 1:44.78 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl
+ 1:44.83 config/makefiles/xpidl/downloads.xpt
+ 1:44.99 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\unknwn.idl(28,10): warning: non-portable path to file '"Unknwnbase.Idl"'; specified path differs in case from file name on disk [-Wnonportable-include-path]
+ 1:44.99 #include "unknwnbase.idl"
+ 1:44.99          ^~~~~~~~~~~~~~~~
+ 1:44.99          "Unknwnbase.Idl"
+ 1:44.99 1 warning generated.
+ 1:45.05 ./MozURL_ffi.h.stub
+ 1:45.06 ./rust_helper.h.stub
+ 1:45.11 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypes.idl
+ 1:45.22 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:45.47 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\wtypesbase.idl
+ 1:45.62 config/makefiles/xpidl/editor.xpt
+ 1:45.71 ./neqo_glue_ffi_generated.h.stub
+ 1:45.72 config/makefiles/xpidl/enterprisepolicies.xpt
+ 1:45.91 ./fog_ffi_generated.h.stub
+ 1:45.91 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\basetsd.h
+ 1:46.27 config/makefiles/xpidl/extensions.xpt
+ 1:46.38 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\guiddef.h
+ 1:46.54 config/makefiles/xpidl/exthandler.xpt
+ 1:46.73 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.idl
+ 1:46.93 config/makefiles/xpidl/fastfind.xpt
+ 1:47.11 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oleacc.idl
+ 1:47.12 ./gk_rust_utils_ffi_generated.h.stub
+ 1:47.24 config/makefiles/xpidl/fog.xpt
+ 1:47.42 config/makefiles/xpidl/gfx.xpt
+ 1:47.72 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRelation.idl
+ 1:47.82 config/makefiles/xpidl/html5.xpt
+ 1:48.18 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleStates.idl
+ 1:48.25 config/makefiles/xpidl/htmlparser.xpt
+ 1:48.27 xpcom/components/Components.h.stub
+ 1:48.58 64 bit Processing d:/fireox/other-licenses/ia2\IA2CommonTypes.idl
+ 1:48.62 config/makefiles/xpidl/http-sfv.xpt
+ 1:48.73 config/makefiles/xpidl/imglib2.xpt
+ 1:48.88 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2_2.idl
+ 1:48.88 config/makefiles/xpidl/inspector.xpt
+ 1:48.91 config/makefiles/xpidl/intl.xpt
+ 1:49.19 64 bit Processing d:/fireox/other-licenses/ia2\Accessible2_3.idl
+ 1:49.25 config/makefiles/xpidl/jar.xpt
+ 1:49.33 config/makefiles/xpidl/jsdebugger.xpt
+ 1:49.41 config/makefiles/xpidl/jsinspector.xpt
+ 1:49.45 config/makefiles/xpidl/kvstore.xpt
+ 1:49.47 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleAction.idl
+ 1:49.59 config/makefiles/xpidl/layout_base.xpt
+ 1:49.75 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleApplication.idl
+ 1:50.00 config/makefiles/xpidl/layout_printing.xpt
+ 1:50.07 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleComponent.idl
+ 1:50.11 config/makefiles/xpidl/layout_xul_tree.xpt
+ 1:50.16 config/makefiles/xpidl/locale.xpt
+ 1:50.21 config/makefiles/xpidl/loginmgr.xpt
+ 1:50.38 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleDocument.idl
+ 1:50.41 config/makefiles/xpidl/migration.xpt
+ 1:50.58 config/makefiles/xpidl/mimetype.xpt
+ 1:50.68 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleEditableText.idl
+ 1:50.84 config/makefiles/xpidl/mozfind.xpt
+ 1:50.92 config/makefiles/xpidl/mozintl.xpt
+ 1:50.98 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleEventId.idl
+ 1:51.07 config/makefiles/xpidl/necko.xpt
+ 1:51.24 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHyperlink.idl
+ 1:51.36 config/makefiles/xpidl/necko_about.xpt
+ 1:51.58 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHypertext.idl
+ 1:51.70 config/makefiles/xpidl/necko_cache2.xpt
+ 1:51.85 config/makefiles/xpidl/necko_cookie.xpt
+ 1:51.86 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleText.idl
+ 1:51.89 config/makefiles/xpidl/necko_dns.xpt
+ 1:52.03 config/makefiles/xpidl/necko_file.xpt
+ 1:52.17 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleHypertext2.idl
+ 1:52.26 config/makefiles/xpidl/necko_http.xpt
+ 1:52.44 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleImage.idl
+ 1:52.61 config/makefiles/xpidl/necko_mdns.xpt
+ 1:52.61 config/makefiles/xpidl/necko_res.xpt
+ 1:52.63 config/makefiles/xpidl/necko_socket.xpt
+ 1:52.72 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleRole.idl
+ 1:52.81 config/makefiles/xpidl/necko_strconv.xpt
+ 1:52.90 config/makefiles/xpidl/necko_viewsource.xpt
+ 1:53.00 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleTable.idl
+ 1:53.13 config/makefiles/xpidl/necko_websocket.xpt
+ 1:53.19 config/makefiles/xpidl/necko_wifi.xpt
+ 1:53.30 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleTable2.idl
+ 1:53.47 config/makefiles/xpidl/parentalcontrols.xpt
+ 1:53.57 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleTableCell.idl
+ 1:53.64 config/makefiles/xpidl/peerconnection.xpt
+ 1:53.80 config/makefiles/xpidl/pipnss.xpt
+ 1:53.87 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleText2.idl
+ 1:53.87 config/makefiles/xpidl/places.xpt
+ 1:53.88 config/makefiles/xpidl/plugin.xpt
+ 1:54.04 config/makefiles/xpidl/pref.xpt
+ 1:54.14 config/makefiles/xpidl/prefetch.xpt
+ 1:54.17 64 bit Processing d:/fireox/other-licenses/ia2\AccessibleValue.idl
+ 1:54.39 config/makefiles/xpidl/profiler.xpt
+ 1:54.49 64 bit Processing c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\oaidl.acf
+ 1:54.60 config/makefiles/xpidl/remote.xpt
+ 1:54.82 config/makefiles/xpidl/reputationservice.xpt
+ 1:54.85 config/makefiles/xpidl/sandbox.xpt
+ 1:54.93 config/makefiles/xpidl/satchel.xpt
+ 1:55.24 config/makefiles/xpidl/services.xpt
+ 1:55.53 config/makefiles/xpidl/sessionstore.xpt
+ 1:55.54 config/makefiles/xpidl/shellservice.xpt
+ 1:55.57 config/makefiles/xpidl/shistory.xpt
+ 1:55.63 config/makefiles/xpidl/spellchecker.xpt
+ 1:55.82 config/makefiles/xpidl/startupcache.xpt
+ 1:56.19 config/makefiles/xpidl/storage.xpt
+ 1:56.28 config/makefiles/xpidl/taskscheduler.xpt
+ 1:56.31 config/makefiles/xpidl/telemetry.xpt
+ 1:56.38 config/makefiles/xpidl/test_necko.xpt
+ 1:56.55 config/makefiles/xpidl/thumbnails.xpt
+ 1:56.81 config/makefiles/xpidl/toolkit_antitracking.xpt
+ 1:56.90 config/makefiles/xpidl/toolkit_asyncshutdown.xpt
+ 1:56.95 config/makefiles/xpidl/toolkit_backgroundtasks.xpt
+ 1:57.15 config/makefiles/xpidl/toolkit_cleardata.xpt
+ 1:57.29 config/makefiles/xpidl/toolkit_crashservice.xpt
+ 1:57.57 config/makefiles/xpidl/toolkit_filewatcher.xpt
+ 1:57.58 config/makefiles/xpidl/toolkit_finalizationwitness.xpt
+ 1:57.71 config/makefiles/xpidl/toolkit_modules.xpt
+ 1:57.77 config/makefiles/xpidl/toolkit_osfile.xpt
+ 1:57.89 config/makefiles/xpidl/toolkit_processtools.xpt
+ 1:57.98 config/makefiles/xpidl/toolkit_search.xpt
+ 1:58.26 config/makefiles/xpidl/toolkit_shell.xpt
+ 1:58.31 config/makefiles/xpidl/toolkit_xulstore.xpt
+ 1:58.34 config/makefiles/xpidl/toolkitprofile.xpt
+ 1:58.44 config/makefiles/xpidl/txmgr.xpt
+ 1:58.62 config/makefiles/xpidl/txtsvc.xpt
+ 1:58.67 config/makefiles/xpidl/uconv.xpt
+ 1:58.93 config/makefiles/xpidl/update.xpt
+ 1:59.02 config/makefiles/xpidl/uriloader.xpt
+ 1:59.04 config/makefiles/xpidl/url-classifier.xpt
+ 1:59.05 config/makefiles/xpidl/urlformatter.xpt
+ 1:59.44 config/makefiles/xpidl/viaduct.xpt
+ 1:59.47 config/makefiles/xpidl/webBrowser_core.xpt
+ 1:59.61 config/makefiles/xpidl/webbrowserpersist.xpt
+ 1:59.71 config/makefiles/xpidl/webextensions.xpt
+ 1:59.75 config/makefiles/xpidl/webextensions-storage.xpt
+ 2:00.16 config/makefiles/xpidl/webvtt.xpt
+ 2:00.19 config/makefiles/xpidl/widget.xpt
+ 2:00.23 config/makefiles/xpidl/windowcreator.xpt
+ 2:00.24 config/makefiles/xpidl/windowwatcher.xpt
+ 2:00.40 config/makefiles/xpidl/xpcom_base.xpt
+ 2:00.45 config/makefiles/xpidl/xpcom_components.xpt
+ 2:00.76 config/makefiles/xpidl/xpcom_ds.xpt
+ 2:00.82 config/makefiles/xpidl/xpcom_io.xpt
+ 2:00.85 config/makefiles/xpidl/xpcom_system.xpt
+ 2:00.88 config/makefiles/xpidl/xpcom_threads.xpt
+ 2:01.44 config/makefiles/xpidl/xpcomtest.xpt
+ 2:01.59 config/makefiles/xpidl/xpconnect.xpt
+ 2:01.78 config/makefiles/xpidl/xpctest.xpt
+ 2:01.81 config/makefiles/xpidl/xul.xpt
+ 2:02.22 config/makefiles/xpidl/xulapp.xpt
+ 2:02.22 config/makefiles/xpidl/zipwriter.xpt
+ 2:02.99 config/makefiles/xpidl/xptdata.stub
+ 2:04.61 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleThrowingConstructorInterface-example.h
+ 2:04.61 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleThrowingConstructorInterface-example.cpp
+ 2:04.65 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleInterface-example.h
+ 2:04.65 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleInterface-example.cpp
+ 2:04.67 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleProxyInterface-example.h
+ 2:04.67 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleProxyInterface-example.cpp
+ 2:04.68 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleWorkerInterface-example.h
+ 2:04.68 Generating d:/fireox/obj-x86_64-w64-mingw32/dom/bindings/TestExampleWorkerInterface-example.cpp
+ 2:05.36 security/nss3.dll.def.stub
+ 2:05.47 memory/build
+ 2:05.47 memory/mozalloc
+ 2:05.47 config/external/nspr/libc
+ 2:05.47 mfbt
+ 2:05.47 ipc/mscom/mozglue
+ 2:05.48 config/external/nspr/ds
+ 2:05.48 config/external/nspr/pr
+ 2:06.54 mozglue/baseprofiler
+ 2:07.22 In file included from Unified_cpp_memory_build0.cpp:2:
+ 2:07.23 d:/fireox/memory/build/mozjemalloc.cpp(1212,16): warning: unused function '_malloc_prefork' [-Wunused-function]
+ 2:07.23 FORK_HOOK void _malloc_prefork(void);
+ 2:07.23                ^
+ 2:07.23 d:/fireox/memory/build/mozjemalloc.cpp(1213,16): warning: unused function '_malloc_postfork_parent' [-Wunused-function]
+ 2:07.23 FORK_HOOK void _malloc_postfork_parent(void);
+ 2:07.23                ^
+ 2:07.23 d:/fireox/memory/build/mozjemalloc.cpp(1214,16): warning: unused function '_malloc_postfork_child' [-Wunused-function]
+ 2:07.23 FORK_HOOK void _malloc_postfork_child(void);
+ 2:07.23                ^
+ 2:07.87 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(119,52): warning: incompatible pointer types passing 'PRInt32 *' (aka 'int *') to parameter of type 'u_long *' (aka 'unsigned long *') [-Wincompatible-pointer-types]
+ 2:07.87     if (ioctlsocket(fd->secret->md.osfd, FIONREAD, &result) < 0) {
+ 2:07.87                                                    ^~~~~~~
+ 2:07.87 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winsock2.h(1717,18): note: passing argument to parameter 'argp' here
+ 2:07.87     u_long FAR * argp
+ 2:07.87                  ^
+ 2:07.87 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(136,60): warning: passing 'PRUint32 *' (aka 'unsigned int *') to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+ 2:07.87     while ((sock = accept(osfd, (struct sockaddr *) raddr, rlen)) == -1)
+ 2:07.87                                                            ^~~~
+ 2:07.87 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winsock2.h(1634,27): note: passing argument to parameter 'addrlen' here
+ 2:07.87     _Inout_opt_ int FAR * addrlen
+ 2:07.87                           ^
+ 2:07.87 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(376,19): warning: incompatible pointer types passing 'PRInt32 *' (aka 'int *') to parameter of type 'LPDWORD' (aka 'unsigned long *') [-Wincompatible-pointer-types]
+ 2:07.87                   &dwBytes, NULL, NULL);
+ 2:07.88                   ^~~~~~~~
+ 2:07.88 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winsock2.h(3094,19): note: passing argument to parameter 'lpcbBytesReturned' here
+ 2:07.88     _Out_ LPDWORD lpcbBytesReturned,
+ 2:07.88                   ^
+ 2:07.88 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(445,37): warning: passing 'const void *' to parameter of type 'PVOID' (aka 'void *') discards qualifiers [-Wincompatible-pointer-types-discards-qualifiers]
+ 2:07.88                            addrlen, buf, amount,
+ 2:07.88                                     ^~~
+ 2:07.88 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(494,38): warning: incompatible integer to pointer conversion passing 'PROsfd' (aka 'long long') to parameter of type 'HANDLE' (aka 'void *') [-Wint-conversion]
+ 2:07.88             rv = GetOverlappedResult(osfd, &fd->secret->ol, &rvSent, FALSE);
+ 2:07.88                                      ^~~~
+ 2:07.88 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\ioapiset.h(106,17): note: passing argument to parameter 'hFile' here
+ 2:07.88     _In_ HANDLE hFile,
+ 2:07.88                 ^
+ 2:07.88 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(407,13): warning: unused variable 'bytesSent' [-Wunused-variable]
+ 2:07.88     PRInt32 bytesSent = 0;
+ 2:07.88             ^
+ 2:07.88 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(518,28): warning: passing 'PRUint32 *' (aka 'unsigned int *') to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+ 2:07.88                            addrlen)) == -1)
+ 2:07.88                            ^~~~~~~
+ 2:07.88 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winsock2.h(2037,27): note: passing argument to parameter 'fromlen' here
+ 2:07.88     _Inout_opt_ int FAR * fromlen
+ 2:07.88                           ^
+ 2:07.88 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(591,76): warning: passing 'PRUint32 *' (aka 'unsigned int *') to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+ 2:07.88     rv = getsockname((SOCKET)fd->secret->md.osfd, (struct sockaddr *)addr, len);
+ 2:07.88                                                                            ^~~
+ 2:07.88 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winsock2.h(1759,23): note: passing argument to parameter 'namelen' here
+ 2:07.88     _Inout_ int FAR * namelen
+ 2:07.88                       ^
+ 2:07.88 d:/fireox/nsprpub/pr/src/md/windows/w95sock.c(605,76): warning: passing 'PRUint32 *' (aka 'unsigned int *') to parameter of type 'int *' converts between pointers to integer types with different sign [-Wpointer-sign]
+ 2:07.88     rv = getpeername((SOCKET)fd->secret->md.osfd, (struct sockaddr *)addr, len);
+ 2:07.88                                                                            ^~~
+ 2:07.88 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winsock2.h(1738,23): note: passing argument to parameter 'namelen' here
+ 2:07.88     _Inout_ int FAR * namelen
+ 2:07.88                       ^
+ 2:08.04 9 warnings generated.
+ 2:09.30 In file included from Unified_c_external_nspr_pr0.c:119:
+ 2:09.30 d:/fireox/nsprpub/pr/src/io/prsocket.c(325,41): warning: incompatible integer to pointer conversion passing 'PROsfd' (aka 'long long') to parameter of type 'HANDLE' (aka 'void *') [-Wint-conversion]
+ 2:09.30                 if (GetOverlappedResult(osfd, &fd->secret->ol, &rvSent, FALSE) == FALSE) {
+ 2:09.30                                         ^~~~
+ 2:09.30 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\ioapiset.h(106,17): note: passing argument to parameter 'hFile' here
+ 2:09.30     _In_ HANDLE hFile,
+ 2:09.30                 ^
+ 2:09.30 In file included from Unified_c_external_nspr_pr0.c:119:
+ 2:09.30 d:/fireox/nsprpub/pr/src/io/prsocket.c(325,64): warning: incompatible pointer types passing 'PRInt32 *' (aka 'int *') to parameter of type 'LPDWORD' (aka 'unsigned long *') [-Wincompatible-pointer-types]
+ 2:09.30                 if (GetOverlappedResult(osfd, &fd->secret->ol, &rvSent, FALSE) == FALSE) {
+ 2:09.30                                                                ^~~~~~~
+ 2:09.30 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\ioapiset.h(108,19): note: passing argument to parameter 'lpNumberOfBytesTransferred' here
+ 2:09.30     _Out_ LPDWORD lpNumberOfBytesTransferred,
+ 2:09.30                   ^
+ 2:09.30 In file included from Unified_c_external_nspr_pr0.c:119:
+ 2:09.30 d:/fireox/nsprpub/pr/src/io/prsocket.c(357,33): warning: incompatible integer to pointer conversion passing 'PROsfd' (aka 'long long') to parameter of type 'HANDLE' (aka 'void *') [-Wint-conversion]
+ 2:09.30         if (GetOverlappedResult(osfd, &fd->secret->ol, &rvSent, FALSE) == TRUE) {
+ 2:09.30                                 ^~~~
+ 2:09.30 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\ioapiset.h(106,17): note: passing argument to parameter 'hFile' here
+ 2:09.30     _In_ HANDLE hFile,
+ 2:09.30                 ^
+ 2:09.30 In file included from Unified_c_external_nspr_pr0.c:119:
+ 2:09.31 d:/fireox/nsprpub/pr/src/io/prsocket.c(357,56): warning: incompatible pointer types passing 'PRInt32 *' (aka 'int *') to parameter of type 'LPDWORD' (aka 'unsigned long *') [-Wincompatible-pointer-types]
+ 2:09.31         if (GetOverlappedResult(osfd, &fd->secret->ol, &rvSent, FALSE) == TRUE) {
+ 2:09.31                                                        ^~~~~~~
+ 2:09.31 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\ioapiset.h(108,19): note: passing argument to parameter 'lpNumberOfBytesTransferred' here
+ 2:09.31     _Out_ LPDWORD lpNumberOfBytesTransferred,
+ 2:09.31                   ^
+ 2:09.62 3 warnings generated.
+ 2:10.49 In file included from Unified_c_external_nspr_pr1.c:38:
+ 2:10.49 d:/fireox/nsprpub/pr/src/md/windows/ntmisc.c(773,48): warning: incompatible pointer types passing 'PRInt32 *' (aka 'int *') to parameter of type 'LPDWORD' (aka 'unsigned long *') [-Wincompatible-pointer-types]
+ 2:10.49         GetExitCodeProcess(process->md.handle, exitCode) == FALSE) {
+ 2:10.49                                                ^~~~~~~~
+ 2:10.49 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\processthreadsapi.h(167,19): note: passing argument to parameter 'lpExitCode' here
+ 2:10.49     _Out_ LPDWORD lpExitCode
+ 2:10.50                   ^
+ 2:10.57 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.57 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(275,19): warning: incompatible pointer types passing 'PRUint32 *' (aka 'unsigned int *') to parameter of type 'LPDWORD' (aka 'unsigned long *') [-Wincompatible-pointer-types]
+ 2:10.57                   &bytes,
+ 2:10.57                   ^~~~~~
+ 2:10.57 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\fileapi.h(983,23): note: passing argument to parameter 'lpNumberOfBytesRead' here
+ 2:10.57     _Out_opt_ LPDWORD lpNumberOfBytesRead,
+ 2:10.57                       ^
+ 2:10.57 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.57 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(304,20): warning: incompatible pointer types passing 'PRInt32 *' (aka 'int *') to parameter of type 'LPDWORD' (aka 'unsigned long *') [-Wincompatible-pointer-types]
+ 2:10.57                    &bytes,
+ 2:10.57                    ^~~~~~
+ 2:10.57 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\fileapi.h(1143,23): note: passing argument to parameter 'lpNumberOfBytesWritten' here
+ 2:10.57     _Out_opt_ LPDWORD lpNumberOfBytesWritten,
+ 2:10.57                       ^
+ 2:10.57 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(442,22): warning: passing 'char *' to parameter of type 'const unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58         cp = _mbsinc(cp);
+ 2:10.58                      ^~
+ 2:10.58 c:/Program Files (x86)/Windows Kits/10/include\10.0.22000.0\ucrt\mbstring.h(268,37): note: passing argument to parameter '_Ptr' here
+ 2:10.58         _In_z_ unsigned char const* _Ptr
+ 2:10.58                                     ^
+ 2:10.58 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(442,12): warning: assigning to 'char *' from 'unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58         cp = _mbsinc(cp);
+ 2:10.58            ^ ~~~~~~~~~~~
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(655,20): warning: passing 'const char *' to parameter of type 'const unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58     prev = _mbsdec(str, current);
+ 2:10.58                    ^~~
+ 2:10.58 c:/Program Files (x86)/Windows Kits/10/include\10.0.22000.0\ucrt\mbstring.h(229,62): note: passing argument to parameter '_Start' here
+ 2:10.58         _In_reads_z_(_Pos - _Start + 1) unsigned char const* _Start,
+ 2:10.58                                                              ^
+ 2:10.58 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(655,25): warning: passing 'const char *' to parameter of type 'const unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58     prev = _mbsdec(str, current);
+ 2:10.58                         ^~~~~~~
+ 2:10.58 c:/Program Files (x86)/Windows Kits/10/include\10.0.22000.0\ucrt\mbstring.h(230,62): note: passing argument to parameter '_Pos' here
+ 2:10.58         _In_z_                          unsigned char const* _Pos
+ 2:10.58                                                              ^
+ 2:10.58 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(655,10): warning: assigning to 'const char *' from 'unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58     prev = _mbsdec(str, current);
+ 2:10.58          ^ ~~~~~~~~~~~~~~~~~~~~~
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(705,25): warning: passing 'char *' to parameter of type 'const unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58             p = _mbsinc(p);
+ 2:10.58                         ^
+ 2:10.58 c:/Program Files (x86)/Windows Kits/10/include\10.0.22000.0\ucrt\mbstring.h(268,37): note: passing argument to parameter '_Ptr' here
+ 2:10.58         _In_z_ unsigned char const* _Ptr
+ 2:10.58                                     ^
+ 2:10.58 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(705,15): warning: assigning to 'char *' from 'unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58             p = _mbsinc(p);
+ 2:10.58               ^ ~~~~~~~~~~
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(719,25): warning: passing 'char *' to parameter of type 'const unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58             p = _mbsinc(p);
+ 2:10.58                         ^
+ 2:10.58 c:/Program Files (x86)/Windows Kits/10/include\10.0.22000.0\ucrt\mbstring.h(268,37): note: passing argument to parameter '_Ptr' here
+ 2:10.58         _In_z_ unsigned char const* _Ptr
+ 2:10.58                                     ^
+ 2:10.58 In file included from Unified_c_external_nspr_pr1.c:110:
+ 2:10.58 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(719,15): warning: assigning to 'char *' from 'unsigned char *' converts between pointers to integer types where one is of the unique plain 'char' type and the other is not [-Wpointer-sign]
+ 2:10.58             p = _mbsinc(p);
+ 2:10.58               ^ ~~~~~~~~~~
+ 2:10.62 d:/fireox/nsprpub/pr/src/md/windows/w95io.c(678,1): warning: unused function 'IsRootDirectory' [-Wunused-function]
+ 2:10.62 IsRootDirectory(char *fn, size_t buflen)
+ 2:10.62 ^
+ 2:10.79 mozglue/build
+ 2:10.95 In file included from Unified_c_external_nspr_pr2.c:20:
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(883,15): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.95         if (y = *xb & 0xffff) {
+ 2:10.95             ~~^~~~~~~~~~~~~~
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(883,15): note: place parentheses around the assignment to silence this warning
+ 2:10.95         if (y = *xb & 0xffff) {
+ 2:10.95               ^
+ 2:10.95             (               )
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(883,15): note: use '==' to turn this assignment into an equality comparison
+ 2:10.95         if (y = *xb & 0xffff) {
+ 2:10.95               ^
+ 2:10.95               ==
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(897,15): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.95         if (y = *xb >> 16) {
+ 2:10.95             ~~^~~~~~~~~~~
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(897,15): note: place parentheses around the assignment to silence this warning
+ 2:10.95         if (y = *xb >> 16) {
+ 2:10.95               ^
+ 2:10.95             (            )
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(897,15): note: use '==' to turn this assignment into an equality comparison
+ 2:10.95         if (y = *xb >> 16) {
+ 2:10.95               ^
+ 2:10.95               ==
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(949,11): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.95     if (i = k & 3) {
+ 2:10.95         ~~^~~~~~~
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(949,11): note: place parentheses around the assignment to silence this warning
+ 2:10.95     if (i = k & 3) {
+ 2:10.95           ^
+ 2:10.95         (        )
+ 2:10.95 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(949,11): note: use '==' to turn this assignment into an equality comparison
+ 2:10.95     if (i = k & 3) {
+ 2:10.95           ^
+ 2:10.95           ==
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1035,17): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.96         if (*x1 = z) {
+ 2:10.96             ~~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1035,17): note: place parentheses around the assignment to silence this warning
+ 2:10.96         if (*x1 = z) {
+ 2:10.96                 ^
+ 2:10.96             (      )
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1035,17): note: use '==' to turn this assignment into an equality comparison
+ 2:10.96         if (*x1 = z) {
+ 2:10.96                 ^
+ 2:10.96                 ==
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1270,33): warning: operator '>>' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:10.96         d0 = Exp_1 | y >> Ebits - k;
+ 2:10.96                        ~~ ~~~~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1270,33): note: place parentheses around the '-' expression to silence this warning
+ 2:10.96         d0 = Exp_1 | y >> Ebits - k;
+ 2:10.96                           ~~~~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1272,30): warning: operator '<<' has lower precedence than '+'; '+' will be evaluated first [-Wshift-op-parentheses]
+ 2:10.96         d1 = y << (32-Ebits) + k | w >> Ebits - k;
+ 2:10.96                ~~ ~~~~~~~~~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1272,30): note: place parentheses around the '+' expression to silence this warning
+ 2:10.96         d1 = y << (32-Ebits) + k | w >> Ebits - k;
+ 2:10.96                              ^
+ 2:10.96                   (             )
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1272,47): warning: operator '>>' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:10.96         d1 = y << (32-Ebits) + k | w >> Ebits - k;
+ 2:10.96                                      ~~ ~~~~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1272,47): note: place parentheses around the '-' expression to silence this warning
+ 2:10.96         d1 = y << (32-Ebits) + k | w >> Ebits - k;
+ 2:10.96                                         ~~~~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1277,39): warning: operator '>>' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:10.96         d0 = Exp_1 | y << k | z >> 32 - k;
+ 2:10.96                                 ~~ ~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1277,39): note: place parentheses around the '-' expression to silence this warning
+ 2:10.96         d0 = Exp_1 | y << k | z >> 32 - k;
+ 2:10.96                                       ^
+ 2:10.96                                    (     )
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1279,31): warning: operator '>>' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:10.96         d1 = z << k | y >> 32 - k;
+ 2:10.96                         ~~ ~~~^~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1279,31): note: place parentheses around the '-' expression to silence this warning
+ 2:10.96         d1 = z << k | y >> 32 - k;
+ 2:10.96                               ^
+ 2:10.96                            (     )
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1355,12): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.96     if (de = (int)(d0 >> Exp_shift)) {
+ 2:10.96         ~~~^~~~~~~~~~~~~~~~~~~~~~~~
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1355,12): note: place parentheses around the assignment to silence this warning
+ 2:10.96     if (de = (int)(d0 >> Exp_shift)) {
+ 2:10.96            ^
+ 2:10.96         (                          )
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1355,12): note: use '==' to turn this assignment into an equality comparison
+ 2:10.96     if (de = (int)(d0 >> Exp_shift)) {
+ 2:10.96            ^
+ 2:10.96            ==
+ 2:10.96 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1360,11): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.96     if (y = d1) {
+ 2:10.96         ~~^~~~
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1360,11): note: place parentheses around the assignment to silence this warning
+ 2:10.97     if (y = d1) {
+ 2:10.97           ^
+ 2:10.97         (     )
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1360,11): note: use '==' to turn this assignment into an equality comparison
+ 2:10.97     if (y = d1) {
+ 2:10.97           ^
+ 2:10.97           ==
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1361,15): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.97         if (k = lo0bits(&y)) {
+ 2:10.97             ~~^~~~~~~~~~~~~
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1361,15): note: place parentheses around the assignment to silence this warning
+ 2:10.97         if (k = lo0bits(&y)) {
+ 2:10.97               ^
+ 2:10.97             (              )
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1361,15): note: use '==' to turn this assignment into an equality comparison
+ 2:10.97         if (k = lo0bits(&y)) {
+ 2:10.97               ^
+ 2:10.97               ==
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1362,32): warning: operator '<<' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:10.97             x[0] = y | z << 32 - k;
+ 2:10.97                          ~~ ~~~^~~
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1362,32): note: place parentheses around the '-' expression to silence this warning
+ 2:10.97             x[0] = y | z << 32 - k;
+ 2:10.97                                ^
+ 2:10.97                             (     )
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1968,15): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.97         if (i = e1 & 15) {
+ 2:10.97             ~~^~~~~~~~~
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1968,15): note: place parentheses around the assignment to silence this warning
+ 2:10.97         if (i = e1 & 15) {
+ 2:10.97               ^
+ 2:10.97             (          )
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(1968,15): note: use '==' to turn this assignment into an equality comparison
+ 2:10.97         if (i = e1 & 15) {
+ 2:10.97               ^
+ 2:10.97               ==
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2033,15): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.97         if (i = e1 & 15) {
+ 2:10.97             ~~^~~~~~~~~
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2033,15): note: place parentheses around the assignment to silence this warning
+ 2:10.97         if (i = e1 & 15) {
+ 2:10.97               ^
+ 2:10.97             (          )
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2033,15): note: use '==' to turn this assignment into an equality comparison
+ 2:10.97         if (i = e1 & 15) {
+ 2:10.97               ^
+ 2:10.97               ==
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2057,53): warning: operator '<<' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:10.97                         word0(rv) &= 0xffffffff << j-32;
+ 2:10.97                                                 ~~ ~^~~
+ 2:10.97 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2057,53): note: place parentheses around the '-' expression to silence this warning
+ 2:10.97                         word0(rv) &= 0xffffffff << j-32;
+ 2:10.97                                                     ^
+ 2:10.97                                                    (   )
+ 2:10.98 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2779,14): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:10.98     while(*t = *s++) {
+ 2:10.98           ~~~^~~~~~
+ 2:10.98 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2779,14): note: place parentheses around the assignment to silence this warning
+ 2:10.98     while(*t = *s++) {
+ 2:10.98              ^
+ 2:10.98           (        )
+ 2:10.98 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2779,14): note: use '==' to turn this assignment into an equality comparison
+ 2:10.98     while(*t = *s++) {
+ 2:10.98              ^
+ 2:10.98              ==
+ 2:11.00 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2968,11): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:11.00     if (i = (int)(word0(d) >> Exp_shift1 & (Exp_mask>>Exp_shift1))) {
+ 2:11.00         ~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 2:11.00 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2968,11): note: place parentheses around the assignment to silence this warning
+ 2:11.00     if (i = (int)(word0(d) >> Exp_shift1 & (Exp_mask>>Exp_shift1))) {
+ 2:11.00           ^
+ 2:11.00         (                                                         )
+ 2:11.00 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(2968,11): note: use '==' to turn this assignment into an equality comparison
+ 2:11.00     if (i = (int)(word0(d) >> Exp_shift1 & (Exp_mask>>Exp_shift1))) {
+ 2:11.00           ^
+ 2:11.00           ==
+ 2:11.00 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3013,34): warning: operator '<<' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:11.00     x = i > 32  ? word0(d) << 64 - i | word1(d) >> i - 32
+ 2:11.00                            ~~ ~~~^~~
+ 2:11.00 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3013,34): note: place parentheses around the '-' expression to silence this warning
+ 2:11.00     x = i > 32  ? word0(d) << 64 - i | word1(d) >> i - 32
+ 2:11.00                                  ^
+ 2:11.00                               (     )
+ 2:11.00 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3013,54): warning: operator '>>' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:11.00     x = i > 32  ? word0(d) << 64 - i | word1(d) >> i - 32
+ 2:11.00                                                 ~~ ~~^~~~
+ 2:11.00 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3013,54): note: place parentheses around the '-' expression to silence this warning
+ 2:11.00     x = i > 32  ? word0(d) << 64 - i | word1(d) >> i - 32
+ 2:11.00                                                      ^
+ 2:11.00                                                    (     )
+ 2:11.01 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3014,26): warning: operator '<<' has lower precedence than '-'; '-' will be evaluated first [-Wshift-op-parentheses]
+ 2:11.01         : word1(d) << 32 - i;
+ 2:11.01                    ~~ ~~~^~~
+ 2:11.01 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3014,26): note: place parentheses around the '-' expression to silence this warning
+ 2:11.01         : word1(d) << 32 - i;
+ 2:11.01                          ^
+ 2:11.01                       (     )
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3129,17): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:11.02     else if (j1 = -k) {
+ 2:11.02              ~~~^~~~
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3129,17): note: place parentheses around the assignment to silence this warning
+ 2:11.02     else if (j1 = -k) {
+ 2:11.02                 ^
+ 2:11.02              (      )
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3129,17): note: use '==' to turn this assignment into an equality comparison
+ 2:11.02     else if (j1 = -k) {
+ 2:11.02                 ^
+ 2:11.02                 ==
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3252,47): warning: '&&' within '||' [-Wlogical-op-parentheses]
+ 2:11.02             if (dval(d) > ds || dval(d) == ds && L & 1) {
+ 2:11.02                              ~~ ~~~~~~~~~~~~~~^~~~~~~~
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3252,47): note: place parentheses around the '&&' expression to silence this warning
+ 2:11.02             if (dval(d) > ds || dval(d) == ds && L & 1) {
+ 2:11.02                                 ~~~~~~~~~~~~~~^~~~~~~~
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3299,15): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:11.02         if (j = b5 - m5) {
+ 2:11.02             ~~^~~~~~~~~
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3299,15): note: place parentheses around the assignment to silence this warning
+ 2:11.02         if (j = b5 - m5) {
+ 2:11.02               ^
+ 2:11.02             (          )
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3299,15): note: use '==' to turn this assignment into an equality comparison
+ 2:11.02         if (j = b5 - m5) {
+ 2:11.02               ^
+ 2:11.02               ==
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3340,7): warning: using the result of an assignment as a condition without parentheses [-Wparentheses]
+ 2:11.02 if (i = ((s5 ? 32 - hi0bits(S->x[S->wds-1]) : 1) + s2) & 0x1f) {
+ 2:11.02     ~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3340,7): note: place parentheses around the assignment to silence this warning
+ 2:11.02 if (i = ((s5 ? 32 - hi0bits(S->x[S->wds-1]) : 1) + s2) & 0x1f) {
+ 2:11.02       ^
+ 2:11.02     (                                                        )
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3340,7): note: use '==' to turn this assignment into an equality comparison
+ 2:11.02 if (i = ((s5 ? 32 - hi0bits(S->x[S->wds-1]) : 1) + s2) & 0x1f) {
+ 2:11.02       ^
+ 2:11.02       ==
+ 2:11.02 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3436,13): warning: '&&' within '||' [-Wlogical-op-parentheses]
+ 2:11.02             && !(word1(d) & 1)
+ 2:11.02             ^~~~~~~~~~~~~~~~~~
+ 2:11.03 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3436,13): note: place parentheses around the '&&' expression to silence this warning
+ 2:11.03             && !(word1(d) & 1)
+ 2:11.03             ^
+ 2:11.03                               )
+ 2:11.03 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3455,40): warning: '&&' within '||' [-Wlogical-op-parentheses]
+ 2:11.03                 if ((j1 > 0 || j1 == 0 && dig & 1)
+ 2:11.03                             ~~ ~~~~~~~~^~~~~~~~~~
+ 2:11.03 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3455,40): note: place parentheses around the '&&' expression to silence this warning
+ 2:11.03                 if ((j1 > 0 || j1 == 0 && dig & 1)
+ 2:11.03                                        ^
+ 2:11.03                                (                 )
+ 2:11.03 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3520,21): warning: '&&' within '||' [-Wlogical-op-parentheses]
+ 2:11.03 if (j > 0 || j == 0 && dig & 1) {
+ 2:11.03           ~~ ~~~~~~~^~~~~~~~~~
+ 2:11.03 d:/fireox/nsprpub/pr/src/misc/prdtoa.c(3520,21): note: place parentheses around the '&&' expression to silence this warning
+ 2:11.03 if (j > 0 || j == 0 && dig & 1) {
+ 2:11.03                     ^
+ 2:11.03              (                )
+ 2:11.09 4 warnings generated.
+ 2:11.12 In file included from Unified_c_external_nspr_pr2.c:110:
+ 2:11.12 d:/fireox/nsprpub/pr/src/misc/prnetdb.c(444,19): warning: cast to smaller integer type 'long' from 'char *' [-Wpointer-to-int-cast]
+ 2:11.12     if (align && ((long)buf & (align - 1))) {
+ 2:11.12                   ^~~~~~~~~
+ 2:11.22 13 warnings generated.
+ 2:11.34 mozglue/dllservices
+ 2:11.45 mozglue/misc
+ 2:11.88 In file included from Unified_c_external_nspr_pr3.c:20:
+ 2:11.88 d:/fireox/nsprpub/pr/src/threads/combined/prucv.c(162,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.88     PRIntn is;
+ 2:11.88            ^
+ 2:11.88 d:/fireox/nsprpub/pr/src/threads/combined/prucv.c(163,14): warning: unused variable 'rv' [-Wunused-variable]
+ 2:11.88     PRStatus rv = PR_SUCCESS;
+ 2:11.88              ^
+ 2:11.88 d:/fireox/nsprpub/pr/src/threads/combined/prucv.c(422,21): warning: unused variable 'pri' [-Wunused-variable]
+ 2:11.88                 int pri = thread->priority;
+ 2:11.88                     ^
+ 2:11.88 d:/fireox/nsprpub/pr/src/threads/combined/prucv.c(569,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.88     PRIntn is;
+ 2:11.88            ^
+ 2:11.88 d:/fireox/nsprpub/pr/src/threads/combined/prucv.c(568,14): warning: unused variable 'q' [-Wunused-variable]
+ 2:11.88     PRCList *q;
+ 2:11.89              ^
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prucv.c(658,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.89     PRIntn is;
+ 2:11.89            ^
+ 2:11.89 In file included from Unified_c_external_nspr_pr3.c:29:
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(81,31): warning: expression result unused [-Wunused-value]
+ 2:11.89         _PR_MD_SWITCH_CONTEXT(me);
+ 2:11.89                               ^~
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(207,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.89     PRIntn is;
+ 2:11.89            ^
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(208,15): warning: unused variable 't' [-Wunused-variable]
+ 2:11.89     PRThread *t;
+ 2:11.89               ^
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(209,14): warning: unused variable 'q' [-Wunused-variable]
+ 2:11.89     PRCList *q;
+ 2:11.89              ^
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(317,14): warning: unused variable 'q' [-Wunused-variable]
+ 2:11.89     PRCList *q;
+ 2:11.89              ^
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(319,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.89     PRIntn is;
+ 2:11.89            ^
+ 2:11.89 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(318,27): warning: unused variable 'boost' [-Wunused-variable]
+ 2:11.89     PRThreadPriority pri, boost;
+ 2:11.89                           ^
+ 2:11.90 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(318,22): warning: unused variable 'pri' [-Wunused-variable]
+ 2:11.90     PRThreadPriority pri, boost;
+ 2:11.90                      ^
+ 2:11.90 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(392,15): warning: unused variable 'me' [-Wunused-variable]
+ 2:11.90     PRThread *me = _PR_MD_CURRENT_THREAD();
+ 2:11.90               ^
+ 2:11.90 d:/fireox/nsprpub/pr/src/threads/combined/prulock.c(404,12): warning: unused variable 'rv' [-Wunused-variable]
+ 2:11.90     PRBool rv = PR_FALSE;
+ 2:11.90            ^
+ 2:11.91 In file included from Unified_c_external_nspr_pr3.c:47:
+ 2:11.91 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(548,35): warning: expression result unused [-Wunused-value]
+ 2:11.91             _PR_MD_SWITCH_CONTEXT(thread);
+ 2:11.91                                   ^~~~~~
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(546,21): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.92             PRInt32 is;
+ 2:11.92                     ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(463,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.92     PRIntn is;
+ 2:11.92            ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(558,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.92     PRIntn is;
+ 2:11.92            ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(624,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.92     PRIntn is;
+ 2:11.92            ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(625,15): warning: unused variable 'me' [-Wunused-variable]
+ 2:11.92     PRThread *me = _PR_MD_CURRENT_THREAD();
+ 2:11.92               ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(683,15): warning: unused variable 'me' [-Wunused-variable]
+ 2:11.92     PRThread *me = _PR_MD_CURRENT_THREAD();
+ 2:11.92               ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(682,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.92     PRIntn is;
+ 2:11.92            ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(961,32): warning: expression result unused [-Wunused-value]
+ 2:11.92         _PR_MD_RESTORE_CONTEXT(thread);
+ 2:11.92                                ^~~~~~
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(1092,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.92     PRIntn is;
+ 2:11.92            ^
+ 2:11.92 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(1435,16): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.93         PRIntn is;
+ 2:11.93                ^
+ 2:11.93 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(1542,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.93     PRIntn is;
+ 2:11.93            ^
+ 2:11.94 In file included from Unified_c_external_nspr_pr3.c:65:
+ 2:11.94 d:/fireox/nsprpub/pr/src/threads/prcthr.c(95,39): warning: expression result unused [-Wunused-value]
+ 2:11.94                 _PR_MD_SWITCH_CONTEXT(me);
+ 2:11.94                                       ^~
+ 2:11.94 d:/fireox/nsprpub/pr/src/threads/prcthr.c(76,16): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.94         PRIntn is;
+ 2:11.94                ^
+ 2:11.94 d:/fireox/nsprpub/pr/src/threads/prcthr.c(234,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.94     PRIntn is;
+ 2:11.94            ^
+ 2:11.94 d:/fireox/nsprpub/pr/src/threads/prcthr.c(250,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.94     PRIntn is;
+ 2:11.95            ^
+ 2:11.95 d:/fireox/nsprpub/pr/src/threads/prcthr.c(266,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.95     PRIntn is;
+ 2:11.95            ^
+ 2:11.95 d:/fireox/nsprpub/pr/src/threads/prcthr.c(285,12): warning: cast to 'void *' from smaller integer type 'PRInt32' (aka 'int') [-Wint-to-void-pointer-cast]
+ 2:11.95     return (void *)_PR_MD_GET_SP(thread);
+ 2:11.95            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ 2:11.95 In file included from Unified_c_external_nspr_pr3.c:74:
+ 2:11.95 d:/fireox/nsprpub/pr/src/threads/prdump.c(106,12): warning: unused variable 'is' [-Wunused-variable]
+ 2:11.95     PRIntn is;
+ 2:11.95            ^
+ 2:11.97 In file included from Unified_c_external_nspr_pr3.c:47:
+ 2:11.97 d:/fireox/nsprpub/pr/src/threads/combined/pruthr.c(460,13): warning: unused function '_PR_UserRunThread' [-Wunused-function]
+ 2:11.97 static void _PR_UserRunThread(void)
+ 2:11.97             ^
+ 2:12.86 36 warnings generated.
+ 2:13.07 29 warnings generated.
+ 2:13.19 security/nss/lib/base
+ 2:14.18 security/nss/lib/certdb
+ 2:15.39 security/nss/lib/certhigh
+ 2:15.73 security/nss/lib/cryptohi
+ 2:17.07 security/nss/lib/dev
+ 2:19.66 security/nss/lib/nss
+ 2:20.02 In file included from d:/fireox/security/nss/lib/nss/nssinit.c:1324:
+ 2:20.02 d:/fireox/obj-x86_64-w64-mingw32/dist/include/private/nss\verref.h(34,25): warning: unused variable '_nss_version_c' [-Wunused-variable]
+ 2:20.02     volatile const char _nss_version_c = NSS_VERSION_VARIABLE[0];
+ 2:20.02                         ^
+ 2:20.25 1 warning generated.
+ 2:21.10 security/nss/lib/pk11wrap
+ 2:21.45 security/nss/lib/pkcs12
+ 2:21.78 security/nss/lib/pkcs7
+ 2:22.67 security/nss/lib/pki
+ 2:23.85 security/nss/lib/smime
+ 2:24.96 security/nss/lib/ssl
+ 2:25.94 security/nss/lib/util
+ 2:26.58 third_party/sqlite3/src
+ 2:26.99 toolkit/library/rust/force-cargo-library-build
+ 2:28.33 d:/fireox/third_party/sqlite3/src/sqlite3.c(42847,35): warning: unused variable 'sqlite3_os_type' [-Wunused-variable]
+ 2:28.33 static LONG SQLITE_WIN32_VOLATILE sqlite3_os_type = 0;
+ 2:28.33                                   ^
+ 2:29.04 testing/geckodriver/module.res
+ 2:29.52 In file included from module.rc:6:
+ 2:29.52 In file included from c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winuser.h:61:
+ 2:29.52 In file included from c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\libloaderapi.h:18:
+ 2:29.52 In file included from c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\shared\minwindef.h:182:
+ 2:29.52 c:\Program Files (x86)\Windows Kits\10\include\10.0.22000.0\um\winnt.h(253,2): error: Must define a target architecture.
+ 2:29.52 #error Must define a target architecture.
+ 2:29.52  ^
+ 2:29.59 1 error generated.
+ 2:29.77 mozmake[4]: *** [d:/fireox/config/rules.mk;797: module.res] Error 1
+ 2:29.77 mozmake[3]: *** [d:/fireox/config/recurse.mk;72: testing/geckodriver/target] Error 2
+ 2:29.77 mozmake[3]: *** Waiting for unfinished jobs....
+ 2:33.77 In file included from d:/fireox/security/nss/lib/smime/smimeutil.c:778:
+ 2:33.77 d:/fireox/obj-x86_64-w64-mingw32/dist/include/private/nss\verref.h(34,25): warning: unused variable '_nss_version_c' [-Wunused-variable]
+ 2:33.77     volatile const char _nss_version_c = NSS_VERSION_VARIABLE[0];
+ 2:33.77                         ^
+ 2:33.81 In file included from d:/fireox/security/nss/lib/ssl/sslcon.c:230:
+ 2:33.81 d:/fireox/obj-x86_64-w64-mingw32/dist/include/private/nss\verref.h(34,25): warning: unused variable '_nss_version_c' [-Wunused-variable]
+ 2:33.81     volatile const char _nss_version_c = NSS_VERSION_VARIABLE[0];
+ 2:33.81                         ^
+ 2:33.85 1 warning generated.
+ 2:33.96 1 warning generated.
+ 2:34.69 In file included from d:/fireox/security/nss/lib/util/secoid.c:2065:
+ 2:34.69 d:/fireox/security/nss/lib/util/verref.h(34,25): warning: unused variable '_nss_version_c' [-Wunused-variable]
+ 2:34.69     volatile const char _nss_version_c = NSS_VERSION_VARIABLE[0];
+ 2:34.69                         ^
+ 2:34.70 d:/fireox/security/nss/lib/util/secoid.c(2121,37): warning: cast to 'void *' from smaller integer type 'unsigned long' [-Wint-to-void-pointer-cast]
+ 2:34.70                                     (void *)oid->mechanism, (void *)oid);
+ 2:34.70                                     ^~~~~~~~~~~~~~~~~~~~~~
+ 2:34.70 d:/fireox/security/nss/lib/util/secoid.c(2142,48): warning: cast to 'void *' from smaller integer type 'unsigned long' [-Wint-to-void-pointer-cast]
+ 2:34.70     ret = PL_HashTableLookupConst(oidmechhash, (void *)mechanism);
+ 2:34.70                                                ^~~~~~~~~~~~~~~~~
+ 2:34.85 3 warnings generated.
+ 2:36.83 d:/fireox/security/nss/lib/ssl/sslsnce.c(255,18): warning: unused function 'LaunchLockPoller' [-Wunused-function]
+ 2:36.83 static SECStatus LaunchLockPoller(cacheDesc *cache);
+ 2:36.83                  ^
+ 2:36.83 d:/fireox/security/nss/lib/ssl/sslsnce.c(256,18): warning: unused function 'StopLockPoller' [-Wunused-function]
+ 2:36.83 static SECStatus StopLockPoller(cacheDesc *cache);
+ 2:36.83                  ^
+ 2:37.20 2 warnings generated.
+ 2:47.01    Compiling proc-macro2 v1.0.27
+ 2:47.01    Compiling unicode-xid v0.2.0
+ 2:47.01    Compiling syn v1.0.73
+ 2:47.01    Compiling autocfg v1.0.1 (D:\fireox\third_party\rust\autocfg)
+ 2:47.01    Compiling serde_derive v1.0.126
+ 2:47.01    Compiling bitflags v1.2.1
+ 2:47.01    Compiling serde v1.0.126
+ 2:47.50    Compiling winapi v0.3.9
+ 2:48.41    Compiling libc v0.2.97
+ 2:48.41    Compiling cfg-if v0.1.10
+ 2:48.42    Compiling cfg-if v1.0.0
+ 2:48.44    Compiling log v0.4.14
+ 2:48.50    Compiling jobserver v0.1.22
+ 2:48.52    Compiling lazy_static v1.4.0
+ 2:48.64    Compiling memchr v2.4.0
+ 2:48.79    Compiling getrandom v0.1.14
+ 2:48.91    Compiling byteorder v1.4.3
+ 2:49.41    Compiling ahash v0.4.7
+ 2:49.49    Compiling encoding_rs v0.8.22
+ 2:49.49    Compiling pkg-config v0.3.19
+ 2:49.74    Compiling itoa v0.4.7
+ 2:49.82    Compiling matches v0.1.8
+ 2:49.92    Compiling thin-vec v0.2.2
+ 2:49.93    Compiling ppv-lite86 v0.2.10
+ 2:49.99    Compiling ryu v1.0.5
+ 2:50.49    Compiling version_check v0.9.3
+ 2:50.65    Compiling serde_json v1.0.64
+ 2:50.89    Compiling threadbound v0.1.2
+ 2:51.00    Compiling scopeguard v1.1.0
+ 2:51.04    Compiling unicode-normalization v0.1.5
+ 2:51.14    Compiling proc-macro-hack v0.5.19
+ 2:51.18    Compiling percent-encoding v2.1.0
+ 2:51.18    Compiling regex-syntax v0.6.25
+ 2:51.87    Compiling maybe-uninit v2.0.0
+ 2:51.98    Compiling crossbeam-utils v0.8.5
+ 2:52.20    Compiling glob v0.3.0
+ 2:52.44    Compiling futures v0.1.31
+ 2:52.68    Compiling stable_deref_trait v1.2.0
+ 2:53.65    Compiling siphasher v0.3.5
+ 2:54.22    Compiling anyhow v1.0.41
+ 2:54.26    Compiling bindgen v0.56.0
+ 2:54.72    Compiling iovec v0.1.4
+ 2:55.03    Compiling peeking_take_while v0.1.2
+ 2:55.20    Compiling shlex v0.1.1
+ 2:55.78    Compiling lazycell v1.3.0
+ 2:55.98    Compiling rustc-hash v1.1.0
+ 2:56.14    Compiling base64 v0.12.3
+ 2:56.34    Compiling vcpkg v0.2.13
+ 2:56.39    Compiling slab v0.4.3
+ 2:56.66    Compiling fnv v1.0.7
+ 2:56.83    Compiling futures-task v0.3.15
+ 2:56.85    Compiling ident_case v1.0.1
+ 2:56.92    Compiling fixedbitset v0.2.0
+ 2:57.10    Compiling humantime v2.1.0
+ 2:57.13    Compiling once_cell v1.8.0
+ 2:57.65    Compiling bit-vec v0.6.3
+ 2:57.67    Compiling tinystr v0.3.4
+ 2:57.95    Compiling unicode-width v0.1.7
+ 2:58.25    Compiling khronos_api v3.1.0
+ 2:58.32    Compiling fallible-streaming-iterator v0.1.9
+ 2:58.33    Compiling typenum v1.13.0
+ 2:58.61    Compiling fallible-iterator v0.2.0
+ 2:58.77    Compiling smallbitvec v2.5.0
+ 2:59.38    Compiling atomic_refcell v0.1.7
+ 2:59.60    Compiling arrayref v0.3.6
+ 2:59.61    Compiling dtoa v0.4.8
+ 2:59.61    Compiling rayon-core v1.8.1
+ 2:59.72    Compiling crc32fast v1.2.1
+ 2:59.94    Compiling neqo-common v0.4.28 (https://github.com/mozilla/neqo?tag=v0.4.28#c3d909e4)
+ 2:59.97    Compiling xml-rs v0.8.3
+ 3:00.66    Compiling id-arena v2.2.1
+ 3:00.89    Compiling byte-tools v0.3.1
+ 3:01.03    Compiling either v1.6.1
+ 3:01.03    Compiling adler v1.0.2
+ 3:01.32    Compiling thin-slice v0.1.1
+ 3:01.51    Compiling interrupt-support v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 3:01.51    Compiling bytes v0.5.6
+ 3:01.88    Compiling precomputed-hash v0.1.1
+ 3:02.14    Compiling static_assertions v1.1.0
+ 3:02.19    Compiling range-alloc v0.1.2 (https://github.com/gfx-rs/gfx?rev=27a1dae3796d33d23812f2bb8c7e3b5aea18b521#27a1dae3)
+ 3:02.27    Compiling semver-parser v0.7.0
+ 3:02.40    Compiling opaque-debug v0.2.1
+ 3:02.51    Compiling thunderdome v0.4.1
+ 3:02.99    Compiling nss_build_common v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 3:03.67    Compiling fake-simd v0.1.2
+ 3:03.85    Compiling futures-core v0.3.15
+ 3:04.33    Compiling cfg_aliases v0.1.1
+ 3:04.47    Compiling void v1.0.2
+ 3:04.62    Compiling svg_fmt v0.4.1
+ 3:04.65    Compiling fluent-syntax v0.10.1
+ 3:05.50    Compiling futures-channel v0.3.15
+ 3:05.84    Compiling error-chain v0.11.0
+ 3:05.89    Compiling renderdoc-sys v0.7.1
+ 3:06.14    Compiling static_prefs v0.1.0 (D:\fireox\modules\libpref\init\static_prefs)
+ 3:06.30    Compiling murmurhash3 v0.0.5
+ 3:06.33    Compiling cose v0.1.4
+ 3:06.36    Compiling inplace_it v0.3.3
+ 3:06.57    Compiling binary-space-partition v0.1.2
+ 3:06.76    Compiling gecko-profiler v0.1.0 (D:\fireox\tools\profiler\rust-api)
+ 3:06.88    Compiling encoding_c_mem v0.2.5
+ 3:06.99    Compiling encoding_c v0.9.7
+ 3:07.47    Compiling authenticator v0.3.1
+ 3:07.65    Compiling copyless v0.1.5
+ 3:07.75    Compiling new_debug_unreachable v1.0.4
+ 3:07.78    Compiling moz_cbor v0.1.2
+ 3:07.85    Compiling quick-error v1.2.3
+ 3:07.86    Compiling tracy-rs v0.1.2
+ 3:08.00    Compiling profiling v1.0.2
+ 3:08.02    Compiling qcms v0.2.0 (D:\fireox\gfx\qcms)
+ 3:08.10    Compiling data-encoding v2.3.2
+ 3:09.82    Compiling unicode-segmentation v1.2.1
+ 3:09.97    Compiling memmap2 v0.2.3
+ 3:10.44    Compiling rustc-demangle v0.1.19
+ 3:10.73    Compiling runloop v0.1.0
+ 3:10.91    Compiling prefs_parser v0.0.1 (D:\fireox\modules\libpref\parser)
+ 3:11.25    Compiling instant v0.1.9
+ 3:11.26    Compiling bitreader v0.3.4
+ 3:11.39    Compiling crossbeam-utils v0.6.6
+ 3:12.09    Compiling cc v1.0.68
+ 3:12.30    Compiling fxhash v0.2.1
+ 3:12.57    Compiling base64 v0.10.1
+ 3:13.47    Compiling hashbrown v0.9.1
+ 3:13.51    Compiling unicode-bidi v0.3.4
+ 3:13.81    Compiling num-traits v0.2.14
+ 3:14.38    Compiling indexmap v1.6.2
+ 3:14.40    Compiling crossbeam-utils v0.7.2
+ 3:14.83    Compiling memoffset v0.5.6
+ 3:14.83    Compiling num-integer v0.1.44
+ 3:15.18    Compiling crossbeam-epoch v0.8.2
+ 3:15.21    Compiling miniz_oxide v0.4.4
+ 3:15.59    Compiling rayon v1.4.1
+ 3:15.63    Compiling lock_api v0.4.4
+ 3:16.20    Compiling servo_arc v0.1.1 (D:\fireox\servo\components\servo_arc)
+ 3:16.20    Compiling owning_ref v0.4.1
+ 3:16.52    Compiling phf_shared v0.8.0
+ 3:16.72    Compiling nom v5.1.2
+ 3:16.87    Compiling bytes v0.4.12
+ 3:17.19    Compiling clang-sys v1.2.0
+ 3:17.19    Compiling zeitstempel v0.1.1
+ 3:17.23    Compiling unic-langid-impl v0.9.0
+ 3:17.31 1 warning generated.
+ 3:17.48    Compiling bit-set v0.5.2
+ 3:17.86    Compiling dtoa-short v0.3.3
+ 3:18.08    Compiling block-padding v0.1.5
+ 3:18.23    Compiling itertools v0.8.2
+ 3:18.56    Compiling type-map v0.4.0
+ 3:19.07    Compiling semver v0.9.0
+ 3:19.26    Compiling webext-storage v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 3:19.33    Compiling wgpu-core v0.8.0 (D:\fireox\gfx\wgpu\wgpu-core)
+ 3:20.04    Compiling http v0.2.2
+ 3:20.07    Compiling dns-parser v0.8.0
+ 3:20.77    Compiling tokio-executor v0.1.9
+ 3:21.17    Compiling crossbeam-queue v0.1.2
+ 3:22.50    Compiling cmake v0.1.45
+ 3:25.55    Compiling idna v0.2.0
+ 3:25.99    Compiling hashlink v0.6.0
+ 3:26.76    Compiling fallible_collections v0.4.2
+ 3:31.63    Compiling unic-langid v0.9.0
+ 3:31.97    Compiling rustc_version v0.2.3
+ 3:32.52    Compiling gpu-alloc-types v0.2.0
+ 3:33.05    Compiling gpu-descriptor-types v0.1.1
+ 3:33.51    Compiling tokio-timer v0.2.11
+ 3:33.53    Compiling tokio-current-thread v0.1.6
+ 3:34.07    Compiling ffi-support v0.4.3
+ 3:34.08    Compiling tokio-io v0.1.7
+ 3:34.84    Compiling dogear v0.4.0
+ 3:34.93    Compiling mapped_hyph v0.4.3 (https://github.com/jfkthame/mapped_hyph.git?rev=746743227485a83123784df0c53227ab466612ed#74674322)
+ 3:35.39    Compiling quote v1.0.9
+ 3:35.55    Compiling rand_core v0.5.1
+ 3:35.84    Compiling aho-corasick v0.7.18
+ 3:38.16    Compiling num_cpus v1.13.0
+ 3:38.54    Compiling raw-window-handle v0.3.3
+ 3:38.77    Compiling hashglobe v0.1.0 (D:\fireox\servo\components\hashglobe)
+ 3:41.85    Compiling nsstring v0.1.0 (D:\fireox\xpcom\rust\nsstring)
+ 3:43.69    Compiling xmldecl v0.1.1
+ 3:44.63    Compiling chardetng v0.1.9 (https://github.com/hsivonen/chardetng?rev=302c995f91f44cf26e77dc4758ad56c3ff0153ad#302c995f)
+ 3:45.89    Compiling crossbeam-channel v0.5.1
+ 3:46.59    Compiling gl_generator v0.14.0
+ 3:46.94    Compiling fluent-langneg v0.13.0
+ 3:47.40    Compiling intl-memoizer v0.5.1
+ 3:47.40    Compiling intl_pluralrules v7.0.1
+ 3:47.47    Compiling libsqlite3-sys v0.20.1
+ 3:47.79    Compiling lmdb-rkv-sys v0.11.0
+ 3:48.10    Compiling cubeb-sys v0.9.0
+ 3:48.21    Compiling spirv-cross-internal v0.1.0 (https://github.com/kvark/spirv_cross?branch=wgpu5#a5a90d38)
+ 3:48.68    Compiling glslopt v0.1.9
+ 3:48.92    Compiling whatsys v0.1.2
+ 3:48.99    Compiling audioipc v0.2.5 (https://github.com/mozilla/audioipc-2?rev=7537bfadad2e981577eb75e4f13662fc517e1a09#7537bfad)
+ 3:49.25    Compiling mozglue-static v0.1.0 (D:\fireox\mozglue\static\rust)
+ 3:49.55    Compiling cose-c v0.1.5
+ 3:49.73    Compiling gpu-alloc v0.4.7
+ 3:50.03    Compiling gpu-descriptor v0.1.1
+ 3:50.15    Compiling generic-array v0.12.4
+ 3:50.26    Compiling gkrust-shared v0.1.0 (D:\fireox\toolkit\library\rust\shared)
+ 3:50.32    Compiling tokio-codec v0.1.0
+ 3:50.38    Compiling paste-impl v0.1.18
+ 3:50.66    Compiling rand_pcg v0.2.1
+ 3:50.94    Compiling rand_chacha v0.2.2
+ 3:51.27    Compiling regex v1.5.4
+ 3:51.64    Compiling cstr v0.2.8
+ 3:51.95    Compiling futures-cpupool v0.1.8
+ 3:53.84    Compiling build-parallel v0.1.2
+ 3:54.25    Compiling nserror v0.1.0 (D:\fireox\xpcom\rust\nserror)
+ 3:54.28    Compiling winapi-util v0.1.5
+ 3:54.72    Compiling time v0.1.43
+ 3:54.81    Compiling socket2 v0.3.19
+ 3:55.13    Compiling atty v0.2.14
+ 3:55.24    Compiling net2 v0.2.37
+ 3:55.58    Compiling libloading v0.7.0
+ 3:56.09    Compiling wio v0.2.2
+ 3:56.33    Compiling comedy v0.2.0
+ 3:56.48    Compiling remove_dir_all v0.5.3
+ 3:56.81    Compiling memmap v0.7.0
+ 3:57.08    Compiling dirs-sys v0.3.5
+ 3:57.29    Compiling mozilla-central-workspace-hack v0.1.0 (D:\fireox\build\workspace-hack)
+ 3:57.40    Compiling audio_thread_priority v0.23.4
+ 3:57.46    Compiling chardetng_c v0.1.2 (https://github.com/hsivonen/chardetng_c?rev=ed8a4c6f900a90d4dbc1d64b856e61490a1c3570#ed8a4c6f)
+ 3:57.60    Compiling petgraph v0.5.1
+ 3:57.81    Compiling crossbeam-channel v0.4.4
+ 3:58.96    Compiling spirv_headers v1.5.0
+ 3:59.29    Compiling ordered-float v1.1.1
+ 3:59.68    Compiling flate2 v1.0.20
+ 4:00.60    Compiling cexpr v0.4.0
+ 4:01.30    Compiling glsl v4.0.3
+ 4:05.67    Compiling block-buffer v0.7.3
+ 4:05.91    Compiling digest v0.8.1
+ 4:06.22    Compiling rand v0.7.3
+ 4:09.48    Compiling Inflector v0.11.4
+ 4:12.07    Compiling netwerk_helper v0.0.1 (D:\fireox\netwerk\base\rust-helper)
+ 4:12.65    Compiling l10nregistry-ffi v0.1.0 (D:\fireox\intl\l10n\rust\l10nregistry-ffi)
+ 4:12.99    Compiling encoding_glue v0.1.0 (D:\fireox\intl\encoding_glue)
+ 4:13.60    Compiling termcolor v1.1.2
+ 4:13.61    Compiling fluent-pseudo v0.2.3
+ 4:14.08    Compiling paste v0.1.18
+ 4:14.24    Compiling miow v0.3.3
+ 4:15.62    Compiling gleam v0.13.1
+ 4:15.69    Compiling d3d12 v0.4.0
+ 4:16.03    Compiling ash v0.32.1
+ 4:16.70    Compiling filetime_win v0.2.0
+ 4:17.16    Compiling guid_win v0.2.0
+ 4:17.98    Compiling dirs v2.0.2
+ 4:18.14    Compiling crossbeam-deque v0.7.3
+ 4:18.57    Compiling synstructure v0.12.4
+ 4:24.00    Compiling darling_core v0.10.2
+ 4:26.72    Compiling same-file v1.0.6
+ 4:29.08    Compiling rose_tree v0.2.0
+ 4:29.74    Compiling glsl-to-cxx v0.1.0 (D:\fireox\gfx\wr\glsl-to-cxx)
+ 4:32.33    Compiling sha2 v0.8.2
+ 4:34.26    Compiling uuid v0.8.1
+ 4:35.49    Compiling tempfile v3.1.0
+ 4:37.59    Compiling phf_generator v0.8.0
+ 4:37.76    Compiling env_logger v0.8.4
+ 4:43.45    Compiling codespan-reporting v0.11.1
+ 4:43.56    Compiling mio v0.6.23 (D:\fireox\third_party\rust\mio)
+ 4:44.68    Compiling bits v0.2.0 (D:\fireox\toolkit\components\bitsdownload\bits_client\bits)
+ 4:47.16    Compiling tokio-threadpool v0.1.17
+ 4:52.49    Compiling walkdir v2.3.2
+ 4:53.73    Compiling cubeb-core v0.9.0
+ 4:54.47    Compiling rust_cascade v0.6.0
+ 4:55.20    Compiling mdns_service v0.1.0 (D:\fireox\dom\media\webrtc\transport\mdns_service)
+ 4:55.42    Compiling gkrust_utils v0.1.0 (D:\fireox\xpcom\rust\gkrust_utils)
+ 4:56.38    Compiling profiler_helper v0.1.0 (D:\fireox\tools\profiler\rust-helper)
+ 4:56.57    Compiling phf_codegen v0.8.0
+ 4:56.86    Compiling mp4parse v0.11.5 (https://github.com/mozilla/mp4parse-rust?rev=1bb484e96ae724309e3346968e8ffd4c25e61616#1bb484e9)
+ 4:58.48    Compiling thiserror-impl v1.0.25
+ 5:00.66    Compiling xpcom_macros v0.1.0 (D:\fireox\xpcom\rust\xpcom\xpcom_macros)
+ 5:00.99    Compiling cssparser v0.28.1
+ 5:02.36    Compiling derive_more v0.99.11
+ 5:03.45    Compiling serde_with_macros v1.1.0
+ 5:03.65    Compiling phf_macros v0.8.0
+ 5:10.56    Compiling malloc_size_of_derive v0.1.2
+ 5:11.33    Compiling cssparser-macros v0.6.0
+ 5:13.58    Compiling peek-poke-derive v0.2.1 (D:\fireox\gfx\wr\peek-poke\peek-poke-derive)
+ 5:15.49    Compiling ouroboros_macro v0.7.0
+ 5:15.86    Compiling inherent v0.1.6
+ 5:17.10    Compiling prost-derive v0.6.1
+ 5:18.10    Compiling rental-impl v0.5.5
+ 5:25.01    Compiling num-derive v0.3.3
+ 5:28.99    Compiling tokio-reactor v0.1.3
+ 5:31.89    Compiling mio-named-pipes v0.1.6 (https://github.com/kinetiknz/mio-named-pipes?rev=21c26326f5f45f415c49eac4ba5bc41a2f961321#21c26326)
+ 5:31.90    Compiling tokio-fs v0.1.3
+ 5:33.58    Compiling cubeb v0.9.0
+ 5:33.95    Compiling cubeb-backend v0.9.0
+ 5:34.13    Compiling selectors v0.22.0 (D:\fireox\servo\components\selectors)
+ 5:36.80    Compiling lmdb-rkv v0.14.0
+ 5:38.14    Compiling mp4parse_capi v0.11.5 (https://github.com/mozilla/mp4parse-rust?rev=1bb484e96ae724309e3346968e8ffd4c25e61616#1bb484e9)
+ 5:39.97    Compiling darling_macro v0.10.2
+ 5:40.01    Compiling thiserror v1.0.25
+ 5:40.18    Compiling phf v0.8.0
+ 5:40.41    Compiling xpcom v0.1.0 (D:\fireox\xpcom\rust\xpcom)
+ 5:43.73    Compiling ouroboros v0.7.0
+ 5:44.03    Compiling tokio-udp v0.1.1
+ 5:44.64    Compiling tokio-tcp v0.1.1
+ 5:46.22    Compiling prost v0.6.1
+ 5:46.78    Compiling naga v0.4.0 (https://github.com/gfx-rs/naga?tag=gfx-25#057d03ad)
+ 5:47.47    Compiling error-support v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 5:47.72    Compiling bits_client v0.2.0 (D:\fireox\toolkit\components\bitsdownload\bits_client)
+ 5:50.43    Compiling darling v0.10.2
+ 5:50.80    Compiling tokio v0.1.11
+ 5:58.90    Compiling derive_common v0.0.1 (D:\fireox\servo\components\derive_common)
+ 5:59.07    Compiling gfx-hal v0.8.0 (https://github.com/gfx-rs/gfx?rev=27a1dae3796d33d23812f2bb8c7e3b5aea18b521#27a1dae3)
+ 6:02.32    Compiling smallvec v1.6.1
+ 6:03.01    Compiling url v2.1.0
+ 6:04.86    Compiling bincode v1.3.3
+ 6:06.05    Compiling arrayvec v0.5.2
+ 6:06.84    Compiling euclid v0.22.6
+ 6:07.99    Compiling chrono v0.4.19
+ 6:09.05    Compiling app_units v0.7.1
+ 6:09.32    Compiling serde_with v1.4.0
+ 6:09.85    Compiling ron v0.6.2
+ 6:09.95    Compiling serde_bytes v0.11.5
+ 6:10.63    Compiling dwrote v0.11.0
+ 6:11.01    Compiling webrender_build v0.0.1 (D:\fireox\gfx\wr\webrender_build)
+ 6:11.10    Compiling wgpu-types v0.8.0 (D:\fireox\gfx\wgpu\wgpu-types)
+ 6:14.91    Compiling to_shmem_derive v0.0.1 (D:\fireox\servo\components\to_shmem_derive)
+ 6:15.44    Compiling style_derive v0.0.1 (D:\fireox\servo\components\style_derive)
+ 6:16.08    Compiling parking_lot_core v0.8.1
+ 6:19.65    Compiling fluent-bundle v0.14.1
+ 6:20.44    Compiling fallible v0.0.1 (D:\fireox\servo\components\fallible)
+ 6:20.70    Compiling toml v0.4.10
+ 6:21.97    Compiling webrtc-sdp v0.3.8
+ 6:23.21    Compiling gfx-backend-empty v0.8.0 (https://github.com/gfx-rs/gfx?rev=27a1dae3796d33d23812f2bb8c7e3b5aea18b521#27a1dae3)
+ 6:24.87    Compiling rusqlite v0.24.2
+ 6:24.97    Compiling viaduct v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 6:26.90    Compiling rkv v0.17.0
+ 6:29.75    Compiling rust_decimal v1.14.2
+ 6:32.50    Compiling uluru v0.4.0
+ 6:32.80    Compiling wr_malloc_size_of v0.0.1 (D:\fireox\gfx\wr\wr_malloc_size_of)
+ 6:33.17    Compiling peek-poke v0.2.0 (D:\fireox\gfx\wr\peek-poke)
+ 6:33.96    Compiling plane-split v0.17.1
+ 6:34.35    Compiling etagere v0.2.4
+ 6:34.94    Compiling qlog v0.4.0
+ 6:35.51    Compiling parking_lot v0.11.1
+ 6:35.54    Compiling to_shmem v0.0.1 (D:\fireox\servo\components\to_shmem)
+ 6:36.18    Compiling fluent v0.14.1
+ 6:36.33    Compiling storage_variant v0.1.0 (D:\fireox\storage\variant)
+ 6:36.48    Compiling moz_task v0.1.0 (D:\fireox\xpcom\rust\moz_task)
+ 6:37.33    Compiling unic-langid-ffi v0.1.0 (D:\fireox\intl\locale\rust\unic-langid-ffi)
+ 6:37.34    Compiling mozurl v0.0.1 (D:\fireox\netwerk\base\mozurl)
+ 6:37.74    Compiling remote v0.1.0 (D:\fireox\remote\components\rust)
+ 6:38.57    Compiling processtools v0.1.0 (D:\fireox\toolkit\components\processtools)
+ 6:39.08    Compiling rsdparsa_capi v0.1.0 (D:\fireox\dom\media\webrtc\sdp\rsdparsa_capi)
+ 6:39.12    Compiling rental v0.5.6
+ 6:39.65    Compiling sync-guid v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 6:39.67    Compiling sql-support v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 6:40.49    Compiling swgl v0.1.0 (D:\fireox\gfx\wr\swgl)
+ 6:40.63    Compiling glean-core v39.0.0
+ 6:42.20    Compiling sfv v0.8.0
+ 6:44.53    Compiling audioipc-client v0.4.0 (https://github.com/mozilla/audioipc-2?rev=7537bfadad2e981577eb75e4f13662fc517e1a09#7537bfad)
+ 6:45.01    Compiling audioipc-server v0.2.3 (https://github.com/mozilla/audioipc-2?rev=7537bfadad2e981577eb75e4f13662fc517e1a09#7537bfad)
+ 6:47.93    Compiling webrender_api v0.61.0 (D:\fireox\gfx\wr\webrender_api)
+ 6:48.18    Compiling neqo-crypto v0.4.28 (https://github.com/mozilla/neqo?tag=v0.4.28#c3d909e4)
+ 6:48.97    Compiling style v0.0.1 (D:\fireox\servo\components\style)
+ 6:53.92    Compiling gfx-backend-vulkan v0.8.0 (https://github.com/gfx-rs/gfx?rev=27a1dae3796d33d23812f2bb8c7e3b5aea18b521#27a1dae3)
+ 6:55.78    Compiling fluent-ffi v0.1.0 (D:\fireox\intl\l10n\rust\fluent-ffi)
+ 7:01.40    Compiling storage v0.1.0 (D:\fireox\storage\rust)
+ 7:02.41    Compiling bitsdownload v0.1.0 (D:\fireox\toolkit\components\bitsdownload)
+ 7:04.50    Compiling kvstore v0.1.0 (D:\fireox\toolkit\components\kvstore)
+ 7:09.14    Compiling fluent-langneg-ffi v0.1.0 (D:\fireox\intl\locale\rust\fluent-langneg-ffi)
+ 7:11.03    Compiling sync15-traits v0.1.0 (https://github.com/mozilla/application-services?rev=8a576fbe79199fa8664f64285524017f74ebcc5f#8a576fbe)
+ 7:11.13    Compiling cert_storage v0.0.1 (D:\fireox\security\manager\ssl\cert_storage)
+ 7:11.36 warning: using `procedural-masquerade` crate
+ 7:11.36    --> security\manager\ssl\cert_storage\src\lib.rs:134:1
+ 7:11.36     |
+ 7:11.36 134 | / rental! {
+ 7:11.37 135 | |     mod holding {
+ 7:11.37 136 | |         use super::{Cascade, Mmap};
+ 7:11.37 137 | |
+ 7:11.37 ...   |
+ 7:11.37 143 | |     }
+ 7:11.37 144 | | }
+ 7:11.37     | |_^
+ 7:11.37     |
+ 7:11.37     = note: `#[warn(proc_macro_back_compat)]` on by default
+ 7:11.37     = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+ 7:11.37     = note: for more information, see issue #83125 <https://github.com/rust-lang/rust/issues/83125>
+ 7:11.37     = note: The `procedural-masquerade` crate has been unnecessary since Rust 1.30.0. Versions of this crate below 0.1.7 will eventually stop compiling.
+ 7:11.37     = note: this warning originates in the macro `rental` (in Nightly builds, run with -Z macro-backtrace for more info)
+ 7:14.29    Compiling cascade_bloom_filter v0.1.0 (D:\fireox\toolkit\components\cascade_bloom_filter)
+ 7:14.56 warning: using `procedural-masquerade` crate
+ 7:14.57   --> toolkit\components\cascade_bloom_filter\src\lib.rs:24:1
+ 7:14.57    |
+ 7:14.57 24 | / rental! {
+ 7:14.57 25 | |     mod rentals {
+ 7:14.57 26 | |         use super::Cascade;
+ 7:14.57 27 | |
+ 7:14.57 ...  |
+ 7:14.57 33 | |     }
+ 7:14.57 34 | | }
+ 7:14.57    | |_^
+ 7:14.57    |
+ 7:14.57    = note: `#[warn(proc_macro_back_compat)]` on by default
+ 7:14.57    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
+ 7:14.57    = note: for more information, see issue #83125 <https://github.com/rust-lang/rust/issues/83125>
+ 7:14.57    = note: The `procedural-masquerade` crate has been unnecessary since Rust 1.30.0. Versions of this crate below 0.1.7 will eventually stop compiling.
+ 7:14.57    = note: this warning originates in the macro `rental` (in Nightly builds, run with -Z macro-backtrace for more info)
+ 7:14.97    Compiling http_sfv v0.1.0 (D:\fireox\netwerk\base\http-sfv)
+ 7:15.40 warning: 1 warning emitted
+ 7:16.92    Compiling malloc_size_of v0.0.1 (D:\fireox\servo\components\malloc_size_of)
+ 7:22.46    Compiling bookmark_sync v0.1.0 (D:\fireox\toolkit\components\places\bookmark_sync)
+ 7:23.77    Compiling golden_gate v0.1.0 (D:\fireox\services\sync\golden_gate)
+ 7:24.49 warning: 1 warning emitted
+ 7:24.84    Compiling style_traits v0.0.1 (D:\fireox\servo\components\style_traits)
+ 7:27.05    Compiling app_services_logger v0.1.0 (D:\fireox\services\common\app_services_logger)
+ 7:29.16    Compiling webext_storage_bridge v0.1.0 (D:\fireox\toolkit\components\extensions\storage\webext_storage_bridge)
+ 7:33.14    Compiling gecko_logger v0.1.0 (D:\fireox\xpcom\rust\gecko_logger)
+ 7:38.74    Compiling glean v39.0.0
+ 7:39.39    Compiling jsrust_shared v0.1.0 (D:\fireox\js\src\rust\shared)
+ 7:40.17    Compiling fog v0.1.0 (D:\fireox\toolkit\components\glean\api)
+ 7:44.70    Compiling neqo-transport v0.4.28 (https://github.com/mozilla/neqo?tag=v0.4.28#c3d909e4)
+ 7:47.08    Compiling fog_control v0.1.0 (D:\fireox\toolkit\components\glean)
+ 7:50.15    Compiling neqo-qpack v0.4.28 (https://github.com/mozilla/neqo?tag=v0.4.28#c3d909e4)
+ 7:53.15    Compiling neqo-http3 v0.4.28 (https://github.com/mozilla/neqo?tag=v0.4.28#c3d909e4)
+ 7:55.41    Compiling neqo_glue v0.1.0 (D:\fireox\netwerk\socket\neqo_glue)
+ 8:55.80    Compiling spirv_cross v0.23.0 (https://github.com/kvark/spirv_cross?branch=wgpu5#a5a90d38)
+ 8:55.93    Compiling gfx-auxil v0.9.0 (https://github.com/gfx-rs/gfx?rev=27a1dae3796d33d23812f2bb8c7e3b5aea18b521#27a1dae3)
+ 8:56.25    Compiling gfx-backend-dx11 v0.8.0 (https://github.com/gfx-rs/gfx?rev=27a1dae3796d33d23812f2bb8c7e3b5aea18b521#27a1dae3)
+ 8:56.59    Compiling gfx-backend-dx12 v0.8.0 (https://github.com/gfx-rs/gfx?rev=27a1dae3796d33d23812f2bb8c7e3b5aea18b521#27a1dae3)
+ 9:09.58    Compiling webrender v0.61.0 (D:\fireox\gfx\wr\webrender)
+ 9:15.90    Compiling wgpu_bindings v0.1.0 (D:\fireox\gfx\wgpu_bindings)
+ 9:42.24    Compiling geckoservo v0.0.1 (D:\fireox\servo\ports\geckolib)
+10:16.80    Compiling webrender_bindings v0.1.0 (D:\fireox\gfx\webrender_bindings)
