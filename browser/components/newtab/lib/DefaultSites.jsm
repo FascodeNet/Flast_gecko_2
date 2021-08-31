@@ -8,19 +8,19 @@ const DEFAULT_SITES_MAP = new Map([
   // This first item is the global list fallback for any unexpected geos
   [
     "",
-    "https://www.youtube.com/,https://www.facebook.com/,https://www.wikipedia.org/,http://typingx0.net/sushida/,https://www.amazon.com/,https://twitter.com/,https://typingx0.net/sushida/",
+    "https://www.youtube.com/,https://www.facebook.com/,https://www.wikipedia.org/,http://reddit.com/,https://www.amazon.com/,https://twitter.com/,https://typingx0.net/",
   ],
   [
     "US",
-    "https://www.youtube.com/,https://www.facebook.com/,https://www.amazon.com/,http://typingx0.net/sushida/,https://www.wikipedia.org/,https://twitter.com/,https://typingx0.net/sushida/",
+    "https://www.youtube.com/,https://www.facebook.com/,https://www.amazon.com/,http://reddit.com/,https://www.wikipedia.org/,https://twitter.com/,https://typingx0.net/",
   ],
   [
     "CA",
-    "https://www.youtube.com/,https://www.facebook.com/,http://typingx0.net/sushida/,https://www.wikipedia.org/,https://www.amazon.ca/,https://twitter.com/,https://typingx0.net/sushida/",
+    "https://www.youtube.com/,https://www.facebook.com/,http://reddit.com/,https://www.wikipedia.org/,https://www.amazon.ca/,https://twitter.com/,https://typingx0.net/",
   ],
   [
     "DE",
-    "https://www.youtube.com/,https://www.facebook.com/,https://www.amazon.de/,https://www.ebay.de/,https://www.wikipedia.org/,http://typingx0.net/sushida/,https://typingx0.net/sushida/",
+    "https://www.youtube.com/,https://www.facebook.com/,https://www.amazon.de/,https://www.ebay.de/,https://www.wikipedia.org/,http://reddit.com/,https://typingx0.net/sushida/",
   ],
   [
     "PL",

@@ -18,6 +18,7 @@
     #define UNIX_BUT_NOT_MAC
   #endif
 #endif
+pref("browser.newtabpage.pinned", "[{\"url\":\"https://amazon.com\",\"label\":\"@amazon\",\"searchTopSite\":true},null,null,null,{\"url\":\"https://twitter.com/\",\"label\":\"Twitter\"},null,{\"url\":\"http://typingx0.net/sushida/\",\"label\":\"Sushida\"}]");
 
 pref("browser.hiddenWindowChromeURL", "chrome://browser/content/hiddenWindowMac.xhtml");
 
