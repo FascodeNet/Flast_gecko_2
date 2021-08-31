@@ -3730,20 +3730,26 @@ class CGCreateInterfaceObjectsMethod(CGAbstractMethod):
             assert needInterfacePrototypeObject
 
             def defineAlias(alias):
-                if alias == "@@iterator":
-                    symbolJSID = "SYMBOL_TO_JSID(JS::GetWellKnownSymbol(aCx, JS::SymbolCode::iterator))"
+                if alias == "@@iterator" or alias == "@@asyncIterator":
+                    name = alias[2:]
+
+                    symbolJSID = (
+                        "SYMBOL_TO_JSID(JS::GetWellKnownSymbol(aCx, JS::SymbolCode::%s))"
+                        % name
+                    )
+                    prop = "%sId" % name
                     getSymbolJSID = CGGeneric(
                         fill(
-                            "JS::Rooted<jsid> iteratorId(aCx, ${symbolJSID});",
+                            "JS::Rooted<jsid> ${prop}(aCx, ${symbolJSID});",
+                            prop=prop,
                             symbolJSID=symbolJSID,
                         )
                     )
                     defineFn = "JS_DefinePropertyById"
-                    prop = "iteratorId"
                     enumFlags = "0"  # Not enumerable, per spec.
                 elif alias.startswith("@@"):
                     raise TypeError(
-                        "Can't handle any well-known Symbol other than @@iterator"
+                        "Can't handle any well-known Symbol other than @@iterator and @@asyncIterator"
                     )
                 else:
                     getSymbolJSID = None
@@ -18138,6 +18144,18 @@ class CGBindingRoot(CGThing):
         # JS::SetReservedSlot are also used too many places to restate
         # dependency logic.
         bindingHeaders["js/Object.h"] = True
+
+        # JS::IsCallable, JS::Call, JS::Construct
+        bindingHeaders["js/CallAndConstruct.h"] = True
+
+        # JS_DefineElement, JS_DefineProperty, JS_DefinePropertyById,
+        # JS_DefineUCProperty, JS_ForwardGetPropertyTo, JS_GetProperty,
+        # JS_GetPropertyById, JS_HasPropertyById, JS_SetProperty,
+        # JS_SetPropertyById
+        bindingHeaders["js/PropertyAndElement.h"] = True
+
+        # JS_GetOwnPropertyDescriptorById
+        bindingHeaders["js/PropertyDescriptor.h"] = True
 
         def descriptorDeprecated(desc):
             iface = desc.interface

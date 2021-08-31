@@ -10,7 +10,6 @@
 
 #include "ChildIterator.h"
 #include "ErrorReporter.h"
-#include "GeckoProfiler.h"
 #include "gfxFontFeatures.h"
 #include "gfxTextRun.h"
 #include "imgLoader.h"
@@ -52,6 +51,7 @@
 #include "mozilla/Keyframe.h"
 #include "mozilla/Mutex.h"
 #include "mozilla/Preferences.h"
+#include "mozilla/ProfilerLabels.h"
 #include "mozilla/ServoElementSnapshot.h"
 #include "mozilla/ShadowParts.h"
 #include "mozilla/StaticPresData.h"
@@ -689,7 +689,8 @@ bool Gecko_IsDocumentBody(const Element* aElement) {
 }
 
 nscolor Gecko_GetLookAndFeelSystemColor(int32_t aId, const Document* aDoc,
-                                        StyleSystemColorScheme aColorScheme) {
+                                        StyleSystemColorScheme aColorScheme,
+                                        const StyleColorScheme* aStyle) {
   auto colorId = static_cast<LookAndFeel::ColorID>(aId);
   auto useStandins = LookAndFeel::ShouldUseStandins(*aDoc, colorId);
   auto colorScheme = [&] {
@@ -701,7 +702,7 @@ nscolor Gecko_GetLookAndFeelSystemColor(int32_t aId, const Document* aDoc,
       case StyleSystemColorScheme::Dark:
         return LookAndFeel::ColorScheme::Dark;
     }
-    return LookAndFeel::ColorSchemeForDocument(*aDoc);
+    return LookAndFeel::ColorSchemeForStyle(*aDoc, aStyle->bits);
   }();
 
   AutoWriteLock guard(*sServoFFILock);
@@ -1365,7 +1366,8 @@ StyleDefaultFontSizes Gecko_GetBaseSize(nsAtom* aLanguage) {
   prefs.Initialize(langGroupAtom);
   return {prefs.mDefaultVariableFont.size,  prefs.mDefaultSerifFont.size,
           prefs.mDefaultSansSerifFont.size, prefs.mDefaultMonospaceFont.size,
-          prefs.mDefaultCursiveFont.size,   prefs.mDefaultFantasyFont.size};
+          prefs.mDefaultCursiveFont.size,   prefs.mDefaultFantasyFont.size,
+          prefs.mDefaultSystemUiFont.size};
 }
 
 static StaticRefPtr<UACacheReporter> gUACacheReporter;
@@ -1559,7 +1561,6 @@ void Gecko_AddPropertyToSet(nsCSSPropertyIDSet* aPropertySet,
     ptr->~nsStyle##name();                                             \
   }
 
-#ifdef MOZ_GECKO_PROFILER
 void Gecko_Construct_AutoProfilerLabel(AutoProfilerLabel* aAutoLabel,
                                        JS::ProfilingCategoryPair aCatPair) {
   new (aAutoLabel) AutoProfilerLabel(
@@ -1571,7 +1572,6 @@ void Gecko_Construct_AutoProfilerLabel(AutoProfilerLabel* aAutoLabel,
 void Gecko_Destroy_AutoProfilerLabel(AutoProfilerLabel* aAutoLabel) {
   aAutoLabel->~AutoProfilerLabel();
 }
-#endif
 
 bool Gecko_DocumentRule_UseForPresentation(
     const Document* aDocument, const nsACString* aPattern,
@@ -1795,6 +1795,8 @@ void StyleSingleFontFamily::AppendToString(nsACString& aName,
       return aName.AppendLiteral("cursive");
     case StyleGenericFontFamily::Fantasy:
       return aName.AppendLiteral("fantasy");
+    case StyleGenericFontFamily::SystemUi:
+      return aName.AppendLiteral("system-ui");
   }
   MOZ_ASSERT_UNREACHABLE("Unknown generic font-family!");
   return aName.AppendLiteral("serif");

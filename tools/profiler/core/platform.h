@@ -34,6 +34,7 @@
 #include "mozilla/Logging.h"
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/ProfileBufferEntrySerialization.h"
+#include "mozilla/ProfilerUtils.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Vector.h"
@@ -54,16 +55,18 @@ extern mozilla::LazyLogModule gProfilerLog;
 // These are for MOZ_LOG="prof:3" or higher. It's the default logging level for
 // the profiler, and should be used sparingly.
 #define LOG_TEST MOZ_LOG_TEST(gProfilerLog, mozilla::LogLevel::Info)
-#define LOG(arg, ...)                            \
-  MOZ_LOG(gProfilerLog, mozilla::LogLevel::Info, \
-          ("[%d] " arg, profiler_current_process_id(), ##__VA_ARGS__))
+#define LOG(arg, ...)                                                  \
+  MOZ_LOG(gProfilerLog, mozilla::LogLevel::Info,                       \
+          ("[%d] " arg, int(profiler_current_process_id().ToNumber()), \
+           ##__VA_ARGS__))
 
 // These are for MOZ_LOG="prof:4" or higher. It should be used for logging that
 // is somewhat more verbose than LOG.
 #define DEBUG_LOG_TEST MOZ_LOG_TEST(gProfilerLog, mozilla::LogLevel::Debug)
-#define DEBUG_LOG(arg, ...)                       \
-  MOZ_LOG(gProfilerLog, mozilla::LogLevel::Debug, \
-          ("[%d] " arg, profiler_current_process_id(), ##__VA_ARGS__))
+#define DEBUG_LOG(arg, ...)                                            \
+  MOZ_LOG(gProfilerLog, mozilla::LogLevel::Debug,                      \
+          ("[%d] " arg, int(profiler_current_process_id().ToNumber()), \
+           ##__VA_ARGS__))
 
 typedef uint8_t* Address;
 
@@ -80,7 +83,7 @@ struct PlatformDataDestructor {
 
 typedef mozilla::UniquePtr<PlatformData, PlatformDataDestructor>
     UniquePlatformData;
-UniquePlatformData AllocPlatformData(int aThreadId);
+UniquePlatformData AllocPlatformData(ProfilerThreadId aThreadId);
 
 namespace mozilla {
 class JSONWriter;
@@ -102,9 +105,6 @@ enum class JSInstrumentationFlags {
   TraceLogging = 0x2,
   Allocations = 0x4,
 };
-
-// Record an exit profile from a child process.
-void profiler_received_exit_profile(const nsCString& aExitProfile);
 
 // Write out the information of the active profiling configuration.
 void profiler_write_active_configuration(mozilla::JSONWriter& aWriter);

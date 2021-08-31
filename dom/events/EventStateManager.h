@@ -41,6 +41,7 @@ class EnterLeaveDispatcher;
 class EventStates;
 class IMEContentObserver;
 class ScrollbarsForWheel;
+class TextControlElement;
 class WheelTransaction;
 
 namespace dom {
@@ -158,6 +159,19 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
 
   void NativeAnonymousContentRemoved(nsIContent* aAnonContent);
   void ContentRemoved(dom::Document* aDocument, nsIContent* aContent);
+
+  /**
+   * Called when a native anonymous <div> element which is root element of
+   * text editor will be removed.
+   */
+  void TextControlRootWillBeRemoved(TextControlElement& aTextControlElement);
+
+  /**
+   * Called when a native anonymous <div> element which is root element of
+   * text editor is created.
+   */
+  void TextControlRootAdded(dom::Element& aAnonymousDivElement,
+                            TextControlElement& aTextControlElement);
 
   bool EventStatusOK(WidgetGUIEvent* aEvent);
 
@@ -350,6 +364,11 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
   static void ConsumeInteractionData(
       dom::Record<nsString, dom::InteractionData>& aInteractions);
 
+  // Stop tracking a possible drag. If aClearInChildProcesses is true, send
+  // a notification to any child processes that are in the drag service that
+  // tried to start a drag.
+  void StopTrackingDragGesture(bool aClearInChildProcesses);
+
  protected:
   /*
    * If aTargetFrame's widget has a cached cursor value, resets the cursor
@@ -396,8 +415,8 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
    *        in that case the caller is responsible for updating hover state.
    */
   void NotifyMouseOut(WidgetMouseEvent* aMouseEvent, nsIContent* aMovingInto);
-  void GenerateDragDropEnterExit(nsPresContext* aPresContext,
-                                 WidgetDragEvent* aDragEvent);
+  MOZ_CAN_RUN_SCRIPT void GenerateDragDropEnterExit(
+      nsPresContext* aPresContext, WidgetDragEvent* aDragEvent);
 
   /**
    * Return mMouseEnterLeaveHelper or relevant mPointersEnterLeaveHelper
@@ -414,11 +433,12 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
    * @param aTargetContent target to set for the event
    * @param aTargetFrame target frame for the event
    */
-  void FireDragEnterOrExit(nsPresContext* aPresContext,
-                           WidgetDragEvent* aDragEvent, EventMessage aMessage,
-                           nsIContent* aRelatedTarget,
-                           nsIContent* aTargetContent,
-                           AutoWeakFrame& aTargetFrame);
+  MOZ_CAN_RUN_SCRIPT void FireDragEnterOrExit(nsPresContext* aPresContext,
+                                              WidgetDragEvent* aDragEvent,
+                                              EventMessage aMessage,
+                                              nsIContent* aRelatedTarget,
+                                              nsIContent* aTargetContent,
+                                              AutoWeakFrame& aTargetFrame);
   /**
    * Update the initial drag session data transfer with any changes that occur
    * on cloned data transfer objects used for events.
@@ -516,11 +536,11 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
   /**
    * The phases of WalkESMTreeToHandleAccessKey processing. See below.
    */
-  typedef enum {
+  enum ProcessingAccessKeyState {
     eAccessKeyProcessingNormal = 0,
     eAccessKeyProcessingUp,
     eAccessKeyProcessingDown
-  } ProcessingAccessKeyState;
+  };
 
   /**
    * Walk EMS to look for access key and execute found access key when aExecute
@@ -967,11 +987,6 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
   void BeginTrackingRemoteDragGesture(nsIContent* aContent,
                                       dom::RemoteDragStartData* aDragStartData);
 
-  // Stop tracking a possible drag. If aClearInChildProcesses is true, send
-  // a notification to any child processes that are in the drag service that
-  // tried to start a drag.
-  void StopTrackingDragGesture(bool aClearInChildProcesses);
-
   MOZ_CAN_RUN_SCRIPT
   void GenerateDragGesture(nsPresContext* aPresContext,
                            WidgetInputEvent* aEvent);
@@ -1176,6 +1191,8 @@ class EventStateManager : public nsSupportsWeakReference, public nsIObserver {
 
   bool mShouldAlwaysUseLineDeltas : 1;
   bool mShouldAlwaysUseLineDeltasInitialized : 1;
+
+  bool mGestureDownInTextControl : 1;
 
   bool mInTouchDrag;
 

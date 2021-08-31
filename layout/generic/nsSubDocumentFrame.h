@@ -129,7 +129,10 @@ class nsSubDocumentFrame final : public nsAtomicContainerFrame,
   }
 
   nsFrameLoader* FrameLoader() const;
-  void ResetFrameLoader();
+
+  enum class RetainPaintData : bool { No, Yes };
+  void ResetFrameLoader(RetainPaintData);
+  void ClearRetainedPaintData();
 
   void PropagateIsUnderHiddenEmbedderElementToSubView(
       bool aIsUnderHiddenEmbedderElement);
@@ -137,6 +140,14 @@ class nsSubDocumentFrame final : public nsAtomicContainerFrame,
   void ClearDisplayItems();
 
   void SubdocumentIntrinsicSizeOrRatioChanged();
+
+  struct RemoteFramePaintData {
+    mozilla::layers::LayersId mLayersId;
+    mozilla::dom::TabId mTabId{0};
+  };
+
+  RemoteFramePaintData GetRemotePaintData() const;
+  bool HasRetainedPaintData() const { return mRetainedRemoteFrame.isSome(); }
 
  protected:
   friend class AsyncFrameInit;
@@ -170,11 +181,17 @@ class nsSubDocumentFrame final : public nsAtomicContainerFrame,
   nsView* mOuterView;
   nsView* mInnerView;
 
-  bool mIsInline;
-  bool mPostedReflowCallback;
-  bool mDidCreateDoc;
-  bool mCallingShow;
+  // When process-switching a remote tab, we might temporarily paint the old
+  // one.
+  Maybe<RemoteFramePaintData> mRetainedRemoteFrame;
+
+  bool mIsInline : 1;
+  bool mPostedReflowCallback : 1;
+  bool mDidCreateDoc : 1;
+  bool mCallingShow : 1;
 };
+
+namespace mozilla {
 
 /**
  * A nsDisplayRemote will graft a remote frame's shadow layer tree (for a given
@@ -219,13 +236,16 @@ class nsDisplayRemote final : public nsPaintedDisplayItem {
   NS_DISPLAY_DECL_NAME("Remote", TYPE_REMOTE)
 
  private:
-  friend class nsDisplayItemBase;
+  friend class nsDisplayItem;
+  using RemoteFramePaintData = nsSubDocumentFrame::RemoteFramePaintData;
+
   nsFrameLoader* GetFrameLoader() const;
 
-  TabId mTabId;
-  LayersId mLayersId;
+  RemoteFramePaintData mPaintData;
   LayoutDevicePoint mOffset;
   EventRegionsOverride mEventRegionsOverride;
 };
+
+}  // namespace mozilla
 
 #endif /* NSSUBDOCUMENTFRAME_H_ */

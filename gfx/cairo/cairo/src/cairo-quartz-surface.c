@@ -124,6 +124,9 @@ static void (*CGContextSetAllowsFontSmoothingPtr) (CGContextRef, bool) = NULL;
 static unsigned int (*CGContextGetTypePtr) (CGContextRef) = NULL;
 static bool (*CGContextGetAllowsFontSmoothingPtr) (CGContextRef) = NULL;
 
+/* CTFontDrawGlyphs is not available until 10.7 */
+static void (*CTFontDrawGlyphsPtr) (CTFontRef, const CGGlyph[], const CGPoint[], size_t, CGContextRef) = NULL;
+
 static cairo_bool_t _cairo_quartz_symbol_lookup_done = FALSE;
 
 /*
@@ -152,6 +155,8 @@ static void quartz_ensure_symbols (void)
     CGContextCopyPathPtr = dlsym (RTLD_DEFAULT, "CGContextCopyPath");
     CGContextGetAllowsFontSmoothingPtr = dlsym (RTLD_DEFAULT, "CGContextGetAllowsFontSmoothing");
     CGContextSetAllowsFontSmoothingPtr = dlsym (RTLD_DEFAULT, "CGContextSetAllowsFontSmoothing");
+
+    CTFontDrawGlyphsPtr = dlsym(RTLD_DEFAULT, "CTFontDrawGlyphs");
 
     _cairo_quartz_symbol_lookup_done = TRUE;
 }
@@ -2056,11 +2061,12 @@ _cairo_quartz_cg_glyphs (const cairo_compositor_t *compositor,
     CGSize cg_advances_static[CAIRO_STACK_ARRAY_LENGTH (CGSize)];
     CGGlyph *cg_glyphs = &glyphs_static[0];
     CGSize *cg_advances = &cg_advances_static[0];
+    CGPoint *cg_positions;
     COMPILE_TIME_ASSERT (sizeof (CGGlyph) <= sizeof (CGSize));
+    COMPILE_TIME_ASSERT (sizeof (CGPoint) == sizeof (CGSize));
 
     cairo_quartz_drawing_state_t state;
     cairo_int_status_t rv = CAIRO_INT_STATUS_UNSUPPORTED;
-    cairo_quartz_float_t xprev, yprev;
     int i;
     CGFontRef cgfref = NULL;
 
@@ -2118,13 +2124,15 @@ _cairo_quartz_cg_glyphs (const cairo_compositor_t *compositor,
     }
 
     if (num_glyphs > ARRAY_LENGTH (glyphs_static)) {
-	cg_glyphs = (CGGlyph*) _cairo_malloc_ab (num_glyphs, sizeof (CGGlyph) + sizeof (CGSize));
-	if (unlikely (cg_glyphs == NULL)) {
+	cg_advances = _cairo_malloc_ab (num_glyphs,
+					sizeof (CGSize) + sizeof (CGGlyph));
+
+	if (unlikely (cg_advances == NULL)) {
 	    rv = _cairo_error (CAIRO_STATUS_NO_MEMORY);
 	    goto BAIL;
 	}
 
-	cg_advances = (CGSize*) (cg_glyphs + num_glyphs);
+	cg_glyphs = (CGGlyph*) (cg_advances + num_glyphs);
     }
 
     /* scale(1,-1) * scaled_font->scale */
@@ -2141,34 +2149,58 @@ _cairo_quartz_cg_glyphs (const cairo_compositor_t *compositor,
 					      -scaled_font->scale_inverse.yy,
 					      0.0, 0.0);
 
-    CGContextSetTextPosition (state.cgMaskContext, 0.0, 0.0);
+    /*
+     * CGContextShowGlyphsWithAdvances does not transform the advances
+     * by the text matrix, if the drawing mode is kCGTextClip. Instead
+     * of trying to recompute the advances, make sure that the text
+     * matrix is the identity and rely on the CTM for the text
+     * transform.
+     */
     CGContextSetTextMatrix (state.cgMaskContext, CGAffineTransformIdentity);
-
-    /* Convert our glyph positions to glyph advances.  We need n-1 advances,
-     * since the advance at index 0 is applied after glyph 0. */
-    xprev = glyphs[0].x;
-    yprev = glyphs[0].y;
-
-    cg_glyphs[0] = glyphs[0].index;
-
-    for (i = 1; i < num_glyphs; i++) {
-	cairo_quartz_float_t xf = glyphs[i].x;
-	cairo_quartz_float_t yf = glyphs[i].y;
-	cg_glyphs[i] = glyphs[i].index;
-	cg_advances[i - 1] = CGSizeApplyAffineTransform (CGSizeMake (xf - xprev, yf - yprev), invTextTransform);
-	xprev = xf;
-	yprev = yf;
-    }
-
-    /* Translate to the first glyph's position before drawing */
     CGContextTranslateCTM (state.cgMaskContext, glyphs[0].x, glyphs[0].y);
     CGContextConcatCTM (state.cgMaskContext, textTransform);
 
-    CGContextShowGlyphsWithAdvances (state.cgMaskContext,
-				     cg_glyphs,
-				     cg_advances,
-				     num_glyphs);
+    /* Convert glyph positions to glyph advances. */
+    cg_glyphs[0] = glyphs[0].index;
+    for (i = 1; i < num_glyphs; i++) {
+	CGSize advance = CGSizeMake (glyphs[i].x - glyphs[i-1].x,
+				     glyphs[i].y - glyphs[i-1].y);
+	cg_advances[i] = CGSizeApplyAffineTransform (advance, invTextTransform);
+	cg_glyphs[i] = glyphs[i].index;
+    }
 
+    if (CTFontDrawGlyphsPtr) {
+	/* If CTFontDrawGlyphs is available, we want to use that
+	 * instead of the deprecated CGContextShowGlyphsWithAdvances
+	 * so that colored-bitmap fonts like Apple Color Emoji will
+	 * render properly. */
+
+	/* Accumulate the glyph advances into glyph positions,
+	 * overwriting them. Start at (0,0) because the CTM already
+	 * takes into account the position of the first glyph. */
+	CGPoint pos = CGPointMake (0, 0);
+	cg_positions = (CGPoint *) cg_advances;
+	cg_positions[0] = pos;
+	for (i = 1; i < num_glyphs; i++) {
+	    pos.x += cg_advances[i].width;
+	    pos.y += cg_advances[i].height;
+	    cg_positions[i] = pos;
+	}
+
+	CTFontDrawGlyphsPtr (_cairo_quartz_scaled_font_get_ct_font_ref (scaled_font),
+			     cg_glyphs,
+			     cg_positions,
+			     num_glyphs,
+			     state.cgMaskContext);
+    } else {
+	CGContextShowGlyphsWithAdvances (state.cgMaskContext,
+					 cg_glyphs,
+					 cg_advances + 1,
+					 num_glyphs);
+    }
+
+    /* Revert the changes to the CTM. This fragment cannot rely on
+     * CG{Save,Restore}GState, as that would reset the clip. */
     CGContextConcatCTM (state.cgMaskContext, invTextTransform);
     CGContextTranslateCTM (state.cgMaskContext, -glyphs[0].x, -glyphs[0].y);
 
@@ -2181,8 +2213,8 @@ BAIL:
 
     _cairo_quartz_teardown_state (&state, extents);
 
-    if (cg_glyphs != glyphs_static)
-	free (cg_glyphs);
+    if (cg_advances != cg_advances_static)
+	free (cg_advances);
 
     return rv;
 }
@@ -2315,24 +2347,13 @@ _cairo_quartz_surface_clipper_intersect_clip_path (cairo_surface_clipper_t *clip
 }
 
 static cairo_int_status_t
-_cairo_quartz_surface_tag (void			       *abstract_surface,
-			   cairo_bool_t                 begin,
-			   const char                  *tag_name,
-			   const char                  *attributes,
-			   const cairo_pattern_t       *source,
-			   const cairo_stroke_style_t  *style,
-			   const cairo_matrix_t	       *ctm,
-			   const cairo_matrix_t	       *ctm_inverse,
-			   const cairo_clip_t	       *clip)
+_cairo_quartz_surface_link (cairo_quartz_surface_t *surface,
+                            cairo_bool_t            begin,
+                            const char             *attributes)
 {
     cairo_link_attrs_t link_attrs;
     cairo_int_status_t status = CAIRO_STATUS_SUCCESS;
     int i, num_rects;
-    cairo_quartz_surface_t *surface = (cairo_quartz_surface_t *) abstract_surface;
-
-    /* Currently the only tag we support is "Link" */
-    if (strcmp (tag_name, "Link"))
-        return CAIRO_INT_STATUS_UNSUPPORTED;
 
     /* We only process the 'begin' tag, and expect a rect attribute;
        using the extents of the drawing operations enclosed by the begin/end
@@ -2346,11 +2367,24 @@ _cairo_quartz_surface_tag (void			       *abstract_surface,
 
     num_rects = _cairo_array_num_elements (&link_attrs.rects);
     if (num_rects > 0) {
-        CFURLRef url = CFURLCreateWithBytes (NULL,
-                                             (const UInt8 *) link_attrs.uri,
-                                             strlen (link_attrs.uri),
-                                             kCFStringEncodingUTF8,
-                                             NULL);
+        /* Create either a named destination or a URL, depending which is present
+           in the link attributes. */
+        CFURLRef url = NULL;
+        CFStringRef name = NULL;
+        if (link_attrs.uri && *link_attrs.uri)
+            url = CFURLCreateWithBytes (NULL,
+                                        (const UInt8 *) link_attrs.uri,
+                                        strlen (link_attrs.uri),
+                                        kCFStringEncodingUTF8,
+                                        NULL);
+        else if (link_attrs.dest && *link_attrs.dest)
+            name = CFStringCreateWithBytes (kCFAllocatorDefault,
+                                            (const UInt8 *) link_attrs.dest,
+                                            strlen (link_attrs.dest),
+                                            kCFStringEncodingUTF8,
+                                            FALSE);
+        else /* silently ignore link that doesn't have a usable target */
+            goto cleanup;
 
         for (i = 0; i < num_rects; i++) {
             CGRect link_rect;
@@ -2364,18 +2398,93 @@ _cairo_quartz_surface_tag (void			       *abstract_surface,
                             rectf.width,
                             rectf.height);
 
-            CGPDFContextSetURLForRect (surface->cgContext, url, link_rect);
+            if (url)
+                CGPDFContextSetURLForRect (surface->cgContext, url, link_rect);
+            else
+                CGPDFContextSetDestinationForRect (surface->cgContext, name, link_rect);
         }
 
-        CFRelease (url);
+        if (url)
+            CFRelease (url);
+        else
+            CFRelease (name);
     }
 
+cleanup:
     _cairo_array_fini (&link_attrs.rects);
     free (link_attrs.dest);
     free (link_attrs.uri);
     free (link_attrs.file);
 
     return status;
+}
+
+static cairo_int_status_t
+_cairo_quartz_surface_dest (cairo_quartz_surface_t *surface,
+                            cairo_bool_t            begin,
+                            const char             *attributes)
+{
+    cairo_dest_attrs_t dest_attrs;
+    cairo_int_status_t status = CAIRO_STATUS_SUCCESS;
+    double x = 0, y = 0;
+
+    /* We only process the 'begin' tag, and expect 'x' and 'y' attributes. */
+    if (!begin)
+        return status;
+
+    status = _cairo_tag_parse_dest_attributes (attributes, &dest_attrs);
+    if (unlikely (status))
+	return status;
+
+    if (unlikely (!dest_attrs.name || !strlen (dest_attrs.name)))
+        goto cleanup;
+
+    CFStringRef name = CFStringCreateWithBytes (kCFAllocatorDefault,
+                                                (const UInt8 *) dest_attrs.name,
+                                                strlen (dest_attrs.name),
+                                                kCFStringEncodingUTF8,
+                                                FALSE);
+
+    if (dest_attrs.x_valid)
+        x = dest_attrs.x;
+    if (dest_attrs.y_valid)
+        y = dest_attrs.y;
+
+    CGPDFContextAddDestinationAtPoint (surface->cgContext,
+                                       name,
+                                       CGPointMake (x, surface->extents.height - y));
+    CFRelease (name);
+
+cleanup:
+    free (dest_attrs.name);
+
+    return status;
+}
+
+static cairo_int_status_t
+_cairo_quartz_surface_tag (void			       *abstract_surface,
+			   cairo_bool_t                 begin,
+			   const char                  *tag_name,
+			   const char                  *attributes,
+			   const cairo_pattern_t       *source,
+			   const cairo_stroke_style_t  *style,
+			   const cairo_matrix_t	       *ctm,
+			   const cairo_matrix_t	       *ctm_inverse,
+			   const cairo_clip_t	       *clip)
+{
+    cairo_link_attrs_t link_attrs;
+    int i, num_rects;
+    cairo_quartz_surface_t *surface = (cairo_quartz_surface_t *) abstract_surface;
+
+    /* Currently the only tags we support are CAIRO_TAG_LINK and CAIRO_TAG_DEST */
+    if (!strcmp (tag_name, CAIRO_TAG_LINK))
+        return _cairo_quartz_surface_link (surface, begin, attributes);
+
+    if (!strcmp (tag_name, CAIRO_TAG_DEST))
+        return _cairo_quartz_surface_dest (surface, begin, attributes);
+
+    /* Unknown tag names are silently ignored here. */
+    return CAIRO_INT_STATUS_SUCCESS;
 }
 
 // XXXtodo implement show_page; need to figure out how to handle begin/end

@@ -974,6 +974,12 @@ pub struct Capabilities {
     /// Whether we are able to ue glClear to clear regions of an alpha render target.
     /// If false, we must use a shader to clear instead.
     pub supports_alpha_target_clears: bool,
+    /// Whether we must perform a full unscissored glClear on alpha targets
+    /// prior to rendering.
+    pub requires_alpha_target_full_clear: bool,
+    /// Whether the driver can correctly invalidate render targets. This can be
+    /// a worthwhile optimization, but is buggy on some devices.
+    pub supports_render_target_invalidate: bool,
     /// Whether the driver can reliably upload data to R8 format textures.
     pub supports_r8_texture_upload: bool,
     /// Whether clip-masking is supported natively by the GL implementation
@@ -1464,10 +1470,6 @@ impl Device {
         // [3] https://www.khronos.org/registry/OpenGL/extensions/EXT/EXT_texture_storage.txt
         // [4] http://http.download.nvidia.com/developer/Papers/2005/Fast_Texture_Transfers/Fast_Texture_Transfers.pdf
 
-        // To support BGRA8 with glTexStorage* we specifically need
-        // GL_EXT_texture_storage and GL_EXT_texture_format_BGRA8888.
-        let supports_gles_bgra = supports_extension(&extensions, "GL_EXT_texture_format_BGRA8888");
-
         // On the android emulator glTexImage fails to create textures larger than 3379.
         // So we must use glTexStorage instead. See bug 1591436.
         let is_emulator = renderer_name.starts_with("Android Emulator");
@@ -1485,6 +1487,20 @@ impl Device {
                 gl::GlType::Gl => supports_extension(&extensions, "GL_ARB_texture_storage"),
                 gl::GlType::Gles => true,
             };
+
+        // The GL_EXT_texture_format_BGRA8888 extension allows us to use BGRA as an internal format
+        // with glTexImage on GLES. However, we can only use BGRA8 as an internal format for
+        // glTexStorage when GL_EXT_texture_storage is also explicitly supported. This is because
+        // glTexStorage was added in GLES 3, but GL_EXT_texture_format_BGRA8888 was written against
+        // GLES 2 and GL_EXT_texture_storage.
+        // To complicate things even further, some Intel devices claim to support both extensions
+        // but in practice do not allow BGRA to be used with glTexStorage.
+        let supports_gles_bgra = supports_extension(&extensions, "GL_EXT_texture_format_BGRA8888");
+        let supports_texture_storage_with_gles_bgra = supports_gles_bgra
+            && supports_extension(&extensions, "GL_EXT_texture_storage")
+            && !renderer_name.starts_with("Intel(R) HD Graphics for BayTrail")
+            && !renderer_name.starts_with("Intel(R) HD Graphics for Atom(TM) x5/x7");
+
         let supports_texture_swizzle = allow_texture_swizzling &&
             match gl.get_type() {
                 // see https://www.g-truc.net/post-0734.html
@@ -1513,9 +1529,7 @@ impl Device {
             // glTexStorage is always supported in GLES 3, but because the GL_EXT_texture_storage
             // extension is supported we can use glTexStorage with BGRA8 as the internal format.
             // Prefer BGRA textures over RGBA.
-            gl::GlType::Gles if supports_gles_bgra
-                && supports_extension(&extensions, "GL_EXT_texture_storage") =>
-            (
+            gl::GlType::Gles if supports_texture_storage_with_gles_bgra => (
                 TextureFormatPair::from(ImageFormat::BGRA8),
                 TextureFormatPair { internal: gl::BGRA8_EXT, external: gl::BGRA_EXT },
                 gl::UNSIGNED_BYTE,
@@ -1707,6 +1721,17 @@ impl Device {
         // Using a shader to clear the regions avoids the crash. See bug 1638593.
         let supports_alpha_target_clears = !is_mali_t;
 
+        // On Adreno 4xx devices with older drivers we have seen render tasks to alpha targets have
+        // no effect unless the target is fully cleared prior to rendering. See bug 1714227.
+        let is_adreno_4xx = renderer_name.starts_with("Adreno (TM) 4");
+        let requires_alpha_target_full_clear = is_adreno_4xx;
+
+        // On PowerVR Rogue devices we have seen that invalidating render targets after we are done
+        // with them can incorrectly cause pending renders to be written to different targets
+        // instead. See bug 1719345.
+        let is_powervr_rogue = renderer_name.starts_with("PowerVR Rogue");
+        let supports_render_target_invalidate = !is_powervr_rogue;
+
         // On Linux we we have seen uploads to R8 format textures result in
         // corruption on some AMD cards.
         // See https://bugzilla.mozilla.org/show_bug.cgi?id=1687554#c13
@@ -1750,6 +1775,8 @@ impl Device {
                 supports_shader_storage_object,
                 requires_batched_texture_uploads,
                 supports_alpha_target_clears,
+                requires_alpha_target_full_clear,
+                supports_render_target_invalidate,
                 supports_r8_texture_upload,
                 uses_native_clip_mask,
                 uses_native_antialiasing,
@@ -2586,21 +2613,23 @@ impl Device {
     /// Notifies the device that the contents of a render target are no longer
     /// needed.
     pub fn invalidate_render_target(&mut self, texture: &Texture) {
-        let (fbo, attachments) = if texture.supports_depth() {
-            (&texture.fbo_with_depth,
-             &[gl::COLOR_ATTACHMENT0, gl::DEPTH_ATTACHMENT] as &[gl::GLenum])
-        } else {
-            (&texture.fbo, &[gl::COLOR_ATTACHMENT0] as &[gl::GLenum])
-        };
+        if self.capabilities.supports_render_target_invalidate {
+            let (fbo, attachments) = if texture.supports_depth() {
+                (&texture.fbo_with_depth,
+                 &[gl::COLOR_ATTACHMENT0, gl::DEPTH_ATTACHMENT] as &[gl::GLenum])
+            } else {
+                (&texture.fbo, &[gl::COLOR_ATTACHMENT0] as &[gl::GLenum])
+            };
 
-        if let Some(fbo_id) = fbo {
-            let original_bound_fbo = self.bound_draw_fbo;
-            // Note: The invalidate extension may not be supported, in which
-            // case this is a no-op. That's ok though, because it's just a
-            // hint.
-            self.bind_external_draw_target(*fbo_id);
-            self.gl.invalidate_framebuffer(gl::FRAMEBUFFER, attachments);
-            self.bind_external_draw_target(original_bound_fbo);
+            if let Some(fbo_id) = fbo {
+                let original_bound_fbo = self.bound_draw_fbo;
+                // Note: The invalidate extension may not be supported, in which
+                // case this is a no-op. That's ok though, because it's just a
+                // hint.
+                self.bind_external_draw_target(*fbo_id);
+                self.gl.invalidate_framebuffer(gl::FRAMEBUFFER, attachments);
+                self.bind_external_draw_target(original_bound_fbo);
+            }
         }
     }
 

@@ -3584,7 +3584,7 @@ PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t ngcthings) {
 /* static */
 bool PrivateScriptData::InitFromStencil(
     JSContext* cx, js::HandleScript script,
-    const js::frontend::CompilationInput& input,
+    const js::frontend::CompilationAtomCache& atomCache,
     const js::frontend::CompilationStencil& stencil,
     js::frontend::CompilationGCOutput& gcOutput,
     const js::frontend::ScriptIndex scriptIndex) {
@@ -3600,7 +3600,7 @@ bool PrivateScriptData::InitFromStencil(
 
   js::PrivateScriptData* data = script->data_;
   if (ngcthings) {
-    if (!EmitScriptThingsVector(cx, input, stencil, gcOutput,
+    if (!EmitScriptThingsVector(cx, atomCache, stencil, gcOutput,
                                 scriptStencil.gcthings(stencil),
                                 data->gcthings())) {
       return false;
@@ -3678,7 +3678,7 @@ bool JSScript::createPrivateScriptData(JSContext* cx, HandleScript script,
 
 /* static */
 bool JSScript::fullyInitFromStencil(
-    JSContext* cx, const js::frontend::CompilationInput& input,
+    JSContext* cx, const js::frontend::CompilationAtomCache& atomCache,
     const js::frontend::CompilationStencil& stencil,
     frontend::CompilationGCOutput& gcOutput, HandleScript script,
     const js::frontend::ScriptIndex scriptIndex) {
@@ -3733,8 +3733,8 @@ bool JSScript::fullyInitFromStencil(
                     stencil.scriptExtra[scriptIndex].immutableFlags);
 
   // Create and initialize PrivateScriptData
-  if (!PrivateScriptData::InitFromStencil(cx, script, input, stencil, gcOutput,
-                                          scriptIndex)) {
+  if (!PrivateScriptData::InitFromStencil(cx, script, atomCache, stencil,
+                                          gcOutput, scriptIndex)) {
     return false;
   }
 
@@ -3758,9 +3758,12 @@ bool JSScript::fullyInitFromStencil(
 
   // Link Scope -> JSFunction -> BaseScript.
   if (script->isFunction()) {
-    JSFunction* fun = gcOutput.functions[scriptIndex];
+    JSFunction* fun = gcOutput.getFunction(scriptIndex);
     script->bodyScope()->as<FunctionScope>().initCanonicalFunction(fun);
     if (fun->isIncomplete()) {
+      fun->initScript(script);
+    } else if (fun->hasSelfHostedLazyScript()) {
+      fun->clearSelfHostedLazyScript();
       fun->initScript(script);
     } else {
       // We are delazifying in-place.
@@ -3791,7 +3794,7 @@ bool JSScript::fullyInitFromStencil(
 }
 
 JSScript* JSScript::fromStencil(JSContext* cx,
-                                frontend::CompilationInput& input,
+                                frontend::CompilationAtomCache& atomCache,
                                 const frontend::CompilationStencil& stencil,
                                 frontend::CompilationGCOutput& gcOutput,
                                 frontend::ScriptIndex scriptIndex) {
@@ -3803,7 +3806,7 @@ JSScript* JSScript::fromStencil(JSContext* cx,
 
   RootedObject functionOrGlobal(cx, cx->global());
   if (scriptStencil.isFunction()) {
-    functionOrGlobal = gcOutput.functions[scriptIndex];
+    functionOrGlobal = gcOutput.getFunction(scriptIndex);
   }
 
   Rooted<ScriptSourceObject*> sourceObject(cx, gcOutput.sourceObject);
@@ -3814,7 +3817,7 @@ JSScript* JSScript::fromStencil(JSContext* cx,
     return nullptr;
   }
 
-  if (!fullyInitFromStencil(cx, input, stencil, gcOutput, script,
+  if (!fullyInitFromStencil(cx, atomCache, stencil, gcOutput, script,
                             scriptIndex)) {
     return nullptr;
   }
@@ -4101,9 +4104,9 @@ void js::maybeSpewScriptFinalWarmUpCount(JSScript* script) {
     MOZ_ASSERT(map);
     ScriptFinalWarmUpCountMap::Ptr p = map->lookup(script);
     MOZ_ASSERT(p);
-    uint32_t warmUpCount;
-    const char* scriptName;
-    mozilla::Tie(warmUpCount, scriptName) = p->value();
+    auto& tuple = p->value();
+    uint32_t warmUpCount = mozilla::Get<0>(tuple);
+    SharedImmutableString& scriptName = mozilla::Get<1>(tuple);
 
     JSContext* cx = TlsContext.get();
     cx->spewer().enableSpewing();
@@ -4114,7 +4117,7 @@ void js::maybeSpewScriptFinalWarmUpCount(JSScript* script) {
     // up count.
     AutoSpewChannel channel(cx, SpewChannel::CacheIRHealthReport, script);
     jit::CacheIRHealth cih;
-    cih.spewScriptFinalWarmUpCount(cx, scriptName, script, warmUpCount);
+    cih.spewScriptFinalWarmUpCount(cx, scriptName.chars(), script, warmUpCount);
 
     script->zone()->scriptFinalWarmUpCountMap->remove(script);
     script->setNeedsFinalWarmUpCount(false);
@@ -4837,27 +4840,17 @@ gc::AllocSite* JSScript::createAllocSite() {
 
 void JSScript::AutoDelazify::holdScript(JS::HandleFunction fun) {
   if (fun) {
-    if (fun->realm()->isSelfHostingRealm()) {
-      // The self-hosting realm is shared across runtimes, so we can't use
-      // JSAutoRealm: it could cause races. Functions in the self-hosting
-      // realm will never be lazy, so we can safely assume we don't have
-      // to delazify.
-      script_ = fun->nonLazyScript();
-    } else {
-      JSAutoRealm ar(cx_, fun);
-      script_ = JSFunction::getOrCreateScript(cx_, fun);
-      if (script_) {
-        oldAllowRelazify_ = script_->allowRelazify();
-        script_->clearAllowRelazify();
-      }
+    JSAutoRealm ar(cx_, fun);
+    script_ = JSFunction::getOrCreateScript(cx_, fun);
+    if (script_) {
+      oldAllowRelazify_ = script_->allowRelazify();
+      script_->clearAllowRelazify();
     }
   }
 }
 
 void JSScript::AutoDelazify::dropScript() {
-  // Don't touch script_ if it's in the self-hosting realm, see the comment
-  // in holdScript.
-  if (script_ && !script_->realm()->isSelfHostingRealm()) {
+  if (script_) {
     script_->setAllowRelazify(oldAllowRelazify_);
   }
   script_ = nullptr;

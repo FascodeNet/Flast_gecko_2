@@ -250,11 +250,8 @@ LayoutDeviceIntPoint HeadlessWidget::WidgetToScreenOffset() {
   return mTopLevel->GetBounds().TopLeft();
 }
 
-LayerManager* HeadlessWidget::GetLayerManager(
-    PLayerTransactionChild* aShadowManager, LayersBackend aBackendHint,
-    LayerManagerPersistence aPersistence) {
-  return nsBaseWidget::GetLayerManager(aShadowManager, aBackendHint,
-                                       aPersistence);
+WindowRenderer* HeadlessWidget::GetWindowRenderer() {
+  return nsBaseWidget::GetWindowRenderer();
 }
 
 void HeadlessWidget::SetCompositorWidgetDelegate(
@@ -512,7 +509,7 @@ nsresult HeadlessWidget::SynthesizeNativeTouchPoint(
 }
 
 nsresult HeadlessWidget::SynthesizeNativeTouchPadPinch(
-    TouchpadPinchPhase aEventPhase, float aScale, LayoutDeviceIntPoint aPoint,
+    TouchpadGesturePhase aEventPhase, float aScale, LayoutDeviceIntPoint aPoint,
     int32_t aModifierFlags) {
   MOZ_ASSERT(NS_IsMainThread());
 

@@ -35,6 +35,7 @@
 #include "js/experimental/Intl.h"     // JS::AddMozDisplayNamesConstructor
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/GCVector.h"
+#include "js/PropertyAndElement.h"  // JS_DefineFunctions, JS_DefineProperties
 #include "js/PropertyDescriptor.h"
 #include "js/PropertySpec.h"
 #include "js/Result.h"
@@ -179,11 +180,6 @@ static bool DisplayNames(JSContext* cx, const CallArgs& args,
     if (!GetPrototypeFromConstructor(cx, newTarget, JSProto_Null, &proto)) {
       return false;
     }
-  }
-
-  // TypeError anyway, but this gives a better error message.
-  if (!args.requireAtLeast(cx, "DisplayNames", 2)) {
-    return false;
   }
 
   Rooted<DisplayNamesObject*> displayNames(cx);

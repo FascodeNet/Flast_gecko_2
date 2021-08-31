@@ -10,10 +10,13 @@
 
 #include "AccessCheck.h"
 #include "jsfriendapi.h"
-#include "js/Array.h"  // JS::GetArrayLength, JS::IsArrayObject
+#include "js/Array.h"             // JS::GetArrayLength, JS::IsArrayObject
+#include "js/CallAndConstruct.h"  // JS::Call, JS::IsCallable
 #include "js/CharacterEncoding.h"
 #include "js/CompilationAndEvaluation.h"
 #include "js/Object.h"  // JS::GetClass, JS::GetCompartment, JS::GetReservedSlot
+#include "js/PropertyAndElement.h"  // JS_DefineFunction, JS_DefineFunctions, JS_DefineProperty, JS_GetElement, JS_GetProperty, JS_HasProperty, JS_SetProperty, JS_SetPropertyById
+#include "js/PropertyDescriptor.h"  // JS::PropertyDescriptor, JS_GetOwnPropertyDescriptorById, JS_GetPropertyDescriptorById
 #include "js/PropertySpec.h"
 #include "js/Proxy.h"
 #include "js/SourceText.h"
@@ -32,6 +35,7 @@
 #include "xpc_make_class.h"
 #include "XPCWrapper.h"
 #include "Crypto.h"
+#include "mozilla/dom/AbortControllerBinding.h"
 #include "mozilla/dom/AutoEntryScript.h"
 #include "mozilla/dom/BindingCallContext.h"
 #include "mozilla/dom/BindingUtils.h"
@@ -74,6 +78,7 @@
 #include "mozilla/dom/URLBinding.h"
 #include "mozilla/dom/URLSearchParamsBinding.h"
 #include "mozilla/dom/XMLHttpRequest.h"
+#include "mozilla/dom/WebSocketBinding.h"
 #include "mozilla/dom/XMLSerializerBinding.h"
 #include "mozilla/dom/FormDataBinding.h"
 #include "mozilla/dom/nsCSPContext.h"
@@ -435,29 +440,27 @@ static bool SandboxCloneInto(JSContext* cx, unsigned argc, Value* vp) {
 }
 
 static void sandbox_finalize(JSFreeOp* fop, JSObject* obj) {
-  nsIScriptObjectPrincipal* sop =
-      static_cast<nsIScriptObjectPrincipal*>(xpc_GetJSPrivate(obj));
-  if (!sop) {
-    // sop can be null if CreateSandboxObject fails in the middle.
+  SandboxPrivate* priv = SandboxPrivate::GetPrivate(obj);
+  if (!priv) {
+    // priv can be null if CreateSandboxObject fails in the middle.
     return;
   }
 
-  static_cast<SandboxPrivate*>(sop)->ForgetGlobalObject(obj);
+  priv->ForgetGlobalObject(obj);
   DestroyProtoAndIfaceCache(obj);
-  DeferredFinalize(sop);
+  DeferredFinalize(static_cast<nsIScriptObjectPrincipal*>(priv));
 }
 
 static size_t sandbox_moved(JSObject* obj, JSObject* old) {
   // Note that this hook can be called before the private pointer is set. In
   // this case the SandboxPrivate will not exist yet, so there is nothing to
   // do.
-  nsIScriptObjectPrincipal* sop =
-      static_cast<nsIScriptObjectPrincipal*>(xpc_GetJSPrivate(obj));
-  if (!sop) {
+  SandboxPrivate* priv = SandboxPrivate::GetPrivate(obj);
+  if (!priv) {
     return 0;
   }
 
-  return static_cast<SandboxPrivate*>(sop)->ObjectMoved(obj, old);
+  return priv->ObjectMoved(obj, old);
 }
 
 #define XPCONNECT_SANDBOX_CLASS_METADATA_SLOT \
@@ -842,7 +845,10 @@ bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
     if (!nameStr) {
       return false;
     }
-    if (JS_LinearStringEqualsLiteral(nameStr, "Blob")) {
+
+    if (JS_LinearStringEqualsLiteral(nameStr, "AbortController")) {
+      AbortController = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "Blob")) {
       Blob = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "ChromeUtils")) {
       ChromeUtils = true;
@@ -898,6 +904,8 @@ bool xpc::GlobalProperties::Parse(JSContext* cx, JS::HandleObject obj) {
       URLSearchParams = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "XMLHttpRequest")) {
       XMLHttpRequest = true;
+    } else if (JS_LinearStringEqualsLiteral(nameStr, "WebSocket")) {
+      WebSocket = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "XMLSerializer")) {
       XMLSerializer = true;
     } else if (JS_LinearStringEqualsLiteral(nameStr, "atob")) {
@@ -943,6 +951,11 @@ bool xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj) {
   // This function holds common properties not exposed automatically but able
   // to be requested either in |Cu.importGlobalProperties| or
   // |wantGlobalProperties| of a sandbox.
+  if (AbortController &&
+      !dom::AbortController_Binding::GetConstructorObject(cx)) {
+    return false;
+  }
+
   if (Blob && !dom::Blob_Binding::GetConstructorObject(cx)) return false;
 
   if (ChromeUtils && !dom::ChromeUtils_Binding::GetConstructorObject(cx)) {
@@ -1039,6 +1052,9 @@ bool xpc::GlobalProperties::Define(JSContext* cx, JS::HandleObject obj) {
     return false;
 
   if (XMLHttpRequest && !dom::XMLHttpRequest_Binding::GetConstructorObject(cx))
+    return false;
+
+  if (WebSocket && !dom::WebSocket_Binding::GetConstructorObject(cx))
     return false;
 
   if (XMLSerializer && !dom::XMLSerializer_Binding::GetConstructorObject(cx))
@@ -1983,10 +1999,9 @@ nsresult xpc::EvalInSandbox(JSContext* cx, HandleObject sandboxArg,
     return NS_ERROR_INVALID_ARG;
   }
 
-  nsIScriptObjectPrincipal* sop =
-      static_cast<nsIScriptObjectPrincipal*>(xpc_GetJSPrivate(sandbox));
+  SandboxPrivate* priv = SandboxPrivate::GetPrivate(sandbox);
+  nsIScriptObjectPrincipal* sop = priv;
   MOZ_ASSERT(sop, "Invalid sandbox passed");
-  SandboxPrivate* priv = static_cast<SandboxPrivate*>(sop);
   nsCOMPtr<nsIPrincipal> prin = sop->GetPrincipal();
   NS_ENSURE_TRUE(prin, NS_ERROR_FAILURE);
 

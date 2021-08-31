@@ -15,11 +15,13 @@
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "nsColor.h"
+#include "nsContentUtils.h"
 #include "nsPrintfCString.h"
 #include "nsRegionFwd.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/webrender/WebRenderTypes.h"
+#include "qcms.h"
 
 class gfxASurface;
 class gfxDrawable;
@@ -174,6 +176,11 @@ class gfxUtils {
       mozilla::gfx::YUVColorSpace aYUVColorSpace);
   static const float* YuvToRgbMatrix4x4ColumnMajor(
       mozilla::gfx::YUVColorSpace aYUVColorSpace);
+
+  static mozilla::Maybe<mozilla::gfx::YUVColorSpace> CicpToColorSpace(
+      const mozilla::gfx::CICP::MatrixCoefficients,
+      const mozilla::gfx::CICP::ColourPrimaries,
+      mozilla::LazyLogModule& aLogger);
 
   /**
    * Creates a copy of aSurface, but having the SurfaceFormat aFormat.

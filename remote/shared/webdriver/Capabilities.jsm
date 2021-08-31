@@ -21,9 +21,9 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Services: "resource://gre/modules/Services.jsm",
 
   AppInfo: "chrome://remote/content/marionette/appinfo.js",
-  assert: "chrome://remote/content/marionette/assert.js",
+  assert: "chrome://remote/content/shared/webdriver/Assert.jsm",
   error: "chrome://remote/content/shared/webdriver/Errors.jsm",
-  pprint: "chrome://remote/content/marionette/format.js",
+  pprint: "chrome://remote/content/shared/Format.jsm",
   RemoteAgent: "chrome://remote/content/components/RemoteAgent.jsm",
 });
 
@@ -433,6 +433,7 @@ class Capabilities extends Map {
       ["timeouts", new Timeouts()],
       ["strictFileInteractability", false],
       ["unhandledPromptBehavior", UnhandledPromptBehavior.DismissAndNotify],
+      ["webSocketUrl", null],
 
       // proprietary
       ["moz:accessibilityChecks", false],
@@ -572,9 +573,14 @@ class Capabilities extends Map {
           break;
 
         case "webSocketUrl":
-          throw new error.InvalidArgumentError(
-            "webSocketURL is not supported yet"
-          );
+          assert.boolean(v, pprint`Expected ${k} to be boolean, got ${v}`);
+
+          if (!v) {
+            throw new error.InvalidArgumentError(
+              pprint`Expected ${k} to be true, got ${v}`
+            );
+          }
+          break;
 
         case "moz:accessibilityChecks":
           assert.boolean(v, pprint`Expected ${k} to be boolean, got ${v}`);

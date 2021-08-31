@@ -716,6 +716,11 @@ class WorkerPrivate final : public RelativeTimeline {
     return mLoadInfo.mLoadingPrincipal;
   }
 
+  nsIPrincipal* GetPartitionedPrincipal() const {
+    AssertIsOnMainThread();
+    return mLoadInfo.mPartitionedPrincipal;
+  }
+
   const nsAString& OriginNoSuffix() const { return mLoadInfo.mOriginNoSuffix; }
 
   const nsACString& Origin() const { return mLoadInfo.mOrigin; }
@@ -984,6 +989,15 @@ class WorkerPrivate final : public RelativeTimeline {
     auto data = mWorkerThreadAccessible.Access();
     return data->mCurrentTimerNestingLevel;
   }
+
+  void IncreaseTopLevelWorkerFinishedRunnableCount() {
+    ++mTopLevelWorkerFinishedRunnableCount;
+  }
+  void DecreaseTopLevelWorkerFinishedRunnableCount() {
+    --mTopLevelWorkerFinishedRunnableCount;
+  }
+  void IncreaseWorkerFinishedRunnableCount() { ++mWorkerFinishedRunnableCount; }
+  void DecreaseWorkerFinishedRunnableCount() { --mWorkerFinishedRunnableCount; }
 
  private:
   WorkerPrivate(
@@ -1380,6 +1394,9 @@ class WorkerPrivate final : public RelativeTimeline {
    * as on the worker thread itself. When bug 1443925 is fixed allowing
    * nsIPrincipal to be used OMT, it may be possible to remove this flag. */
   bool mIsPrivilegedAddonGlobal;
+
+  Atomic<uint32_t> mTopLevelWorkerFinishedRunnableCount;
+  Atomic<uint32_t> mWorkerFinishedRunnableCount;
 };
 
 class AutoSyncLoopHolder {

@@ -46,11 +46,24 @@ add_task(async function() {
   await testCopy(hud, `$("#${id}")`, outerHTML);
 });
 
+add_task(async function() {
+  const hud = await openNewTabAndConsole(TEST_URI);
+  await executeAndWaitForMessage(
+    hud,
+    "var a = {}; a.b = a; copy(a);",
+    "`copy` command failed, object can’t be stringified: TypeError: cyclic object value"
+  );
+});
+
 function testCopy(hud, stringToCopy, expectedResult) {
-  return waitForClipboardPromise(() => {
+  return waitForClipboardPromise(async () => {
     info(`Attempting to copy: "${stringToCopy}"`);
     const command = `copy(${stringToCopy})`;
     info(`Executing command: "${command}"`);
-    execute(hud, command);
+    await executeAndWaitForMessage(
+      hud,
+      command,
+      "String was copied to clipboard"
+    );
   }, expectedResult);
 }

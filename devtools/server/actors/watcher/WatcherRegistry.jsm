@@ -121,6 +121,8 @@ const WatcherRegistry = {
         // Expose watcher traits so we can retrieve them in content process.
         // This should be removed as part of Bug 1700092.
         watcherTraits: watcher.form().traits,
+        // Expose to the content process if we should create top level targets from the server side
+        isServerTargetSwitchingEnabled: watcher.isServerTargetSwitchingEnabled,
       };
       // Define empty default array for all data
       for (const name of Object.values(SUPPORTED_DATA)) {
@@ -142,6 +144,23 @@ const WatcherRegistry = {
    */
   getWatcher(actorID) {
     return watcherActors.get(actorID);
+  },
+
+  /**
+   * Return an array of the watcher actors that match the passed browserId
+   *
+   * @param {Number} browserId
+   * @returns {Array<WatcherActor>} An array of the matching watcher actors
+   */
+  getWatchersForBrowserId(browserId) {
+    const watchers = [];
+    for (const watcherActor of watcherActors.values()) {
+      if (watcherActor.browserId === browserId) {
+        watchers.push(watcherActor);
+      }
+    }
+
+    return watchers;
   },
 
   /**

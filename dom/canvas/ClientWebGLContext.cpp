@@ -9,7 +9,8 @@
 #include "Layers.h"
 #include "gfxCrashReporterUtils.h"
 #include "HostWebGLContext.h"
-#include "js/ScalarType.h"  // js::Scalar::Type
+#include "js/PropertyAndElement.h"  // JS_DefineElement
+#include "js/ScalarType.h"          // js::Scalar::Type
 #include "mozilla/dom/Document.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/WebGLContextEvent.h"
@@ -902,8 +903,10 @@ RefPtr<gfx::SourceSurface> ClientWebGLContext::GetFrontBufferSnapshot(
     if (!child->SendGetFrontBufferSnapshot(&res)) {
       res = {};
     }
+    if (!res.shmem) return nullptr;
+
     const auto& surfSize = res.surfSize;
-    const webgl::RaiiShmem shmem{child, res.shmem};
+    const webgl::RaiiShmem shmem{child, res.shmem.ref()};
     const auto& shmemBytes = shmem.ByteRange();
     if (!surfSize.x) return nullptr;  // Zero means failure.
 
@@ -2016,27 +2019,71 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
   // -
 
   if (!debug) {
-    const char* ret = nullptr;
+    const auto GetPref = [&](const char* const name) {
+      Maybe<std::string> ret;
+      nsCString overrideVal;
+      const auto res = Preferences::GetCString(name, overrideVal);
+      if (NS_SUCCEEDED(res) && overrideVal.Length() > 0) {
+        ret = Some(ToString(overrideVal));
+      }
+      return ret;
+    };
+
+    const auto GetUnmaskedRenderer = [&]() {
+      auto ret = GetPref("webgl.override-unmasked-renderer");
+      if (!ret) {
+        ret = GetString(LOCAL_GL_RENDERER);
+      }
+      return ret;
+    };
+
+    const auto GetUnmaskedVendor = [&]() {
+      auto ret = GetPref("webgl.override-unmasked-vendor");
+      if (!ret) {
+        ret = GetString(LOCAL_GL_VENDOR);
+      }
+      return ret;
+    };
+
+    // -
+
+    Maybe<std::string> ret;
 
     switch (pname) {
       case LOCAL_GL_VENDOR:
-      case LOCAL_GL_RENDERER:
-        ret = "Mozilla";
+        ret = Some(std::string{"Mozilla"});
         break;
+
+      case LOCAL_GL_RENDERER: {
+        bool allowRenderer = StaticPrefs::webgl_enable_renderer_query();
+        if (nsContentUtils::ShouldResistFingerprinting()) {
+          allowRenderer = false;
+        }
+        if (allowRenderer) {
+          ret = GetUnmaskedRenderer();
+          if (ret) {
+            ret = Some(webgl::SanitizeRenderer(*ret));
+          }
+        }
+        if (!ret) {
+          ret = Some(std::string{"Mozilla"});
+        }
+        break;
+      }
 
       case LOCAL_GL_VERSION:
         if (mIsWebGL2) {
-          ret = "WebGL 2.0";
+          ret = Some(std::string{"WebGL 2.0"});
         } else {
-          ret = "WebGL 1.0";
+          ret = Some(std::string{"WebGL 1.0"});
         }
         break;
 
       case LOCAL_GL_SHADING_LANGUAGE_VERSION:
         if (mIsWebGL2) {
-          ret = "WebGL GLSL ES 3.00";
+          ret = Some(std::string{"WebGL GLSL ES 3.00"});
         } else {
-          ret = "WebGL GLSL ES 1.0";
+          ret = Some(std::string{"WebGL GLSL ES 1.0"});
         }
         break;
 
@@ -2047,37 +2094,22 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
           return;
         }
 
-        const char* overridePref;
-        GLenum driverEnum;
         switch (pname) {
           case dom::WEBGL_debug_renderer_info_Binding::UNMASKED_RENDERER_WEBGL:
-            overridePref = "webgl.renderer-string-override";
-            driverEnum = LOCAL_GL_RENDERER;
+            ret = GetUnmaskedRenderer();
+            if (ret && StaticPrefs::webgl_sanitize_unmasked_renderer()) {
+              *ret = webgl::SanitizeRenderer(*ret);
+            }
             break;
+
           case dom::WEBGL_debug_renderer_info_Binding::UNMASKED_VENDOR_WEBGL:
-            overridePref = "webgl.vendor-string-override";
-            driverEnum = LOCAL_GL_VENDOR;
+            ret = GetUnmaskedVendor();
             break;
+
           default:
             MOZ_CRASH();
         }
-
-        nsCString overrideStr;
-        const auto res = Preferences::GetCString(overridePref, overrideStr);
-        if (NS_SUCCEEDED(res) && overrideStr.Length() > 0) {
-          retval.set(StringValue(cx, overrideStr.BeginReading(), rv));
-          return;
-        }
-
-        const auto maybe = GetString(driverEnum);
-        if (maybe) {
-          std::string str = *maybe;
-          if (driverEnum == LOCAL_GL_RENDERER) {
-            str = webgl::SanitizeRenderer(str);
-          }
-          retval.set(StringValue(cx, str, rv));
-        }
-        return;
+        break;
       }
 
       default:
@@ -2085,7 +2117,7 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
     }
 
     if (ret) {
-      retval.set(StringValue(cx, ret, rv));
+      retval.set(StringValue(cx, *ret, rv));
       return;
     }
   }  // if (!debug)

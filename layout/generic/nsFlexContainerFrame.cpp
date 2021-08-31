@@ -364,6 +364,7 @@ class nsFlexContainerFrame::FlexItem final {
                "aContinuation should be in aItem's continuation chain!");
     FlexItem item(*this);
     item.mFrame = aContinuation;
+    item.mHadMeasuringReflow = false;
     return item;
   }
 
@@ -389,27 +390,38 @@ class nsFlexContainerFrame::FlexItem final {
   nscoord CrossSize() const { return mCrossSize; }
   nscoord CrossPosition() const { return mCrossPosn; }
 
+  // Lazy getter for mAscent.
   nscoord ResolvedAscent(bool aUseFirstBaseline) const {
-    if (mAscent == ReflowOutput::ASK_FOR_BASELINE) {
-      // XXXdholbert We should probably be using the *container's* writing-mode
-      // here, instead of the item's -- though it doesn't much matter right
-      // now, because all of the baseline-handling code here essentially
-      // assumes that the container & items have the same writing-mode. This
-      // will matter more (& can be expanded/tested) once we officially support
-      // logical directions & vertical writing-modes in flexbox, in bug 1079155
-      // or a dependency.
-      // Use GetFirstLineBaseline() or GetLastLineBaseline() as appropriate,
-      // or just GetLogicalBaseline() if that fails.
-      bool found =
-          aUseFirstBaseline
-              ? nsLayoutUtils::GetFirstLineBaseline(mWM, mFrame, &mAscent)
-              : nsLayoutUtils::GetLastLineBaseline(mWM, mFrame, &mAscent);
-
-      if (!found) {
-        mAscent = mFrame->SynthesizeBaselineBOffsetFromBorderBox(
-            mWM, BaselineSharingGroup::First);
-      }
+    // XXXdholbert Two concerns to follow up on here:
+    // (1) We probably should be checking and reacting to aUseFirstBaseline
+    // for all of the cases here (e.g. this first one). Maybe we need to store
+    // two versions of mAscent and choose the appropriate one based on
+    // aUseFirstBaseline? This is roughly bug 1480850, I think.
+    // (2) We should be using the *container's* writing-mode (mCBWM) here,
+    // instead of the item's (mWM). This is essentially bug 1155322.
+    if (mAscent != ReflowOutput::ASK_FOR_BASELINE) {
+      return mAscent;
     }
+
+    // Use GetFirstLineBaseline() or GetLastLineBaseline() as appropriate:
+    bool found =
+        aUseFirstBaseline
+            ? nsLayoutUtils::GetFirstLineBaseline(mWM, mFrame, &mAscent)
+            : nsLayoutUtils::GetLastLineBaseline(mWM, mFrame, &mAscent);
+    if (found) {
+      return mAscent;
+    }
+
+    // If the nsLayoutUtils getter fails, then ask the frame directly:
+    auto baselineGroup = aUseFirstBaseline ? BaselineSharingGroup::First
+                                           : BaselineSharingGroup::Last;
+    if (mFrame->GetNaturalBaselineBOffset(mWM, baselineGroup, &mAscent)) {
+      return mAscent;
+    }
+
+    // We couldn't determine a baseline, so we synthesize one from border box:
+    mAscent = mFrame->SynthesizeBaselineBOffsetFromBorderBox(
+        mWM, BaselineSharingGroup::First);
     return mAscent;
   }
 
@@ -1959,7 +1971,8 @@ nsFlexContainerFrame::MeasureAscentAndBSizeForFlexItem(
   auto* cachedData = aItem.Frame()->GetProperty(CachedFlexItemData::Prop());
 
   if (cachedData && cachedData->mBAxisMeasurement) {
-    if (cachedData->mBAxisMeasurement->IsValidFor(aChildReflowInput)) {
+    if (!aItem.Frame()->IsSubtreeDirty() &&
+        cachedData->mBAxisMeasurement->IsValidFor(aChildReflowInput)) {
       return *(cachedData->mBAxisMeasurement);
     }
     FLEX_LOG("[perf] MeasureAscentAndBSizeForFlexItem rejected cached value");
@@ -2130,9 +2143,7 @@ FlexItem::FlexItem(ReflowInput& aFlexItemReflowInput, float aFlexGrow,
   // Our main-size is considered definite if any of these are true:
   // (a) main axis is the item's inline axis.
   // (b) flex container has definite main size.
-  // (c) flex item has a definite flex basis and is fully inflexible
-  //     (NOTE: We don't actually check "fully inflexible" because webcompat
-  //     may not agree with that restriction...)
+  // (c) flex item has a definite flex basis.
   //
   // Hence, we need to take care to treat the final main-size as *indefinite*
   // if none of these conditions are satisfied.
@@ -2166,11 +2177,6 @@ FlexItem::FlexItem(ReflowInput& aFlexItemReflowInput, float aFlexGrow,
     } else if (aFlexBaseSize != NS_UNCONSTRAINEDSIZE) {
       // The flex item has a definite flex basis, which we'll treat as making
       // its main-size definite.
-      // XXXdholbert Technically the spec requires the flex item to *also* be
-      // fully inflexible in order to have its size treated as definite in this
-      // scenario, but no browser implements that additional restriction, so
-      // it's not clear that this additional requirement would be
-      // web-compatible...
       mTreatBSizeAsIndefinite = false;
     } else {
       // Otherwise, we have to treat the item's BSize as indefinite.
@@ -3381,14 +3387,22 @@ MainAxisPositionTracker::MainAxisPositionTracker(
   // Map 'left'/'right' to 'start'/'end'
   if (mJustifyContent.primary == StyleAlignFlags::LEFT ||
       mJustifyContent.primary == StyleAlignFlags::RIGHT) {
-    if (aAxisTracker.IsColumnOriented()) {
-      // Container's alignment axis is not parallel to the inline axis,
-      // so we map both 'left' and 'right' to 'start'.
+    const auto wm = aAxisTracker.GetWritingMode();
+    if (aAxisTracker.IsColumnOriented() && !wm.IsVertical()) {
+      // Container's alignment axis (main axis) is *not* parallel to the
+      // line-left <-> line-right axis or the physical left <-> physical right
+      // axis, so we map both 'left' and 'right' to 'start'.
       mJustifyContent.primary = StyleAlignFlags::START;
     } else {
-      // Row-oriented, so we map 'left' and 'right' to 'start' or 'end',
-      // depending on left-to-right writing mode.
-      const bool isLTR = aAxisTracker.GetWritingMode().IsBidiLTR();
+      MOZ_ASSERT(
+          aAxisTracker.MainAxis() == eLogicalAxisInline ||
+              wm.PhysicalAxis(aAxisTracker.MainAxis()) == eAxisHorizontal,
+          "The container's main axis should be parallel to either line-left "
+          "<-> line-right axis or physical left <-> physical right axis!");
+
+      // Otherwise, we map 'left' and 'right' to 'start' or 'end', depending on
+      // the container's writing mode.
+      const bool isLTR = wm.IsPhysicalLTR();
       const bool isJustifyLeft =
           (mJustifyContent.primary == StyleAlignFlags::LEFT);
       mJustifyContent.primary = (isJustifyLeft == isLTR)

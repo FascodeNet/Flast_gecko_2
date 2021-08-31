@@ -27,11 +27,11 @@
     }                                                \
   }
 
-class nsDisplayListBuilder;
 class nsIDocShell;
 class nsRefreshDriver;
 
 namespace mozilla {
+class nsDisplayListBuilder;
 class ClientWebGLContext;
 class PresShell;
 namespace layers {
@@ -52,13 +52,13 @@ class SourceSurface;
 class nsICanvasRenderingContextInternal : public nsISupports,
                                           public nsAPostRefreshObserver {
  public:
-  typedef mozilla::layers::CanvasLayer CanvasLayer;
-  typedef mozilla::layers::CanvasRenderer CanvasRenderer;
-  typedef mozilla::layers::Layer Layer;
-  typedef mozilla::layers::LayerManager LayerManager;
-  typedef mozilla::layers::WebRenderCanvasData WebRenderCanvasData;
-  typedef mozilla::layers::CompositableHandle CompositableHandle;
-  typedef mozilla::layers::LayerTransactionChild LayerTransactionChild;
+  using CanvasLayer = mozilla::layers::CanvasLayer;
+  using CanvasRenderer = mozilla::layers::CanvasRenderer;
+  using Layer = mozilla::layers::Layer;
+  using LayerManager = mozilla::layers::LayerManager;
+  using WebRenderCanvasData = mozilla::layers::WebRenderCanvasData;
+  using CompositableHandle = mozilla::layers::CompositableHandle;
+  using LayerTransactionChild = mozilla::layers::LayerTransactionChild;
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_ICANVASRENDERINGCONTEXTINTERNAL_IID)
 
@@ -143,14 +143,15 @@ class nsICanvasRenderingContextInternal : public nsISupports,
 
   // Return the CanvasLayer for this context, creating
   // one for the given layer manager if not available.
-  virtual already_AddRefed<Layer> GetCanvasLayer(nsDisplayListBuilder* builder,
-                                                 Layer* oldLayer,
-                                                 LayerManager* manager) = 0;
-  virtual bool UpdateWebRenderCanvasData(nsDisplayListBuilder* aBuilder,
-                                         WebRenderCanvasData* aCanvasData) {
+  virtual already_AddRefed<Layer> GetCanvasLayer(
+      mozilla::nsDisplayListBuilder* builder, Layer* oldLayer,
+      LayerManager* manager) = 0;
+  virtual bool UpdateWebRenderCanvasData(
+      mozilla::nsDisplayListBuilder* aBuilder,
+      WebRenderCanvasData* aCanvasData) {
     return false;
   }
-  virtual bool InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
+  virtual bool InitializeCanvasRenderer(mozilla::nsDisplayListBuilder* aBuilder,
                                         CanvasRenderer* aRenderer) {
     return true;
   }

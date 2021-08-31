@@ -26,6 +26,7 @@
 
 #include "jit/AtomicOp.h"
 #include "js/Printf.h"
+#include "wasm/WasmIntrinsic.h"
 #include "wasm/WasmUtility.h"
 #include "wasm/WasmValidate.h"
 
@@ -209,6 +210,7 @@ enum class OpKind {
   Rethrow,
   Try,
 #  endif
+  Intrinsic,
 };
 
 // Return the OpKind for a given Op. This is used for sanity-checking that
@@ -366,8 +368,12 @@ class MOZ_STACK_CLASS OpIter : private Policy {
   [[nodiscard]] bool popStackType(StackType* type, Value* value);
   [[nodiscard]] bool popWithType(ValType expected, Value* value);
   [[nodiscard]] bool popWithType(ResultType expected, ValueVector* values);
+  template <typename ValTypeSpanT>
+  [[nodiscard]] bool popWithTypes(ValTypeSpanT expected, ValueVector* values);
   [[nodiscard]] bool popWithRefType(Value* value, StackType* type);
   [[nodiscard]] bool popWithRttType(Value* rtt, uint32_t* rttTypeIndex,
+                                    uint32_t* rttDepth);
+  [[nodiscard]] bool popWithRttType(Value* rtt, uint32_t rttTypeIndex,
                                     uint32_t* rttDepth);
   [[nodiscard]] bool popThenPushType(ResultType expected, ValueVector* values);
   [[nodiscard]] bool topWithType(ResultType expected, ValueVector* values);
@@ -411,6 +417,11 @@ class MOZ_STACK_CLASS OpIter : private Policy {
 
   inline bool checkIsSubtypeOf(ValType actual, ValType expected);
   inline bool checkIsSubtypeOf(ResultType params, ResultType results);
+
+#ifdef ENABLE_WASM_FUNCTION_REFERENCES
+  inline bool checkIsSubtypeOf(uint32_t actualTypeIndex,
+                               uint32_t expectedTypeIndex);
+#endif
 
  public:
 #ifdef DEBUG
@@ -500,7 +511,7 @@ class MOZ_STACK_CLASS OpIter : private Policy {
                                  ValueVector* branchValues, Value* index);
 #ifdef ENABLE_WASM_EXCEPTIONS
   [[nodiscard]] bool readTry(ResultType* type);
-  [[nodiscard]] bool readCatch(LabelKind* kind, uint32_t* eventIndex,
+  [[nodiscard]] bool readCatch(LabelKind* kind, uint32_t* tagIndex,
                                ResultType* paramType, ResultType* resultType,
                                ValueVector* tryResults);
   [[nodiscard]] bool readCatchAll(LabelKind* kind, ResultType* paramType,
@@ -510,7 +521,7 @@ class MOZ_STACK_CLASS OpIter : private Policy {
                                   ResultType* resultType,
                                   ValueVector* tryResults);
   void popDelegate();
-  [[nodiscard]] bool readThrow(uint32_t* eventIndex, ValueVector* argValues);
+  [[nodiscard]] bool readThrow(uint32_t* tagIndex, ValueVector* argValues);
   [[nodiscard]] bool readRethrow(uint32_t* relativeDepth);
 #endif
   [[nodiscard]] bool readUnreachable();
@@ -595,6 +606,8 @@ class MOZ_STACK_CLASS OpIter : private Policy {
                                   Value* value);
 
   [[nodiscard]] bool readTableSize(uint32_t* tableIndex);
+
+#ifdef ENABLE_WASM_GC
   [[nodiscard]] bool readStructNewWithRtt(uint32_t* typeIndex, Value* rtt,
                                           ValueVector* argValues);
   [[nodiscard]] bool readStructNewDefaultWithRtt(uint32_t* typeIndex,
@@ -613,7 +626,7 @@ class MOZ_STACK_CLASS OpIter : private Policy {
                                   Value* ptr);
   [[nodiscard]] bool readArrayLen(uint32_t* typeIndex, Value* ptr);
   [[nodiscard]] bool readRttCanon(ValType* rttType);
-  [[nodiscard]] bool readRttSub(Value* parentRtt);
+  [[nodiscard]] bool readRttSub(Value* parentRtt, uint32_t* rttSubTypeIndex);
   [[nodiscard]] bool readRefTest(Value* rtt, uint32_t* rttTypeIndex,
                                  uint32_t* rttDepth, Value* ref);
   [[nodiscard]] bool readRefCast(Value* rtt, uint32_t* rttTypeIndex,
@@ -622,6 +635,7 @@ class MOZ_STACK_CLASS OpIter : private Policy {
                                   uint32_t* rttTypeIndex, uint32_t* rttDepth,
                                   ResultType* branchTargetType,
                                   ValueVector* values);
+#endif
 
 #ifdef ENABLE_WASM_SIMD
   [[nodiscard]] bool readLaneIndex(uint32_t inputLanes, uint32_t* laneIndex);
@@ -644,6 +658,9 @@ class MOZ_STACK_CLASS OpIter : private Policy {
                                    LinearMemoryAddress<Value>* addr,
                                    uint32_t* laneIndex, Value* input);
 #endif
+
+  [[nodiscard]] bool readIntrinsic(const Intrinsic& intrinsic,
+                                   ValueVector* params);
 
   // At a location where readOp is allowed, peek at the next opcode
   // without consuming it or updating any internal state.
@@ -730,6 +747,17 @@ inline bool OpIter<Policy>::checkIsSubtypeOf(ResultType params,
   return true;
 }
 
+#ifdef ENABLE_WASM_FUNCTION_REFERENCES
+template <typename Policy>
+inline bool OpIter<Policy>::checkIsSubtypeOf(uint32_t actualTypeIndex,
+                                             uint32_t expectedTypeIndex) {
+  return CheckIsSubtypeOf(
+      d_, env_, lastOpcodeOffset(),
+      ValType(RefType::fromTypeIndex(actualTypeIndex, true)),
+      ValType(RefType::fromTypeIndex(expectedTypeIndex, true)), &cache_);
+}
+#endif
+
 template <typename Policy>
 inline bool OpIter<Policy>::unrecognizedOpcode(const OpBytes* expr) {
   UniqueChars error(JS_smprintf("unrecognized opcode: %x %x", expr->b0,
@@ -807,11 +835,18 @@ inline bool OpIter<Policy>::popWithType(ValType expectedType, Value* value) {
          checkIsSubtypeOf(stackType.valType(), expectedType);
 }
 
-// Pops each of the given expected types (in reverse, because it's a stack).
 template <typename Policy>
 inline bool OpIter<Policy>::popWithType(ResultType expected,
                                         ValueVector* values) {
-  size_t expectedLength = expected.length();
+  return popWithTypes(expected, values);
+}
+
+// Pops each of the given expected types (in reverse, because it's a stack).
+template <typename Policy>
+template <typename ValTypeSpanT>
+inline bool OpIter<Policy>::popWithTypes(ValTypeSpanT expected,
+                                         ValueVector* values) {
+  size_t expectedLength = expected.size();
   if (!values->resize(expectedLength)) {
     return false;
   }
@@ -1511,17 +1546,17 @@ inline bool OpIter<Policy>::readTry(ResultType* paramType) {
 }
 
 template <typename Policy>
-inline bool OpIter<Policy>::readCatch(LabelKind* kind, uint32_t* eventIndex,
+inline bool OpIter<Policy>::readCatch(LabelKind* kind, uint32_t* tagIndex,
                                       ResultType* paramType,
                                       ResultType* resultType,
                                       ValueVector* tryResults) {
   MOZ_ASSERT(Classify(op_) == OpKind::Catch);
 
-  if (!readVarU32(eventIndex)) {
-    return fail("expected event index");
+  if (!readVarU32(tagIndex)) {
+    return fail("expected tag index");
   }
-  if (*eventIndex >= env_.events.length()) {
-    return fail("event index out of range");
+  if (*tagIndex >= env_.tags.length()) {
+    return fail("tag index out of range");
   }
 
   Control& block = controlStack_.back();
@@ -1543,7 +1578,7 @@ inline bool OpIter<Policy>::readCatch(LabelKind* kind, uint32_t* eventIndex,
     block.switchToCatch();
   }
 
-  return push(env_.events[*eventIndex].resultType());
+  return push(env_.tags[*tagIndex].resultType());
 }
 
 template <typename Policy>
@@ -1611,18 +1646,18 @@ inline void OpIter<Policy>::popDelegate() {
 }
 
 template <typename Policy>
-inline bool OpIter<Policy>::readThrow(uint32_t* eventIndex,
+inline bool OpIter<Policy>::readThrow(uint32_t* tagIndex,
                                       ValueVector* argValues) {
   MOZ_ASSERT(Classify(op_) == OpKind::Throw);
 
-  if (!readVarU32(eventIndex)) {
-    return fail("expected event index");
+  if (!readVarU32(tagIndex)) {
+    return fail("expected tag index");
   }
-  if (*eventIndex >= env_.events.length()) {
-    return fail("event index out of range");
+  if (*tagIndex >= env_.tags.length()) {
+    return fail("tag index out of range");
   }
 
-  if (!popWithType(env_.events[*eventIndex].resultType(), argValues)) {
+  if (!popWithType(env_.tags[*tagIndex].resultType(), argValues)) {
     return false;
   }
 
@@ -1864,7 +1899,7 @@ inline bool OpIter<Policy>::readMemorySize() {
     return fail("failed to read memory flags");
   }
 
-  if (flags != uint8_t(MemoryTableFlags::Default)) {
+  if (flags != uint8_t(0)) {
     return fail("unexpected flags");
   }
 
@@ -1884,7 +1919,7 @@ inline bool OpIter<Policy>::readMemoryGrow(Value* input) {
     return fail("failed to read memory flags");
   }
 
-  if (flags != uint8_t(MemoryTableFlags::Default)) {
+  if (flags != uint8_t(0)) {
     return fail("unexpected flags");
   }
 
@@ -2020,7 +2055,7 @@ template <typename Policy>
 inline bool OpIter<Policy>::readGetGlobal(uint32_t* id) {
   MOZ_ASSERT(Classify(op_) == OpKind::GetGlobal);
 
-  if (!d_.readGetGlobal(id)) {
+  if (!d_.readGlobalIndex(id)) {
     return false;
   }
 
@@ -2042,8 +2077,8 @@ template <typename Policy>
 inline bool OpIter<Policy>::readSetGlobal(uint32_t* id, Value* value) {
   MOZ_ASSERT(Classify(op_) == OpKind::SetGlobal);
 
-  if (!readVarU32(id)) {
-    return fail("unable to read global index");
+  if (!d_.readGlobalIndex(id)) {
+    return false;
   }
 
   if (*id >= env_.globals.length()) {
@@ -2061,8 +2096,8 @@ template <typename Policy>
 inline bool OpIter<Policy>::readTeeGlobal(uint32_t* id, Value* value) {
   MOZ_ASSERT(Classify(op_) == OpKind::TeeGlobal);
 
-  if (!readVarU32(id)) {
-    return fail("unable to read global index");
+  if (!d_.readGlobalIndex(id)) {
+    return false;
   }
 
   if (*id >= env_.globals.length()) {
@@ -2131,7 +2166,7 @@ template <typename Policy>
 inline bool OpIter<Policy>::readRefFunc(uint32_t* funcIndex) {
   MOZ_ASSERT(Classify(op_) == OpKind::RefFunc);
 
-  if (!d_.readRefFunc(funcIndex)) {
+  if (!d_.readFuncIndex(funcIndex)) {
     return false;
   }
   if (*funcIndex >= env_.funcs.length()) {
@@ -2768,8 +2803,8 @@ inline bool OpIter<Policy>::readTableSize(uint32_t* tableIndex) {
 
 template <typename Policy>
 inline bool OpIter<Policy>::readGcTypeIndex(uint32_t* typeIndex) {
-  if (!readVarU32(typeIndex)) {
-    return fail("unable to read type index");
+  if (!d_.readTypeIndex(typeIndex)) {
+    return false;
   }
 
   if (*typeIndex >= env_.types.length()) {
@@ -2832,6 +2867,8 @@ inline bool OpIter<Policy>::readFieldIndex(uint32_t* fieldIndex,
   return true;
 }
 
+#ifdef ENABLE_WASM_GC
+
 template <typename Policy>
 inline bool OpIter<Policy>::readStructNewWithRtt(uint32_t* typeIndex,
                                                  Value* rtt,
@@ -2843,7 +2880,7 @@ inline bool OpIter<Policy>::readStructNewWithRtt(uint32_t* typeIndex,
   }
 
   const StructType& str = env_.types.structType(*typeIndex);
-  const ValType rttType = ValType::fromRtt(*typeIndex, 0);
+  const ValType rttType = ValType::fromRtt(*typeIndex, RttDepthNone);
 
   if (!popWithType(rttType, rtt)) {
     return false;
@@ -2874,7 +2911,7 @@ inline bool OpIter<Policy>::readStructNewDefaultWithRtt(uint32_t* typeIndex,
   }
 
   const StructType& str = env_.types.structType(*typeIndex);
-  const ValType rttType = ValType::fromRtt(*typeIndex, 0);
+  const ValType rttType = ValType::fromRtt(*typeIndex, RttDepthNone);
 
   if (!popWithType(rttType, rtt)) {
     return false;
@@ -2966,7 +3003,7 @@ inline bool OpIter<Policy>::readArrayNewWithRtt(uint32_t* typeIndex, Value* rtt,
   }
 
   const ArrayType& arr = env_.types.arrayType(*typeIndex);
-  const ValType rttType = ValType::fromRtt(*typeIndex, 0);
+  const ValType rttType = ValType::fromRtt(*typeIndex, RttDepthNone);
 
   if (!popWithType(rttType, rtt)) {
     return false;
@@ -2994,7 +3031,7 @@ inline bool OpIter<Policy>::readArrayNewDefaultWithRtt(uint32_t* typeIndex,
   }
 
   const ArrayType& arr = env_.types.arrayType(*typeIndex);
-  const ValType rttType = ValType::fromRtt(*typeIndex, 0);
+  const ValType rttType = ValType::fromRtt(*typeIndex, RttDepthNone);
 
   if (!popWithType(rttType, rtt)) {
     return false;
@@ -3103,19 +3140,34 @@ inline bool OpIter<Policy>::readRttCanon(ValType* rttType) {
 }
 
 template <typename Policy>
-inline bool OpIter<Policy>::readRttSub(Value* parentRtt) {
+inline bool OpIter<Policy>::readRttSub(Value* parentRtt,
+                                       uint32_t* rttSubTypeIndex) {
   MOZ_ASSERT(Classify(op_) == OpKind::RttSub);
 
-  uint32_t rttTypeIndex;
-  uint32_t rttDepth;
-  if (!popWithRttType(parentRtt, &rttTypeIndex, &rttDepth)) {
+  if (!readGcTypeIndex(rttSubTypeIndex)) {
     return false;
   }
 
-  if (rttDepth >= MaxRttDepth) {
-    return fail("rtt depth is too deep");
+  uint32_t rttParentTypeIndex;
+  uint32_t rttParentDepth;
+  if (!popWithRttType(parentRtt, &rttParentTypeIndex, &rttParentDepth)) {
+    return false;
   }
-  return push(ValType::fromRtt(rttTypeIndex, rttDepth + 1));
+
+  if (!checkIsSubtypeOf(*rttSubTypeIndex, rttParentTypeIndex)) {
+    return false;
+  }
+
+  uint32_t subRttDepth;
+  if (rttParentDepth == RttDepthNone) {
+    subRttDepth = RttDepthNone;
+  } else {
+    if (rttParentDepth >= MaxRttDepth) {
+      return fail("rtt depth is too deep");
+    }
+    subRttDepth = rttParentDepth + 1;
+  }
+  return push(ValType::fromRtt(*rttSubTypeIndex, subRttDepth));
 }
 
 template <typename Policy>
@@ -3172,6 +3224,8 @@ inline bool OpIter<Policy>::readBrOnCast(uint32_t* relativeDepth, Value* rtt,
   return checkCastedBranchValue(*relativeDepth, castedFromType, castedToType,
                                 branchTargetType, values);
 }
+
+#endif // ENABLE_WASM_GC
 
 #ifdef ENABLE_WASM_SIMD
 
@@ -3385,6 +3439,16 @@ inline bool OpIter<Policy>::readStoreLane(uint32_t byteSize,
 }
 
 #endif  // ENABLE_WASM_SIMD
+
+template <typename Policy>
+inline bool OpIter<Policy>::readIntrinsic(const Intrinsic& intrinsic,
+                                          ValueVector* params) {
+  MOZ_ASSERT(Classify(op_) == OpKind::Intrinsic);
+  if (!env_.usesMemory()) {
+    return fail("can't touch memory without memory");
+  }
+  return popWithTypes(intrinsic.params, params);
+}
 
 }  // namespace wasm
 }  // namespace js

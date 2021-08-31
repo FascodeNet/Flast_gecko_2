@@ -31,6 +31,7 @@
 #include "js/experimental/Intl.h"     // JS::AddMozDateTimeFormatConstructor
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/GCAPI.h"
+#include "js/PropertyAndElement.h"  // JS_DefineFunctions, JS_DefineProperties
 #include "js/PropertySpec.h"
 #include "js/StableStringChars.h"
 #include "unicode/udat.h"
@@ -1167,6 +1168,8 @@ static FieldType GetFieldTypeForFormatField(UDateFormatField fieldName) {
       return &JSAtomState::dayPeriod;
 
     case UDAT_TIMEZONE_FIELD:
+    case UDAT_TIMEZONE_GENERIC_FIELD:
+    case UDAT_TIMEZONE_LOCALIZED_GMT_OFFSET_FIELD:
       return &JSAtomState::timeZoneName;
 
     case UDAT_FRACTIONAL_SECOND_FIELD:
@@ -1185,11 +1188,9 @@ static FieldType GetFieldTypeForFormatField(UDateFormatField fieldName) {
     case UDAT_WEEK_OF_MONTH_FIELD:
     case UDAT_MILLISECONDS_IN_DAY_FIELD:
     case UDAT_TIMEZONE_RFC_FIELD:
-    case UDAT_TIMEZONE_GENERIC_FIELD:
     case UDAT_QUARTER_FIELD:
     case UDAT_STANDALONE_QUARTER_FIELD:
     case UDAT_TIMEZONE_SPECIAL_FIELD:
-    case UDAT_TIMEZONE_LOCALIZED_GMT_OFFSET_FIELD:
     case UDAT_TIMEZONE_ISO_FIELD:
     case UDAT_TIMEZONE_ISO_LOCAL_FIELD:
     case UDAT_AM_PM_MIDNIGHT_NOON_FIELD:

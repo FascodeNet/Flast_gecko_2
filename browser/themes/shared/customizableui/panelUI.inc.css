@@ -25,13 +25,6 @@
 
 
 :root {
-  --arrowpanel-menuitem-margin: 0;
-  --arrowpanel-menuitem-padding-block: 4px;
-  --arrowpanel-menuitem-padding: var(--arrowpanel-menuitem-padding-block) 12px;
-  --arrowpanel-menuitem-border-radius: unset;
-  --panel-separator-margin: 6px 0;
-  --panel-subview-body-padding: 6px 0;
-
   --panel-separator-zap-gradient: linear-gradient(90deg, #9059FF 0%, #FF4AA2 52.08%, #FFBD4F 100%);
   --panelview-toolbarbutton-focus-box-shadow: inset 0 0 0 2px var(--focus-outline-color);
 
@@ -47,7 +40,9 @@
   --arrowpanel-menuitem-padding-block: 8px;
   --arrowpanel-menuitem-padding: var(--arrowpanel-menuitem-padding-block);
   --arrowpanel-menuitem-border-radius: 4px;
-  --panel-separator-margin: 4px 8px;
+  --panel-separator-margin-vertical: 4px;
+  --panel-separator-margin-horizontal: 8px;
+  --panel-separator-margin: var(--panel-separator-margin-vertical) var(--panel-separator-margin-horizontal);
   --panel-subview-body-padding: 8px 0;
 }
 
@@ -107,7 +102,7 @@
 }
 
 .panel-banner-item[notificationid="update-unsupported"] > .toolbarbutton-icon {
-  background: url(chrome://browser/skin/warning.svg) no-repeat center;
+  background: url(chrome://global/skin/icons/warning.svg) no-repeat center;
   -moz-context-properties: stroke, fill;
   stroke: var(--arrowpanel-background);
   fill: var(--panel-banner-item-warning-icon-bgcolor);
@@ -132,6 +127,7 @@
   filter: grayscale(100%);
 }
 
+#BMB_bookmarksPopup menupopup,
 .cui-widget-panel,
 #widget-overflow {
   font: menu;
@@ -189,19 +185,6 @@ toolbarseparator + .panel-subview-body,
   -moz-box-flex: 1;
 }
 
-.subviewbutton.panel-subview-footer {
-  box-sizing: border-box;
-  min-height: 41px;
-}
-
-.cui-widget-panelview menuitem.subviewbutton.panel-subview-footer {
-  margin: 4px 0 0;
-}
-
-.cui-widget-panelview .subviewbutton.panel-subview-footer > .menu-text {
-  -moz-box-flex: 1;
-}
-
 .panel-info-button {
   appearance: none;
   padding: 0;
@@ -229,7 +212,6 @@ toolbarseparator + .panel-subview-body,
   list-style-image: url(chrome://global/skin/icons/info.svg);
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
-  fill-opacity: var(--toolbarbutton-icon-fill-opacity);
   padding: 4px;
 }
 
@@ -245,12 +227,36 @@ panelview .toolbaritem-combined-buttons,
 }
 
 #BMB_bookmarksPopup menupopup {
+  appearance: none;
+  background-color: transparent;
+  --panel-background: var(--arrowpanel-background);
+  --panel-color: var(--arrowpanel-color);
+  --panel-border-color: var(--arrowpanel-border-color);
   --panel-border-radius: var(--arrowpanel-border-radius);
   --panel-padding: var(--panel-subview-body-padding);
 }
 
 #BMB_bookmarksPopup .subviewbutton {
   padding: var(--arrowpanel-menuitem-padding);
+}
+
+#PlacesToolbar menupopup {
+  appearance: none;
+  background: var(--arrowpanel-background);
+  font: menu;
+}
+
+#PlacesToolbar menupopup[placespopup=true]::part(content),
+#PlacesToolbar menupopup[placespopup=true]::part(arrowscrollbox),
+#PlacesToolbar menupopup {
+  border-radius: var(--arrowpanel-border-radius);
+}
+
+#PlacesToolbar menupopup[placespopup=true]::part(arrowscrollbox) {
+  padding: var(--panel-subview-body-padding);
+  border: 0;
+  background: var(--arrowpanel-background) !important;
+  color: var(--arrowpanel-color) !important;
 }
 
 #confirmation-hint {
@@ -365,7 +371,7 @@ panelview[id^=PanelUI-webext-] {
 
 .cui-widget-panel,
 .cui-widget-panel::part(arrowcontent) {
-  --arrowpanel-padding: 4px 0;
+  --arrowpanel-padding: var(--panel-subview-body-padding);
 }
 
 #appMenu-popup panelview,
@@ -388,10 +394,6 @@ panelview[id^=PanelUI-webext-] {
 /* Add 2 * 16px extra width for touch mode button padding. */
 #appMenu-popup[touchmode] panelview {
   min-width: calc(@menuPanelWidth@ + 32px);
-}
-
-.cui-widget-panel.cui-widget-panelWithFooter::part(content) {
-  padding-bottom: 0;
 }
 
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton > .toolbarbutton-icon {
@@ -956,9 +958,7 @@ panelmultiview[mainViewId="PanelUI-fxa"] #PanelUI-remotetabs-syncnow {
 
 .PanelUI-fxa-signin-button > .toolbarbutton-text,
 .PanelUI-remotetabs-button > .toolbarbutton-text {
-  /* !important to override ".cui-widget-panel toolbarbutton > .toolbarbutton-text" above. */
-  text-align: center !important;
-  text-shadow: none;
+  display: -moz-box;
 }
 
 #PanelUI-remotetabs[mainview] { /* panel anchored to toolbar button might be too skinny */
@@ -1027,6 +1027,8 @@ panelmultiview[mainViewId="PanelUI-fxa"] #PanelUI-remotetabs-syncnow {
   display: -moz-box;
 }
 
+#PlacesToolbar menuitem,
+#PlacesToolbar menu,
 .subview-subheader,
 panelview .toolbarbutton-1,
 .subviewbutton,
@@ -1047,6 +1049,7 @@ panelview .toolbarbutton-1,
   color: var(--panel-disabled-color);
 }
 
+#PlacesToolbar menu > .menu-right,
 .subviewbutton > .menu-right {
   appearance: none;
   list-style-image: url(chrome://global/skin/icons/arrow-right.svg);
@@ -1059,10 +1062,18 @@ panelview .toolbarbutton-1,
   -moz-image-region: auto;
 }
 
+#PlacesToolbar menu > .menu-right {
+  margin-inline-end: 0;
+}
+
+#PlacesToolbar menu > .menu-right:-moz-locale-dir(rtl),
 .subviewbutton > .menu-right:-moz-locale-dir(rtl) {
   list-style-image: url(chrome://global/skin/icons/arrow-left.svg);
 }
 
+
+#PlacesToolbar menu > .menu-right,
+#PlacesToolbar menu > .menu-iconic-left,
 .subviewbutton > .menu-right,
 .subviewbutton > .menu-accel-container > .menu-iconic-accel,
 .subviewbutton > .menu-iconic-left,
@@ -1070,6 +1081,9 @@ panelview .toolbarbutton-1,
   padding-block: 0;
 }
 
+#BMB_bookmarksPopup .subviewbutton > .menu-iconic-text,
+#PlacesToolbar menu > .menu-iconic-text,
+#PlacesToolbar menuitem > .menu-iconic-text,
 .addon-banner-item > .toolbarbutton-text,
 .subviewbutton-iconic > .toolbarbutton-text,
 .subviewbutton[image] > .toolbarbutton-text,
@@ -1171,24 +1185,15 @@ panelview .toolbarbutton-1,
   margin-bottom: 6px;
 }
 
-.subviewbutton.panel-subview-footer > .menu-text {
+.subviewbutton > .menu-text {
   appearance: none;
   padding-inline-start: 0 !important; /* to override menu.css on Windows */
-  padding-inline-end: 6px;
-  -moz-box-flex: 0;
-}
-
-.subviewbutton.panel-subview-footer > .toolbarbutton-text {
-  padding-inline-start: 0;
-}
-
-.subviewbutton.panel-subview-footer > .menu-accel-container {
-  padding-inline-start: 6px;
 }
 
 .subviewbutton > .menu-accel-container > .menu-iconic-accel,
 .subviewbutton > .menu-accel-container > .menu-accel {
   margin-inline-end: 0 !important; /* to override menu.css on Windows */
+  color: var(--panel-shortcut-color);
 }
 
 .subviewbutton[shortcut]::after {
@@ -1370,6 +1375,8 @@ panelview .toolbarbutton-1@buttonStateHover@,
 toolbarbutton.subviewbutton@buttonStateHover@,
 .navigable.subviewbutton@buttonStateHover@,
 menu.subviewbutton@menuStateHover@,
+#PlacesToolbar menuitem@menuStateHover@,
+#PlacesToolbar menu@menuStateHover@,
 menuitem.subviewbutton@menuStateHover@,
 .widget-overflow-list .toolbarbutton-1@buttonStateHover@,
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton@buttonStateHover@ {
@@ -1386,6 +1393,8 @@ panelview .toolbarbutton-1@buttonStateActive@,
 toolbarbutton.subviewbutton@buttonStateActive@,
 .navigable.subviewbutton@buttonStateActive@,
 menu.subviewbutton@menuStateActive@,
+#PlacesToolbar menuitem@menuStateActive@,
+#PlacesToolbar menu@menuStateActive@,
 menuitem.subviewbutton@menuStateActive@,
 .widget-overflow-list .toolbarbutton-1@buttonStateActive@,
 .toolbaritem-combined-buttons@inAnyPanel@ > toolbarbutton@buttonStateActive@ {
@@ -1394,30 +1403,18 @@ menuitem.subviewbutton@menuStateActive@,
   box-shadow: 0 1px 0 hsla(210,4%,10%,.03) inset;
 }
 
-.subviewbutton.panel-subview-footer {
-  margin: 0;
-  background-color: var(--arrowpanel-dimmed);
-  border-top: 1px solid var(--panel-separator-color);
-  border-radius: 0;
+#PlacesToolbar menuitem,
+#PlacesToolbar menu {
+  color: var(--arrowpanel-color);
 }
 
-menuitem.panel-subview-footer@menuStateHover@,
-.subviewbutton.panel-subview-footer@buttonStateHoverOrFocus@ {
-  background-color: var(--arrowpanel-dimmed-further);
-}
-
-menuitem.panel-subview-footer@menuStateActive@,
-.subviewbutton.panel-subview-footer@buttonStateActive@ {
-  background-color: var(--arrowpanel-dimmed-even-further);
-  box-shadow: 0 1px 0 hsla(210,4%,10%,.05) inset;
+#PlacesToolbar menuitem[disabled=true],
+#PlacesToolbar menu[disabled=true] {
+  color: var(--panel-disabled-color);
 }
 
 #BMB_bookmarksPopup .subviewbutton:not([disabled="true"]) {
   color: inherit;
-}
-
-#BMB_bookmarksPopup .subviewbutton > .menu-iconic-left {
-  margin-inline-end: 3px;
 }
 
 /* Disabled (empty) item is always alone and never has an icon, so fix its left padding */
@@ -1425,6 +1422,8 @@ menuitem.panel-subview-footer@menuStateActive@,
   padding-left: 6px;
 }
 
+.PanelUI-subView menuseparator,
+#PlacesToolbar menupopup[placespopup=true] toolbarseparator,
 #widget-overflow-mainView > toolbarseparator,
 #widget-overflow-mainView > .panel-subview-body > toolbarseparator,
 .PanelUI-subView toolbarseparator,
@@ -1444,13 +1443,24 @@ menuitem.panel-subview-footer@menuStateActive@,
   padding: 0;
 }
 
-.PanelUI-subView menuseparator {
+/* Styled differently to allow for user interaction with menu separator */
+#PlacesToolbar menupopup[placespopup="true"] menuseparator {
+  position: relative;
   appearance: none;
+  border: none;
   min-height: 0;
+  margin: 0 var(--panel-separator-margin-horizontal);
+  padding-inline: 0;
+  padding-top: var(--panel-separator-margin-vertical);
+  padding-bottom: calc(var(--panel-separator-margin-vertical) + 1px);
+}
+
+#PlacesToolbar menupopup[placespopup="true"] menuseparator::before {
+  content: '';
+  position: absolute;
+  width: 100%;
   border-top: 1px solid var(--panel-separator-color);
   border-bottom: none;
-  margin: var(--panel-separator-margin);
-  padding: 0;
 }
 
 .PanelUI-subView toolbarseparator.proton-zap {
@@ -1596,6 +1606,8 @@ toolbarpaletteitem[place="menu-panel"] > .subviewbutton-nav::after {
   padding-inline-start: .5em;
 }
 
+#PlacesToolbar menu > .menu-iconic-left,
+#PlacesToolbar menuitem > .menu-iconic-left,
 .subviewbutton > .menu-iconic-left {
   appearance: none;
   margin-inline-end: 0;

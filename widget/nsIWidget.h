@@ -74,6 +74,7 @@ namespace dom {
 class BrowserChild;
 enum class CallerType : uint32_t;
 }  // namespace dom
+class WindowRenderer;
 namespace layers {
 class AsyncDragMetrics;
 class Compositor;
@@ -377,8 +378,10 @@ class nsIWidget : public nsISupports {
   typedef mozilla::layers::AsyncDragMetrics AsyncDragMetrics;
   typedef mozilla::layers::FrameMetrics FrameMetrics;
   typedef mozilla::layers::LayerManager LayerManager;
+  typedef mozilla::WindowRenderer WindowRenderer;
   typedef mozilla::layers::LayerManagerComposite LayerManagerComposite;
   typedef mozilla::layers::LayersBackend LayersBackend;
+  typedef mozilla::layers::LayersId LayersId;
   typedef mozilla::layers::PLayerTransactionChild PLayerTransactionChild;
   typedef mozilla::layers::ScrollableLayerGuid ScrollableLayerGuid;
   typedef mozilla::layers::ZoomConstraints ZoomConstraints;
@@ -1294,24 +1297,7 @@ class nsIWidget : public nsISupports {
    * Return the widget's LayerManager. The layer tree for that
    * LayerManager is what gets rendered to the widget.
    */
-  inline LayerManager* GetLayerManager() {
-    return GetLayerManager(nullptr, mozilla::layers::LayersBackend::LAYERS_NONE,
-                           LAYER_MANAGER_CURRENT);
-  }
-
-  inline LayerManager* GetLayerManager(LayerManagerPersistence aPersistence) {
-    return GetLayerManager(nullptr, mozilla::layers::LayersBackend::LAYERS_NONE,
-                           aPersistence);
-  }
-
-  /**
-   * Like GetLayerManager(), but prefers creating a layer manager of
-   * type |aBackendHint| instead of what would normally be created.
-   * LayersBackend::LAYERS_NONE means "no hint".
-   */
-  virtual LayerManager* GetLayerManager(
-      PLayerTransactionChild* aShadowManager, LayersBackend aBackendHint,
-      LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) = 0;
+  virtual WindowRenderer* GetWindowRenderer() = 0;
 
   /**
    * Called before each layer manager transaction to allow any preparation
@@ -1689,10 +1675,14 @@ class nsIWidget : public nsISupports {
     ALL_BITS = (1 << 4) - 1
   };
   /*
-   * TouchpadPinchPhase states for SynthesizeNativeTouchPadPinch. Match
-   * Phase states in nsIDOMWindowUtils.idl.
+   * TouchpadGesturePhase states for SynthesizeNativeTouchPadPinch and
+   * SynthesizeNativeTouchpadPan. Match phase states in nsIDOMWindowUtils.idl.
    */
-  enum TouchpadPinchPhase { PHASE_BEGIN = 0, PHASE_UPDATE = 1, PHASE_END = 2 };
+  enum TouchpadGesturePhase {
+    PHASE_BEGIN = 0,
+    PHASE_UPDATE = 1,
+    PHASE_END = 2
+  };
   /*
    * Create a new or update an existing touch pointer on the digitizer.
    * To trigger os level gestures, individual touch points should
@@ -1717,10 +1707,9 @@ class nsIWidget : public nsISupports {
   /*
    * See nsIDOMWindowUtils.sendNativeTouchpadPinch().
    */
-  virtual nsresult SynthesizeNativeTouchPadPinch(TouchpadPinchPhase aEventPhase,
-                                                 float aScale,
-                                                 LayoutDeviceIntPoint aPoint,
-                                                 int32_t aModifierFlags) = 0;
+  virtual nsresult SynthesizeNativeTouchPadPinch(
+      TouchpadGesturePhase aEventPhase, float aScale,
+      LayoutDeviceIntPoint aPoint, int32_t aModifierFlags) = 0;
 
   /*
    * Helper for simulating a simple tap event with one touch point. When
@@ -1755,6 +1744,14 @@ class nsIWidget : public nsISupports {
   virtual nsresult SynthesizeNativeTouchpadDoubleTap(
       LayoutDeviceIntPoint aPoint, uint32_t aModifierFlags) = 0;
 
+  /*
+   * See nsIDOMWindowUtils.sendNativeTouchpadPan().
+   */
+  virtual nsresult SynthesizeNativeTouchpadPan(TouchpadGesturePhase aEventPhase,
+                                               LayoutDeviceIntPoint aPoint,
+                                               double aDeltaX, double aDeltaY,
+                                               int32_t aModifierFlags) = 0;
+
   virtual void StartAsyncScrollbarDrag(
       const AsyncDragMetrics& aDragMetrics) = 0;
 
@@ -1772,6 +1769,8 @@ class nsIWidget : public nsISupports {
    * @param aGuid identifies the scroll frame which is being autoscrolled.
    */
   virtual void StopAsyncAutoscroll(const ScrollableLayerGuid& aGuid) = 0;
+
+  virtual LayersId GetRootLayerTreeId() = 0;
 
   // If this widget supports out-of-process compositing, it can override
   // this method to provide additional information to the compositor.

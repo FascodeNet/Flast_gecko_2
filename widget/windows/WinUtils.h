@@ -145,6 +145,9 @@ class WinUtils {
   static EnableNonClientDpiScalingProc sEnableNonClientDpiScaling;
   static GetSystemMetricsForDpiProc sGetSystemMetricsForDpi;
 
+  // Set on Initialize().
+  static bool sHasPackageIdentity;
+
  public:
   class AutoSystemDpiAware {
    public:
@@ -217,6 +220,20 @@ class WinUtils {
    *         if aHdc is null
    */
   static gfx::MarginDouble GetUnwriteableMarginsForDeviceInInches(HDC aHdc);
+
+  static bool HasPackageIdentity() { return sHasPackageIdentity; }
+
+  /*
+   * The "family name" of a Windows app package is the full name without any of
+   * the components that might change during the life cycle of the app (such as
+   * the version number, or the architecture). This leaves only those properties
+   * which together serve to uniquely identify the app within one Windows
+   * installation, namely the base name and the publisher name. Meaning, this
+   * string is safe to use anywhere that a string uniquely identifying an app
+   * installation is called for (because multiple copies of the same app on the
+   * same system is not a supported feature in the app framework).
+   */
+  static nsString GetPackageFamilyName();
 
   /**
    * Logging helpers that dump output to prlog module 'Widget', console, and

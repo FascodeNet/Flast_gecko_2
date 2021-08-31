@@ -100,10 +100,7 @@ class HeadlessWidget : public nsBaseWidget {
   }
   virtual InputContext GetInputContext() override { return mInputContext; }
 
-  virtual LayerManager* GetLayerManager(
-      PLayerTransactionChild* aShadowManager = nullptr,
-      LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-      LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
+  virtual WindowRenderer* GetWindowRenderer() override;
 
   void SetCompositorWidgetDelegate(CompositorWidgetDelegate* delegate) override;
 
@@ -140,8 +137,8 @@ class HeadlessWidget : public nsBaseWidget {
                                               nsIObserver* aObserver) override;
 
   virtual nsresult SynthesizeNativeTouchPadPinch(
-      TouchpadPinchPhase aEventPhase, float aScale, LayoutDeviceIntPoint aPoint,
-      int32_t aModifierFlags) override;
+      TouchpadGesturePhase aEventPhase, float aScale,
+      LayoutDeviceIntPoint aPoint, int32_t aModifierFlags) override;
 
  private:
   ~HeadlessWidget();

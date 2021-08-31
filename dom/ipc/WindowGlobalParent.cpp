@@ -108,6 +108,7 @@ already_AddRefed<WindowGlobalParent> WindowGlobalParent::CreateDisconnected(
                              aInit.context().mOuterWindowId, std::move(fields));
   wgp->mDocumentPrincipal = aInit.principal();
   wgp->mDocumentURI = aInit.documentURI();
+  wgp->mIsInitialDocument = aInit.isInitialDocument();
   wgp->mBlockAllMixedContent = aInit.blockAllMixedContent();
   wgp->mUpgradeInsecureRequests = aInit.upgradeInsecureRequests();
   wgp->mSandboxFlags = aInit.sandboxFlags();
@@ -1225,8 +1226,8 @@ nsresult WindowGlobalParent::WriteFormDataAndScrollToSessionStore(
     return NS_OK;
   }
 
-  nsCOMPtr<nsISessionStoreFunctions> funcs =
-      do_ImportModule("resource://gre/modules/SessionStoreFunctions.jsm");
+  nsCOMPtr<nsISessionStoreFunctions> funcs = do_ImportModule(
+      "resource://gre/modules/SessionStoreFunctions.jsm", fallible);
   if (!funcs) {
     return NS_ERROR_FAILURE;
   }
@@ -1276,8 +1277,8 @@ nsresult WindowGlobalParent::ResetSessionStore(uint32_t aEpoch) {
     return NS_OK;
   }
 
-  nsCOMPtr<nsISessionStoreFunctions> funcs =
-      do_ImportModule("resource://gre/modules/SessionStoreFunctions.jsm");
+  nsCOMPtr<nsISessionStoreFunctions> funcs = do_ImportModule(
+      "resource://gre/modules/SessionStoreFunctions.jsm", fallible);
   if (!funcs) {
     return NS_ERROR_FAILURE;
   }

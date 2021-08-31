@@ -1655,6 +1655,14 @@ public class GeckoViewActivity
             }
             getWindow().setAttributes(layoutParams);
         }
+
+        @Override
+        public void onShowDynamicToolbar(final GeckoSession session) {
+            final View toolbar = findViewById(R.id.toolbar);
+            if (toolbar != null) {
+                toolbar.setTranslationY(0f);
+            }
+        }
     }
 
     private class ExampleProgressDelegate implements GeckoSession.ProgressDelegate {
@@ -1803,6 +1811,9 @@ public class GeckoViewActivity
                     }
                 case PERMISSION_MEDIA_KEY_SYSTEM_ACCESS:
                     resId = R.string.request_media_key_system_access;
+                    break;
+                case PERMISSION_STORAGE_ACCESS:
+                    resId = R.string.request_storage_access;
                     break;
                 default:
                     return GeckoResult.fromValue(ContentPermission.VALUE_DENY);

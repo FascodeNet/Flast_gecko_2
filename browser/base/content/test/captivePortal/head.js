@@ -120,7 +120,7 @@ function ensurePortalTab(win) {
 }
 
 function ensurePortalNotification(win) {
-  let notification = win.gHighPriorityNotificationBox.getNotificationWithValue(
+  let notification = win.gNotificationBox.getNotificationWithValue(
     PORTAL_NOTIFICATION_VALUE
   );
   isnot(
@@ -156,9 +156,7 @@ function ensureNoPortalTab(win) {
 
 function ensureNoPortalNotification(win) {
   is(
-    win.gHighPriorityNotificationBox.getNotificationWithValue(
-      PORTAL_NOTIFICATION_VALUE
-    ),
+    win.gNotificationBox.getNotificationWithValue(PORTAL_NOTIFICATION_VALUE),
     null,
     "There should be no captive portal notification in the window."
   );
@@ -269,4 +267,16 @@ async function openCaptivePortalLoginTab(
   );
 
   return portalTab;
+}
+
+// XXX This likely wants to move to TestUtils, mostly borrowed from
+// browser_doorhanger_form_password_edit.js
+async function waitForPromiseWithTimeout(promise, timeoutMs = 5000) {
+  let timedOut = new Promise((resolve, reject) => {
+    /* eslint-disable-next-line mozilla/no-arbitrary-setTimeout */
+    setTimeout(() => {
+      reject(new Error(`Timed out in ${timeoutMs} ms.`));
+    }, timeoutMs);
+  });
+  await Promise.race([promise, timedOut]);
 }

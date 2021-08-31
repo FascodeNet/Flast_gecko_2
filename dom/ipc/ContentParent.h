@@ -152,9 +152,9 @@ class ContentParent final
   static LogModule* GetLog();
 
   /**
-   * Create a subprocess suitable for use later as a content process.
+   * Create a ContentParent suitable for use later as a content process.
    */
-  static RefPtr<LaunchPromise> PreallocateProcess();
+  static already_AddRefed<ContentParent> MakePreallocProcess();
 
   /**
    * Start up the content-process machinery.  This might include
@@ -631,8 +631,8 @@ class ContentParent final
 
   // This function is called in BrowsingContext immediately before IPC call to
   // load a URI. If aURI is a BlobURL, this method transmits all BlobURLs for
-  // aPrincipal that were previously not transmitted. This allows for opening a
-  // locally created BlobURL in a new tab.
+  // aURI's principal that were previously not transmitted. This allows for
+  // opening a locally created BlobURL in a new tab.
   //
   // The reason all previously untransmitted Blobs are transmitted is that the
   // current BlobURL could contain html code, referring to another untransmitted
@@ -640,7 +640,7 @@ class ContentParent final
   //
   // Should eventually be made obsolete by broader design changes that only
   // store BlobURLs in the parent process.
-  void TransmitBlobDataIfBlobURL(nsIURI* aURI, nsIPrincipal* aPrincipal);
+  void TransmitBlobDataIfBlobURL(nsIURI* aURI);
 
   void OnCompositorDeviceReset() override;
 
@@ -1319,6 +1319,10 @@ class ContentParent final
       const MaybeDiscarded<BrowsingContext>& aContext,
       const PositionState& aState);
 
+  mozilla::ipc::IPCResult RecvAddOrRemovePageAwakeRequest(
+      const MaybeDiscarded<BrowsingContext>& aContext,
+      const bool& aShouldAddCount);
+
   mozilla::ipc::IPCResult RecvGetModulesTrust(
       ModulePaths&& aModPaths, bool aRunAtNormalPriority,
       GetModulesTrustResolver&& aResolver);
@@ -1444,7 +1448,7 @@ class ContentParent final
   // Return an existing ContentParent if possible. Otherwise, `nullptr`.
   static already_AddRefed<ContentParent> GetUsedBrowserProcess(
       const nsACString& aRemoteType, nsTArray<ContentParent*>& aContentParents,
-      uint32_t aMaxContentParents, bool aPreferUsed);
+      uint32_t aMaxContentParents, bool aPreferUsed, ProcessPriority aPriority);
 
   void AddToPool(nsTArray<ContentParent*>&);
   void RemoveFromPool(nsTArray<ContentParent*>&);
@@ -1544,7 +1548,11 @@ class ContentParent final
   uint8_t mCalledKillHard : 1;
   uint8_t mCreatedPairedMinidumps : 1;
   uint8_t mShutdownPending : 1;
+
+  // Whether or not `LaunchSubprocessResolve` has been called, and whether or
+  // not it returned `true` when called.
   uint8_t mLaunchResolved : 1;
+  uint8_t mLaunchResolvedOk : 1;
 
   // True if the input event queue on the main thread of the content process is
   // enabled.

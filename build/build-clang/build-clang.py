@@ -21,7 +21,6 @@ import sys
 import tarfile
 from contextlib import contextmanager
 from distutils.dir_util import copy_tree
-from distutils.file_util import copy_file
 
 from shutil import which
 
@@ -167,37 +166,6 @@ def delete(path):
             pass
 
 
-def install_libgcc(gcc_dir, clang_dir, is_final_stage):
-    gcc_bin_dir = os.path.join(gcc_dir, "bin")
-
-    out = subprocess.check_output(
-        [os.path.join(gcc_bin_dir, "gcc"), "-print-libgcc-file-name"]
-    )
-
-    libgcc_dir = os.path.dirname(out.decode().rstrip())
-    clang_lib_dir = os.path.join(
-        clang_dir,
-        "lib",
-        "gcc",
-        "x86_64-unknown-linux-gnu",
-        os.path.basename(libgcc_dir),
-    )
-    mkdir_p(clang_lib_dir)
-    copy_tree(libgcc_dir, clang_lib_dir, preserve_symlinks=True)
-    libgcc_dir = os.path.join(gcc_dir, "lib64")
-    # This is necessary as long as CI runs on debian8 docker images.
-    copy_file(
-        os.path.join(libgcc_dir, "libstdc++.so.6"), os.path.join(clang_dir, "lib")
-    )
-    copy_tree(libgcc_dir, clang_lib_dir, preserve_symlinks=True)
-    libgcc_dir = os.path.join(gcc_dir, "lib32")
-    clang_lib_dir = os.path.join(clang_lib_dir, "32")
-    copy_tree(libgcc_dir, clang_lib_dir, preserve_symlinks=True)
-    include_dir = os.path.join(gcc_dir, "include")
-    clang_include_dir = os.path.join(clang_dir, "include")
-    copy_tree(include_dir, clang_include_dir, preserve_symlinks=True)
-
-
 def install_import_library(build_dir, clang_dir):
     shutil.copy2(
         os.path.join(build_dir, "lib", "clang.lib"), os.path.join(clang_dir, "lib")
@@ -247,8 +215,6 @@ def build_one_stage(
     osx_cross_compile,
     build_type,
     assertions,
-    python_path,
-    gcc_dir,
     libcxx_include_dir,
     build_wasm,
     compiler_rt_source_dir=None,
@@ -296,7 +262,6 @@ def build_one_stage(
             "-DCMAKE_INSTALL_PREFIX=%s" % inst_dir,
             "-DLLVM_TARGETS_TO_BUILD=%s" % machine_targets,
             "-DLLVM_ENABLE_ASSERTIONS=%s" % ("ON" if assertions else "OFF"),
-            "-DPYTHON_EXECUTABLE=%s" % slashify_path(python_path),
             "-DLLVM_TOOL_LIBCXX_BUILD=%s" % ("ON" if build_libcxx else "OFF"),
             "-DLLVM_ENABLE_BINDINGS=OFF",
         ]
@@ -314,6 +279,10 @@ def build_one_stage(
             sysroot = os.path.join(os.environ.get("MOZ_FETCHES_DIR", ""), "sysroot")
             if os.path.exists(sysroot):
                 cmake_args += ["-DCMAKE_SYSROOT=%s" % sysroot]
+                # Work around the LLVM build system not building the i386 compiler-rt
+                # because it doesn't allow to use a sysroot for that during the cmake
+                # checks.
+                cmake_args += ["-DCAN_TARGET_i386=1"]
         if is_windows():
             cmake_args.insert(-1, "-DLLVM_EXPORT_SYMBOLS_FOR_PLUGINS=ON")
             cmake_args.insert(-1, "-DLLVM_USE_CRT_RELEASE=MT")
@@ -439,8 +408,6 @@ def build_one_stage(
     cmake_args += [src_dir]
     build_package(build_dir, cmake_args)
 
-    if is_linux():
-        install_libgcc(gcc_dir, inst_dir, is_final_stage)
     # For some reasons the import library clang.lib of clang.exe is not
     # installed, so we copy it by ourselves.
     if is_windows():
@@ -742,15 +709,6 @@ if __name__ == "__main__":
         assertions = config["assertions"]
         if assertions not in (True, False):
             raise ValueError("Only boolean values are accepted for assertions.")
-    python_path = None
-    if "python_path" not in config:
-        raise ValueError("Config file needs to set python_path")
-    python_path = config["python_path"]
-    gcc_dir = None
-    if "gcc_dir" in config:
-        gcc_dir = config["gcc_dir"].format(**os.environ)
-        if not os.path.exists(gcc_dir):
-            raise ValueError("gcc_dir must point to an existing path")
     ndk_dir = None
     android_targets = None
     if "android_targets" in config:
@@ -769,9 +727,6 @@ if __name__ == "__main__":
             raise ValueError("extra_targets must be a list")
         if not all(isinstance(t, str) for t in extra_targets):
             raise ValueError("members of extra_targets should be strings")
-
-    if is_linux() and gcc_dir is None:
-        raise ValueError("Config file needs to set gcc_dir")
 
     if is_darwin() or osx_cross_compile:
         os.environ["MACOSX_DEPLOYMENT_TARGET"] = (
@@ -923,8 +878,6 @@ if __name__ == "__main__":
         osx_cross_compile,
         build_type,
         assertions,
-        python_path,
-        gcc_dir,
         libcxx_include_dir,
         build_wasm,
         is_final_stage=(stages == 1),
@@ -953,8 +906,6 @@ if __name__ == "__main__":
             osx_cross_compile,
             build_type,
             assertions,
-            python_path,
-            gcc_dir,
             libcxx_include_dir,
             build_wasm,
             compiler_rt_source_dir,
@@ -986,8 +937,6 @@ if __name__ == "__main__":
             osx_cross_compile,
             build_type,
             assertions,
-            python_path,
-            gcc_dir,
             libcxx_include_dir,
             build_wasm,
             compiler_rt_source_dir,
@@ -1028,8 +977,6 @@ if __name__ == "__main__":
             osx_cross_compile,
             build_type,
             assertions,
-            python_path,
-            gcc_dir,
             libcxx_include_dir,
             build_wasm,
             compiler_rt_source_dir,

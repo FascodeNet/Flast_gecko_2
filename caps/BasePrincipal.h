@@ -125,7 +125,7 @@ class BasePrincipal : public nsJSPrincipals {
   NS_IMETHOD CheckMayLoadWithReporting(nsIURI* uri,
                                        bool allowIfInheritsPrincipal,
                                        uint64_t innerWindowID) final;
-  NS_IMETHOD GetAddonPolicy(nsISupports** aResult) final;
+  NS_IMETHOD GetAddonPolicy(extensions::WebExtensionPolicy** aResult) final;
   NS_IMETHOD GetIsNullPrincipal(bool* aResult) override;
   NS_IMETHOD GetIsContentPrincipal(bool* aResult) override;
   NS_IMETHOD GetIsExpandedPrincipal(bool* aResult) override;
@@ -180,6 +180,9 @@ class BasePrincipal : public nsJSPrincipals {
 
   NS_IMETHOD GetNextSubDomainPrincipal(
       nsIPrincipal** aNextSubDomainPrincipal) override;
+
+  NS_IMETHOD GetPrecursorPrincipal(nsIPrincipal** aPrecursor) override;
+
   nsresult ToJSON(nsACString& aJSON);
   static already_AddRefed<BasePrincipal> FromJSON(const nsACString& aJSON);
   // Method populates a passed Json::Value with serializable fields

@@ -13,6 +13,18 @@ exclude: true
 
 ⚠️  breaking change and deprecation notices
 
+## v92
+- Added [`GeckoSession.PermissionDelegate.PERMISSION_STORAGE_ACCESS`][92.1] to
+  control the allowing of third-party frames to access first-party cookies and
+  storage. ([bug 1543720]({{bugzilla}}1543720))
+- Added [`ContentDelegate#onShowDynamicToolbar(GeckoSession)`][92.2] to notify
+  the app that it must fully-expand its dynamic toolbar ([bug 1690296]({{bugzilla}}1690296)).
+- Removed deprecated `GeckoResult.ALLOW` and `GeckoResult.DENY`.
+  Use [`GeckoResult.allow`][89.8] and [`GeckoResult.deny`][89.9] instead.
+
+[92.1]: {{javadoc_uri}}/GeckoSession.PermissionDelegate.html#PERMISSION_STORAGE_ACCESS
+[92.2]: {{javadoc_uri}}/GeckoSession.ContentDelegate.html#onShowDynamicToolbar-org.mozilla.geckoview.GeckoSession-
+
 ## v91
 - Extended [`Autocomplete`][78.7] API to support addresses.
   ([bug 1699794]({{bugzilla}}1699794)).
@@ -1022,4 +1034,4 @@ to allow adding gecko profiler markers.
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 05c7e21b7ea40cd9978b319a9acfac1b256e700f
+[api-version]: d0ed6375463fed98d5402a30aacb6eee7969079e

@@ -1273,11 +1273,9 @@ gfxFcPlatformFontList::gfxFcPlatformFontList()
       mFcSubstituteCache(64),
       mLastConfig(nullptr),
       mAlwaysUseFontconfigGenerics(true) {
-  CheckFamilyList(kBaseFonts_Ubuntu_20_04,
-                  ArrayLength(kBaseFonts_Ubuntu_20_04));
-  CheckFamilyList(kLangFonts_Ubuntu_20_04,
-                  ArrayLength(kLangFonts_Ubuntu_20_04));
-  CheckFamilyList(kBaseFonts_Fedora_32, ArrayLength(kBaseFonts_Fedora_32));
+  CheckFamilyList(kBaseFonts_Ubuntu_20_04);
+  CheckFamilyList(kLangFonts_Ubuntu_20_04);
+  CheckFamilyList(kBaseFonts_Fedora_32);
   mLastConfig = FcConfigGetCurrent();
   if (XRE_IsParentProcess()) {
     // if the rescan interval is set, start the timer
@@ -1870,18 +1868,15 @@ FontVisibility gfxFcPlatformFontList::GetVisibilityForFamily(
     const nsACString& aName) const {
   switch (GetDistroID()) {
     case DistroID::Ubuntu:
-      if (FamilyInList(aName, kBaseFonts_Ubuntu_20_04,
-                       ArrayLength(kBaseFonts_Ubuntu_20_04))) {
+      if (FamilyInList(aName, kBaseFonts_Ubuntu_20_04)) {
         return FontVisibility::Base;
       }
-      if (FamilyInList(aName, kLangFonts_Ubuntu_20_04,
-                       ArrayLength(kLangFonts_Ubuntu_20_04))) {
+      if (FamilyInList(aName, kLangFonts_Ubuntu_20_04)) {
         return FontVisibility::LangPack;
       }
       return FontVisibility::User;
     case DistroID::Fedora:
-      if (FamilyInList(aName, kBaseFonts_Fedora_32,
-                       ArrayLength(kBaseFonts_Fedora_32))) {
+      if (FamilyInList(aName, kBaseFonts_Fedora_32)) {
         return FontVisibility::Base;
       }
       return FontVisibility::User;
@@ -2600,28 +2595,26 @@ void gfxFcPlatformFontList::ActivateBundledFonts() {
 /***************************************************************************
  *
  * These functions must be last in the file because it uses the system cairo
- * library.  Above this point the cairo library used is the tree cairo if
- * MOZ_TREE_CAIRO.
+ * library.  Above this point the cairo library used is the tree cairo.
  */
 
-#  if MOZ_TREE_CAIRO
 // Tree cairo symbols have different names.  Disable their activation through
 // preprocessor macros.
-#    undef cairo_ft_font_options_substitute
+#  undef cairo_ft_font_options_substitute
 
-#    undef cairo_font_options_create
-#    undef cairo_font_options_destroy
-#    undef cairo_font_options_copy
-#    undef cairo_font_options_equal
+#  undef cairo_font_options_create
+#  undef cairo_font_options_destroy
+#  undef cairo_font_options_copy
+#  undef cairo_font_options_equal
 
-#    undef cairo_font_options_get_antialias
-#    undef cairo_font_options_set_antialias
-#    undef cairo_font_options_get_hint_style
-#    undef cairo_font_options_set_hint_style
-#    undef cairo_font_options_get_lcd_filter
-#    undef cairo_font_options_set_lcd_filter
-#    undef cairo_font_options_get_subpixel_order
-#    undef cairo_font_options_set_subpixel_order
+#  undef cairo_font_options_get_antialias
+#  undef cairo_font_options_set_antialias
+#  undef cairo_font_options_get_hint_style
+#  undef cairo_font_options_set_hint_style
+#  undef cairo_font_options_get_lcd_filter
+#  undef cairo_font_options_set_lcd_filter
+#  undef cairo_font_options_get_subpixel_order
+#  undef cairo_font_options_set_subpixel_order
 
 // The system cairo functions are not declared because the include paths cause
 // the gdk headers to pick up the tree cairo.h.
@@ -2649,7 +2642,6 @@ cairo_font_options_get_subpixel_order(const cairo_font_options_t*);
 NS_VISIBILITY_DEFAULT void cairo_font_options_set_subpixel_order(
     cairo_font_options_t*, cairo_subpixel_order_t);
 }
-#  endif
 
 void gfxFcPlatformFontList::ClearSystemFontOptions() {
   if (mSystemFontOptions) {

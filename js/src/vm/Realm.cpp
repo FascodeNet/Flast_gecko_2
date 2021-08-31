@@ -20,6 +20,7 @@
 #include "jit/JitOptions.h"
 #include "jit/JitRealm.h"
 #include "jit/JitRuntime.h"
+#include "js/CallAndConstruct.h"  // JS::IsCallable
 #include "js/Date.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/Proxy.h"
@@ -115,13 +116,6 @@ bool Realm::init(JSContext* cx, JSPrincipals* principals) {
   }
 
   return true;
-}
-
-void Realm::setIsSelfHostingRealm() {
-  MOZ_ASSERT(!isSelfHostingRealm_);
-  MOZ_ASSERT(zone()->isSelfHostingZone());
-  isSelfHostingRealm_ = true;
-  isSystem_ = true;
 }
 
 bool JSRuntime::createJitRuntime(JSContext* cx) {
@@ -368,19 +362,13 @@ void Realm::sweepAfterMinorGC() {
 void Realm::traceWeakSavedStacks(JSTracer* trc) { savedStacks_.traceWeak(trc); }
 
 void Realm::traceWeakObjects(JSTracer* trc) {
-  if (global_) {
-    TraceWeakEdge(trc, &global_, "Realm::global_");
-  }
-  if (lexicalEnv_) {
-    TraceWeakEdge(trc, &lexicalEnv_, "Realm::lexicalEnv_");
-  }
+  TraceWeakEdge(trc, &global_, "Realm::global_");
+  TraceWeakEdge(trc, &lexicalEnv_, "Realm::lexicalEnv_");
 }
 
 void Realm::traceWeakSelfHostingScriptSource(JSTracer* trc) {
-  if (selfHostingScriptSource.unbarrieredGet()) {
-    TraceWeakEdge(trc, &selfHostingScriptSource,
-                  "Realm::selfHostingScriptSource");
-  }
+  TraceWeakEdge(trc, &selfHostingScriptSource,
+                "Realm::selfHostingScriptSource");
 }
 
 void Realm::traceWeakEdgesInJitRealm(JSTracer* trc) {
@@ -427,24 +415,13 @@ void Realm::traceWeakObjectRealm(JSTracer* trc) {
 void Realm::tracekWeakVarNames(JSTracer* trc) { varNames_.traceWeak(trc); }
 
 void Realm::traceWeakTemplateObjects(JSTracer* trc) {
-  if (mappedArgumentsTemplate_) {
-    TraceWeakEdge(trc, &mappedArgumentsTemplate_,
-                  "Realm::mappedArgumentsTemplate_");
-  }
-
-  if (unmappedArgumentsTemplate_) {
-    TraceWeakEdge(trc, &unmappedArgumentsTemplate_,
-                  "Realm::unmappedArgumentsTemplate_");
-  }
-
-  if (iterResultTemplate_) {
-    TraceWeakEdge(trc, &iterResultTemplate_, "Realm::iterResultTemplate_");
-  }
-
-  if (iterResultWithoutPrototypeTemplate_) {
-    TraceWeakEdge(trc, &iterResultWithoutPrototypeTemplate_,
-                  "Realm::iterResultWithoutPrototypeTemplate_");
-  }
+  TraceWeakEdge(trc, &mappedArgumentsTemplate_,
+                "Realm::mappedArgumentsTemplate_");
+  TraceWeakEdge(trc, &unmappedArgumentsTemplate_,
+                "Realm::unmappedArgumentsTemplate_");
+  TraceWeakEdge(trc, &iterResultTemplate_, "Realm::iterResultTemplate_");
+  TraceWeakEdge(trc, &iterResultWithoutPrototypeTemplate_,
+                "Realm::iterResultWithoutPrototypeTemplate_");
 }
 
 void Realm::fixupAfterMovingGC(JSTracer* trc) {

@@ -94,6 +94,7 @@
 
 #include "mozilla/Preferences.h"
 #include "mozilla/StaticPrefs_apz.h"
+#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_general.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/StaticPrefs_ui.h"
@@ -1088,6 +1089,19 @@ void nsChildView::PostHandleKeyEvent(mozilla::WidgetKeyboardEvent* aEvent) {
     return;
   }
 
+  // If the escape key is pressed, the expectations are as follows:
+  // 1. If the page is loading, interrupt loading.
+  // 2. Give a website an opportunity to handle the event and call
+  //    preventDefault() on it.
+  // 3. If the browser is fullscreen and the page isn't loading, exit
+  //    fullscreen.
+  // 4. Ignore.
+  // Case 1 and 2 are handled before we get here. Below, we handle case 3.
+  if (StaticPrefs::browser_fullscreen_exit_on_escape() && [cocoaEvent keyCode] == kVK_Escape &&
+      [[mView window] styleMask] & NSWindowStyleMaskFullScreen) {
+    [[mView window] toggleFullScreen:nil];
+  }
+
   if (SendEventToNativeMenuSystem(cocoaEvent)) {
     aEvent->PreventDefault();
   }
@@ -1190,7 +1204,7 @@ void nsChildView::Invalidate(const LayoutDeviceIntRect& aRect) {
 
   if (!mView || !mVisible) return;
 
-  NS_ASSERTION(GetLayerManager()->GetBackendType() != LayersBackend::LAYERS_CLIENT,
+  NS_ASSERTION(GetWindowRenderer()->GetBackendType() != LayersBackend::LAYERS_CLIENT,
                "Shouldn't need to invalidate with accelerated OMTC layers!");
 
   EnsureContentLayerForMainThreadPainting();
@@ -1335,12 +1349,13 @@ bool nsChildView::PaintWindowInDrawTarget(gfx::DrawTarget* aDT,
   targetContext->Clip();
 
   nsAutoRetainCocoaObject kungFuDeathGrip(mView);
-  if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
+  if (GetWindowRenderer()->GetBackendType() == LayersBackend::LAYERS_NONE ||
+      GetWindowRenderer()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
     nsBaseWidget::AutoLayerManagerSetup setupLayerManager(this, targetContext,
                                                           BufferMode::BUFFER_NONE);
     return PaintWindow(aRegion);
   }
-  if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
+  if (GetWindowRenderer()->GetBackendType() == LayersBackend::LAYERS_CLIENT) {
     // We only need this so that we actually get DidPaintWindow fired
     return PaintWindow(aRegion);
   }
@@ -1386,7 +1401,8 @@ void nsChildView::PaintWindowInContentLayer() {
 void nsChildView::HandleMainThreadCATransaction() {
   WillPaintWindow();
 
-  if (GetLayerManager()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
+  if (GetWindowRenderer()->GetBackendType() == LayersBackend::LAYERS_NONE ||
+      GetWindowRenderer()->GetBackendType() == LayersBackend::LAYERS_BASIC) {
     // We're in BasicLayers mode, i.e. main thread software compositing.
     // Composite the window into our layer's surface.
     PaintWindowInContentLayer();
@@ -3169,6 +3185,11 @@ NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
   mGeckoChild->DispatchInputEvent(&geckoEvent);
 }
 
+static bool ShouldDispatchBackForwardCommandForMouseButton(int16_t aButton) {
+  return (aButton == MouseButton::eX1 && Preferences::GetBool("mousebutton.4th.enabled", true)) ||
+         (aButton == MouseButton::eX2 && Preferences::GetBool("mousebutton.5th.enabled", true));
+}
+
 - (void)otherMouseDown:(NSEvent*)theEvent {
   NS_OBJC_BEGIN_TRY_IGNORE_BLOCK;
 
@@ -3183,9 +3204,17 @@ NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
     return;
   }
 
+  int16_t button = nsCocoaUtils::ButtonForEvent(theEvent);
+  if (ShouldDispatchBackForwardCommandForMouseButton(button)) {
+    WidgetCommandEvent appCommandEvent(
+        true, (button == MouseButton::eX2) ? nsGkAtoms::Forward : nsGkAtoms::Back, mGeckoChild);
+    mGeckoChild->DispatchWindowEvent(appCommandEvent);
+    return;
+  }
+
   WidgetMouseEvent geckoEvent(true, eMouseDown, mGeckoChild, WidgetMouseEvent::eReal);
   [self convertCocoaMouseEvent:theEvent toGeckoEvent:&geckoEvent];
-  geckoEvent.mButton = MouseButton::eMiddle;
+  geckoEvent.mButton = button;
   geckoEvent.mClickCount = [theEvent clickCount];
 
   mGeckoChild->DispatchInputEvent(&geckoEvent);
@@ -3199,9 +3228,14 @@ NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
     return;
   }
 
+  int16_t button = nsCocoaUtils::ButtonForEvent(theEvent);
+  if (ShouldDispatchBackForwardCommandForMouseButton(button)) {
+    return;
+  }
+
   WidgetMouseEvent geckoEvent(true, eMouseUp, mGeckoChild, WidgetMouseEvent::eReal);
   [self convertCocoaMouseEvent:theEvent toGeckoEvent:&geckoEvent];
-  geckoEvent.mButton = MouseButton::eMiddle;
+  geckoEvent.mButton = button;
 
   nsAutoRetainCocoaObject kungFuDeathGrip(self);
   mGeckoChild->DispatchInputEvent(&geckoEvent);
@@ -3215,7 +3249,8 @@ NSEvent* gLastDragMouseDownEvent = nil;  // [strong]
 
   WidgetMouseEvent geckoEvent(true, eMouseMove, mGeckoChild, WidgetMouseEvent::eReal);
   [self convertCocoaMouseEvent:theEvent toGeckoEvent:&geckoEvent];
-  geckoEvent.mButton = MouseButton::eMiddle;
+  int16_t button = nsCocoaUtils::ButtonForEvent(theEvent);
+  geckoEvent.mButton = button;
 
   // send event into Gecko by going directly to the
   // the widget.
@@ -3359,8 +3394,7 @@ static gfx::IntPoint GetIntegerDeltaForEvent(NSEvent* aEvent) {
   if (usePreciseDeltas && hasPhaseInformation) {
     PanGestureInput panEvent(PanGestureTypeForEvent(theEvent), eventIntervalTime, eventTimeStamp,
                              position, preciseDelta, modifiers);
-    panEvent.mLineOrPageDeltaX = lineOrPageDelta.x;
-    panEvent.mLineOrPageDeltaY = lineOrPageDelta.y;
+    panEvent.SetLineOrPageDeltas(lineOrPageDelta.x, lineOrPageDelta.y);
 
     if (panEvent.mType == PanGestureInput::PANGESTURE_END) {
       // Check if there's a momentum start event in the event queue, so that we
@@ -3744,7 +3778,8 @@ static gfx::IntPoint GetIntegerDeltaForEvent(NSEvent* aEvent) {
     NSString* info = [NSString
         stringWithFormat:
             @"\nview [%@], window [%@], window is key %i, is fullscreen %i, app is active %i", self,
-            window, [window isKeyWindow], ([window styleMask] & (1 << 14)) != 0, [NSApp isActive]];
+            window, [window isKeyWindow], ([window styleMask] & NSWindowStyleMaskFullScreen) != 0,
+            [NSApp isActive]];
     nsAutoCString additionalInfo([info UTF8String]);
 
     if (mGeckoChild->GetInputContext().IsPasswordEditor() &&

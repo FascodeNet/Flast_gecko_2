@@ -39,12 +39,15 @@
 namespace mozilla {
 namespace baseprofiler {
 
-int profiler_current_process_id() { return _getpid(); }
+BaseProfilerProcessId profiler_current_process_id() {
+  return BaseProfilerProcessId::FromNumber(_getpid());
+}
 
-int profiler_current_thread_id() {
+BaseProfilerThreadId profiler_current_thread_id() {
   DWORD threadId = GetCurrentThreadId();
   MOZ_ASSERT(threadId <= INT32_MAX, "native thread ID is > INT32_MAX");
-  return int(threadId);
+  return BaseProfilerThreadId::FromNumber(
+      static_cast<BaseProfilerThreadId::NumberType>(threadId));
 }
 
 static int64_t MicrosecondsSince1970() {
@@ -107,9 +110,9 @@ class PlatformData {
   // Get a handle to the calling thread. This is the thread that we are
   // going to profile. We need a real handle because we are going to use it in
   // the sampler thread.
-  explicit PlatformData(int aThreadId)
+  explicit PlatformData(BaseProfilerThreadId aThreadId)
       : mProfiledThread(GetRealCurrentThreadHandleForProfiling()) {
-    MOZ_ASSERT(aThreadId == ::GetCurrentThreadId());
+    MOZ_ASSERT(DWORD(aThreadId.ToNumber()) == ::GetCurrentThreadId());
   }
 
   ~PlatformData() {
@@ -258,7 +261,7 @@ void SamplerThread::SleepMicro(uint32_t aMicroseconds) {
   if (mIntervalMicroseconds >= 1000) {
     ::Sleep(std::max(1u, aMicroseconds / 1000));
   } else {
-    TimeStamp start = TimeStamp::NowUnfuzzed();
+    TimeStamp start = TimeStamp::Now();
     TimeStamp end = start + TimeDuration::FromMicroseconds(aMicroseconds);
 
     // First, sleep for as many whole milliseconds as possible.
@@ -267,7 +270,7 @@ void SamplerThread::SleepMicro(uint32_t aMicroseconds) {
     }
 
     // Then, spin until enough time has passed.
-    while (TimeStamp::NowUnfuzzed() < end) {
+    while (TimeStamp::Now() < end) {
       YieldProcessor();
     }
   }

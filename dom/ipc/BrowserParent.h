@@ -255,6 +255,7 @@ class BrowserParent final : public PBrowserParent,
 
   void AddWindowListeners();
 
+  mozilla::ipc::IPCResult RecvDidUnsuppressPainting();
   mozilla::ipc::IPCResult RecvMoveFocus(const bool& aForward,
                                         const bool& aForDocumentNavigation);
 
@@ -455,7 +456,7 @@ class BrowserParent final : public PBrowserParent,
   void ResumeLoad(uint64_t aPendingSwitchID);
 
   void InitRendering();
-  bool AttachLayerManager();
+  bool AttachWindowRenderer();
   void MaybeShowFrame();
 
   bool Show(const OwnerShowInfo&);
@@ -524,7 +525,7 @@ class BrowserParent final : public PBrowserParent,
       const uint32_t& aPointerOrientation, const uint64_t& aObserverId);
 
   mozilla::ipc::IPCResult RecvSynthesizeNativeTouchPadPinch(
-      const TouchpadPinchPhase& aEventPhase, const float& aScale,
+      const TouchpadGesturePhase& aEventPhase, const float& aScale,
       const LayoutDeviceIntPoint& aPoint, const int32_t& aModifierFlags);
 
   mozilla::ipc::IPCResult RecvSynthesizeNativeTouchTap(
@@ -542,6 +543,11 @@ class BrowserParent final : public PBrowserParent,
 
   mozilla::ipc::IPCResult RecvSynthesizeNativeTouchpadDoubleTap(
       const LayoutDeviceIntPoint& aPoint, const uint32_t& aModifierFlags);
+
+  mozilla::ipc::IPCResult RecvSynthesizeNativeTouchpadPan(
+      const TouchpadGesturePhase& aEventPhase,
+      const LayoutDeviceIntPoint& aPoint, const double& aDeltaX,
+      const double& aDeltaY, const int32_t& aModifierFlags);
 
   mozilla::ipc::IPCResult RecvLockNativePointer();
 
@@ -696,10 +702,6 @@ class BrowserParent final : public PBrowserParent,
   void PreserveLayers(bool aPreserveLayers);
   void NotifyResolutionChanged();
 
-  bool StartApzAutoscroll(float aAnchorX, float aAnchorY, nsViewID aScrollId,
-                          uint32_t aPresShellId);
-  void StopApzAutoscroll(nsViewID aScrollId, uint32_t aPresShellId);
-
   bool CanCancelContentJS(nsIRemoteTab::NavigationType aNavigationType,
                           int32_t aNavigationIndex,
                           nsIURI* aNavigationURI) const;
@@ -721,8 +723,6 @@ class BrowserParent final : public PBrowserParent,
   virtual mozilla::ipc::IPCResult Recv__delete__() override;
 
   virtual void ActorDestroy(ActorDestroyReason why) override;
-
-  mozilla::ipc::IPCResult RecvRemotePaintIsReady();
 
   mozilla::ipc::IPCResult RecvRemoteIsReadyToHandleInputEvents();
 
@@ -755,6 +755,8 @@ class BrowserParent final : public PBrowserParent,
   mozilla::ipc::IPCResult RecvRequestPointerCapture(
       const uint32_t& aPointerId, RequestPointerCaptureResolver&& aResolve);
   mozilla::ipc::IPCResult RecvReleasePointerCapture(const uint32_t& aPointerId);
+
+  mozilla::ipc::IPCResult RecvShowDynamicToolbar();
 
  private:
   void SuppressDisplayport(bool aEnabled);
@@ -976,6 +978,9 @@ class BrowserParent final : public PBrowserParent,
   // True after RecvLockNativePointer has been called and until
   // UnlockNativePointer has been called.
   bool mLockedNativePointer : 1;
+
+  // True between ShowTooltip and HideTooltip messages.
+  bool mShowingTooltip : 1;
 };
 
 struct MOZ_STACK_CLASS BrowserParent::AutoUseNewTab final {

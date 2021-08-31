@@ -330,19 +330,77 @@
         "SELECT note_sync_change(); "                                       \
         "END")
 
+// This trigger updates last_interaction_at when interactions are created. It
+// also updates first_interaction_at and document_type in cases where a snapshot
+// was created before its corresponding interaction.
+#  define CREATE_PLACES_METADATA_AFTERINSERT_TRIGGER                   \
+    nsLiteralCString(                                                  \
+        "CREATE TEMP TRIGGER moz_places_metadata_afterinsert_trigger " \
+        "AFTER INSERT ON moz_places_metadata "                         \
+        "FOR EACH ROW  "                                               \
+        "BEGIN "                                                       \
+        "UPDATE moz_places_metadata_snapshots "                        \
+        "SET last_interaction_at = NEW.created_at "                    \
+        "WHERE place_id = NEW.place_id; "                              \
+        "UPDATE moz_places_metadata_snapshots "                        \
+        "SET first_interaction_at = NEW.created_at, document_type = "  \
+          "CASE WHEN NEW.document_type <> 0 "                          \
+          "THEN NEW.document_type ELSE document_type END "             \
+        "WHERE place_id = NEW.place_id AND first_interaction_at = 0;"  \
+        "END")
+
 // This trigger removes orphan search terms when interactions are removed from
 // the metadata table.
-#  define CREATE_PLACES_METADATA_DELETED_AFTERDELETE_TRIGGER           \
+#  define CREATE_PLACES_METADATA_AFTERDELETE_TRIGGER                   \
     nsLiteralCString(                                                  \
         "CREATE TEMP TRIGGER moz_places_metadata_afterdelete_trigger " \
         "AFTER DELETE ON moz_places_metadata "                         \
         "FOR EACH ROW "                                                \
         "BEGIN "                                                       \
-        "DELETE FROM moz_places_metadata_search_queries WHERE id = "   \
-        "OLD.search_query_id AND NOT EXISTS ("                         \
+        "DELETE FROM moz_places_metadata_search_queries "              \
+        "WHERE id = OLD.search_query_id AND NOT EXISTS ("              \
         "SELECT id FROM moz_places_metadata "                          \
-        "WHERE search_query_id = OLD.search_query_id"                  \
-        ");"                                                           \
+        "WHERE search_query_id = OLD.search_query_id "                 \
+        "); "                                                          \
+        "END")
+
+// This trigger increments foreign_count when snapshots are created.
+#  define CREATE_PLACES_METADATA_SNAPSHOTS_AFTERINSERT_TRIGGER     \
+    nsLiteralCString(                                              \
+        "CREATE TEMP TRIGGER "                                     \
+        "moz_places_metadata_snapshots_afterinsert_trigger "       \
+        "AFTER INSERT ON moz_places_metadata_snapshots "           \
+        "FOR EACH ROW "                                            \
+        "BEGIN "                                                   \
+        "UPDATE moz_places SET foreign_count = foreign_count + 1 " \
+        "WHERE id = NEW.place_id; "                                \
+        "END")
+
+// This trigger decrements foreign_count when snapshots are removed.
+#  define CREATE_PLACES_METADATA_SNAPSHOTS_AFTERDELETE_TRIGGER     \
+    nsLiteralCString(                                              \
+        "CREATE TEMP TRIGGER "                                     \
+        "moz_places_metadata_snapshots_afterdelete_trigger "       \
+        "AFTER DELETE ON moz_places_metadata_snapshots "           \
+        "FOR EACH ROW "                                            \
+        "BEGIN "                                                   \
+        "UPDATE moz_places SET foreign_count = foreign_count - 1 " \
+        "WHERE id = OLD.place_id; "                                \
+        "END")
+
+// This trigger removes orphan groups when snapshots are removed.
+#  define CREATE_PLACES_METADATA_SNAPSHOTS_GROUPS_AFTERDELETE_TRIGGER   \
+    nsLiteralCString(                                                   \
+        "CREATE TEMP TRIGGER "                                          \
+        "moz_places_metadata_groups_to_snapshots_afterdelete_trigger "  \
+        "AFTER DELETE ON moz_places_metadata_groups_to_snapshots "      \
+        "FOR EACH ROW "                                                 \
+        "BEGIN "                                                        \
+        "DELETE FROM moz_places_metadata_groups "                       \
+        "WHERE id = OLD.id AND NOT EXISTS ( "                           \
+        "SELECT group_id FROM moz_places_metadata_groups_to_snapshots " \
+        "WHERE group_id = OLD.id "                                      \
+        "); "                                                           \
         "END")
 
 #endif  // __nsPlacesTriggers_h__

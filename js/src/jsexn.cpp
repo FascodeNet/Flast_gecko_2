@@ -34,6 +34,7 @@
 #include "js/experimental/TypedData.h"  // JS_IsArrayBufferViewObject
 #include "js/friend/ErrorMessages.h"  // JSErrNum, js::GetErrorMessage, JSMSG_*
 #include "js/Object.h"                // JS::GetBuiltinClass
+#include "js/PropertyAndElement.h"    // JS_GetProperty, JS_HasProperty
 #include "js/SavedFrameAPI.h"
 #include "js/UniquePtr.h"
 #include "js/Value.h"
@@ -289,14 +290,6 @@ JS_PUBLIC_API JSLinearString* js::GetErrorTypeName(JSContext* cx,
 void js::ErrorToException(JSContext* cx, JSErrorReport* reportp,
                           JSErrorCallback callback, void* userRef) {
   MOZ_ASSERT(!reportp->isWarning());
-
-  // We cannot throw a proper object inside the self-hosting realm, as we
-  // cannot construct the Error constructor without self-hosted code. Just
-  // print the error to stderr to help debugging.
-  if (cx->realm()->isSelfHostingRealm()) {
-    JS::PrintError(stderr, reportp, true);
-    return;
-  }
 
   // Find the exception index associated with this error.
   JSErrNum errorNumber = static_cast<JSErrNum>(reportp->errorNumber);

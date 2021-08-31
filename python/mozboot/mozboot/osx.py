@@ -121,13 +121,6 @@ class OSXBootstrapperLight(BaseBootstrapper):
 
 
 class OSXBootstrapper(BaseBootstrapper):
-
-    INSTALL_PYTHON_GUIDANCE = (
-        "See https://firefox-source-docs.mozilla.org/setup/macos_build.html "
-        "for guidance on how to prepare your system to build Firefox. Perhaps "
-        "you need to update Xcode, or install Python using brew?"
-    )
-
     def __init__(self, version, **kwargs):
         BaseBootstrapper.__init__(self, **kwargs)
 
@@ -160,13 +153,61 @@ class OSXBootstrapper(BaseBootstrapper):
     def install_browser_artifact_mode_packages(self, mozconfig_builder):
         pass
 
-    def install_mobile_android_packages(self, mozconfig_builder):
-        self.ensure_homebrew_mobile_android_packages(mozconfig_builder)
+    def install_mobile_android_packages(self, mozconfig_builder, artifact_mode=False):
+        # Multi-part process:
+        # 1. System packages.
+        # 2. Android SDK. Android NDK only if we are not in artifact mode. Android packages.
+
+        # 1. System packages.
+        packages = ["wget"]
+        self._ensure_homebrew_packages(packages)
+
+        casks = ["adoptopenjdk8"]
+        self._ensure_homebrew_casks(casks)
+
+        is_64bits = sys.maxsize > 2 ** 32
+        if not is_64bits:
+            raise Exception(
+                "You need a 64-bit version of Mac OS X to build "
+                "GeckoView/Firefox for Android."
+            )
+
+        # 2. Android pieces.
+        java_path = self.ensure_java(mozconfig_builder)
+        # Prefer our validated java binary by putting it on the path first.
+        os.environ["PATH"] = "{}{}{}".format(java_path, os.pathsep, os.environ["PATH"])
+        from mozboot import android
+
+        android.ensure_android(
+            "macosx", artifact_mode=artifact_mode, no_interactive=self.no_interactive
+        )
+        android.ensure_android(
+            "macosx",
+            system_images_only=True,
+            artifact_mode=artifact_mode,
+            no_interactive=self.no_interactive,
+            avd_manifest_path=android.AVD_MANIFEST_X86_64,
+        )
+        android.ensure_android(
+            "macosx",
+            system_images_only=True,
+            artifact_mode=artifact_mode,
+            no_interactive=self.no_interactive,
+            avd_manifest_path=android.AVD_MANIFEST_ARM,
+        )
+
+    def ensure_mobile_android_packages(self, state_dir, checkout_root):
+        from mozboot import android
+
+        self.install_toolchain_artifact(
+            state_dir, checkout_root, android.MACOS_X86_64_ANDROID_AVD
+        )
+        self.install_toolchain_artifact(
+            state_dir, checkout_root, android.MACOS_ARM_ANDROID_AVD
+        )
 
     def install_mobile_android_artifact_mode_packages(self, mozconfig_builder):
-        self.ensure_homebrew_mobile_android_packages(
-            mozconfig_builder, artifact_mode=True
-        )
+        self.install_mobile_android_packages(mozconfig_builder, artifact_mode=True)
 
     def generate_mobile_android_mozconfig(self):
         return self._generate_mobile_android_mozconfig()
@@ -237,37 +278,6 @@ class OSXBootstrapper(BaseBootstrapper):
         packages = ["yasm"]
         self._ensure_homebrew_packages(packages)
 
-    def ensure_homebrew_mobile_android_packages(
-        self, mozconfig_builder, artifact_mode=False
-    ):
-        # Multi-part process:
-        # 1. System packages.
-        # 2. Android SDK. Android NDK only if we are not in artifact mode. Android packages.
-
-        # 1. System packages.
-        packages = ["wget"]
-        self._ensure_homebrew_packages(packages)
-
-        casks = ["adoptopenjdk8"]
-        self._ensure_homebrew_casks(casks)
-
-        is_64bits = sys.maxsize > 2 ** 32
-        if not is_64bits:
-            raise Exception(
-                "You need a 64-bit version of Mac OS X to build "
-                "GeckoView/Firefox for Android."
-            )
-
-        # 2. Android pieces.
-        java_path = self.ensure_java(mozconfig_builder)
-        # Prefer our validated java binary by putting it on the path first.
-        os.environ["PATH"] = "{}{}{}".format(java_path, os.pathsep, os.environ["PATH"])
-        from mozboot import android
-
-        android.ensure_android(
-            "macosx", artifact_mode=artifact_mode, no_interactive=self.no_interactive
-        )
-
     def ensure_homebrew_installed(self):
         """
         Search for Homebrew in sys.path, if not found, prompt the user to install it.
@@ -335,13 +345,6 @@ class OSXBootstrapper(BaseBootstrapper):
 
         self.install_toolchain_artifact(
             state_dir, checkout_root, minidump_stackwalk.MACOS_MINIDUMP_STACKWALK
-        )
-
-    def ensure_dump_syms_packages(self, state_dir, checkout_root):
-        from mozboot import dump_syms
-
-        self.install_toolchain_artifact(
-            state_dir, checkout_root, dump_syms.MACOS_DUMP_SYMS
         )
 
     def install_homebrew(self):

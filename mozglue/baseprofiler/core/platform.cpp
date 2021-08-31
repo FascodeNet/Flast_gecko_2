@@ -181,9 +181,11 @@ void PrintToConsole(const char* aFmt, ...) {
   va_end(args);
 }
 
+namespace detail {
 // Statically initialized to 0, then set once from profiler_init(), which should
 // be called from the main thread before any other use of the profiler.
-int scProfilerMainThreadId;
+BaseProfilerThreadId scProfilerMainThreadId;
+}  // namespace detail
 
 constexpr static bool ValidateFeatures() {
   int expectedFeatureNumber = 0;
@@ -246,8 +248,6 @@ static uint32_t StartupExtraDefaultFeatures() {
   return ProfilerFeature::MainThreadIO;
 }
 
-class MOZ_RAII PSAutoTryLock;
-
 // The auto-lock/unlock mutex that guards accesses to CorePS and ActivePS.
 // Use `PSAutoLock lock;` to take the lock until the end of the enclosing block.
 // External profilers may use this same lock for their own data, but as the lock
@@ -255,9 +255,7 @@ class MOZ_RAII PSAutoTryLock;
 // called, to avoid double-locking.
 class MOZ_RAII PSAutoLock {
  public:
-  PSAutoLock() { gPSMutex.Lock(); }
-
-  ~PSAutoLock() { gPSMutex.Unlock(); }
+  PSAutoLock() : mLock(gPSMutex) {}
 
   PSAutoLock(const PSAutoLock&) = delete;
   void operator=(const PSAutoLock&) = delete;
@@ -267,47 +265,11 @@ class MOZ_RAII PSAutoLock {
   }
 
  private:
-  // Allow PSAutoTryLock to access gPSMutex, and to call the following
-  // `PSAutoLock(int)` constructor through `Maybe<const PSAutoLock>::emplace()`.
-  friend class PSAutoTryLock;
-  friend class Maybe<const PSAutoLock>;
-
-  // Special constructor for an already-locked gPSMutex. The `int` parameter is
-  // necessary to distinguish it from the main constructor.
-  explicit PSAutoLock(int) { gPSMutex.AssertCurrentThreadOwns(); }
-
   static detail::BaseProfilerMutex gPSMutex;
+  detail::BaseProfilerAutoLock mLock;
 };
 
-// RAII class that attempts to lock the profiler mutex. Example usage:
-//   PSAutoTryLock tryLock;
-//   if (tryLock.IsLocked()) { locked_foo(tryLock.LockRef()); }
-class MOZ_RAII PSAutoTryLock {
- public:
-  PSAutoTryLock() {
-    if (PSAutoLock::gPSMutex.TryLock()) {
-      mMaybePSAutoLock.emplace(0);
-    }
-  }
-
-  // Return true if the mutex was aquired and locked.
-  [[nodiscard]] bool IsLocked() const { return mMaybePSAutoLock.isSome(); }
-
-  // Assuming the mutex is locked, return a reference to a `PSAutoLock` for that
-  // mutex, which can be passed as proof-of-lock.
-  [[nodiscard]] const PSAutoLock& LockRef() const {
-    MOZ_ASSERT(IsLocked());
-    return mMaybePSAutoLock.ref();
-  }
-
- private:
-  // `mMaybePSAutoLock` is `Nothing` if locking failed, otherwise it contains a
-  // `const PSAutoLock` holding the locked mutex, and whose reference may be
-  // passed to functions expecting a proof-of-lock.
-  Maybe<const PSAutoLock> mMaybePSAutoLock;
-};
-
-detail::BaseProfilerMutex PSAutoLock::gPSMutex;
+detail::BaseProfilerMutex PSAutoLock::gPSMutex{"Base Profiler mutex"};
 
 // Only functions that take a PSLockRef arg can access CorePS's and ActivePS's
 // fields.
@@ -727,7 +689,8 @@ class ActivePS {
 
       // If the filter starts with pid:, check for a pid match
       if (filter.find("pid:") == 0) {
-        std::string mypid = std::to_string(profiler_current_process_id());
+        std::string mypid =
+            std::to_string(profiler_current_process_id().ToNumber());
         if (filter.compare(4, std::string::npos, mypid) == 0) {
           return true;
         }
@@ -1862,7 +1825,7 @@ static void StreamMetaJSCustomObject(PSLockRef aLock,
   // The "startTime" field holds the number of milliseconds since midnight
   // January 1, 1970 GMT. This grotty code computes (Now - (Now -
   // ProcessStartTime)) to convert CorePS::ProcessStartTime() into that form.
-  TimeDuration delta = TimeStamp::NowUnfuzzed() - CorePS::ProcessStartTime();
+  TimeDuration delta = TimeStamp::Now() - CorePS::ProcessStartTime();
   aWriter.DoubleProperty(
       "startTime", MicrosecondsSince1970() / 1000.0 - delta.ToMilliseconds());
 
@@ -2189,11 +2152,11 @@ class Sampler {
 
   // This process' ID. Needed as an argument for tgkill in
   // SuspendAndSampleAndResumeThread.
-  int mMyPid;
+  BaseProfilerProcessId mMyPid;
 
   // The sampler thread's ID.  Used to assert that it is not sampling itself,
   // which would lead to deadlock.
-  int mSamplerTid;
+  BaseProfilerThreadId mSamplerTid;
 
  public:
   // This is the one-and-only variable used to communicate between the sampler
@@ -2304,13 +2267,13 @@ void SamplerThread::Run() {
   // This will be positive if we are running behind schedule (sampling less
   // frequently than desired) and negative if we are ahead of schedule.
   TimeDuration lastSleepOvershoot = 0;
-  TimeStamp sampleStart = TimeStamp::NowUnfuzzed();
+  TimeStamp sampleStart = TimeStamp::Now();
 
   while (true) {
     // This scope is for |lock|. It ends before we sleep below.
     {
       PSAutoLock lock;
-      TimeStamp lockAcquired = TimeStamp::NowUnfuzzed();
+      TimeStamp lockAcquired = TimeStamp::Now();
 
       if (!ActivePS::Exists(lock)) {
         return;
@@ -2325,7 +2288,7 @@ void SamplerThread::Run() {
 
       ActivePS::ClearExpiredExitProfiles(lock);
 
-      TimeStamp expiredMarkersCleaned = TimeStamp::NowUnfuzzed();
+      TimeStamp expiredMarkersCleaned = TimeStamp::Now();
 
       if (!ActivePS::IsSamplingPaused(lock)) {
         TimeDuration delta = sampleStart - CorePS::ProcessStartTime();
@@ -2350,7 +2313,7 @@ void SamplerThread::Run() {
             buffer.AddEntry(ProfileBufferEntry::Number(number));
           }
         }
-        TimeStamp countersSampled = TimeStamp::NowUnfuzzed();
+        TimeStamp countersSampled = TimeStamp::Now();
 
         if (stackSampling) {
           const Vector<LiveProfiledThreadData>& liveThreads =
@@ -2377,7 +2340,7 @@ void SamplerThread::Run() {
 
             AUTO_PROFILER_STATS(base_SamplerThread_Run_DoPeriodicSample);
 
-            TimeStamp now = TimeStamp::NowUnfuzzed();
+            TimeStamp now = TimeStamp::Now();
 
             // Record the global profiler buffer's range start now, before
             // adding the first entry for this thread's sample.
@@ -2433,7 +2396,7 @@ void SamplerThread::Run() {
           lul->MaybeShowStats();
         }
 #endif
-        TimeStamp threadsSampled = TimeStamp::NowUnfuzzed();
+        TimeStamp threadsSampled = TimeStamp::Now();
 
         {
           AUTO_PROFILER_STATS(Sampler_FulfillChunkRequests);
@@ -2455,12 +2418,12 @@ void SamplerThread::Run() {
     // actual sleep intervals.
     TimeStamp targetSleepEndTime =
         sampleStart + TimeDuration::FromMicroseconds(mIntervalMicroseconds);
-    TimeStamp beforeSleep = TimeStamp::NowUnfuzzed();
+    TimeStamp beforeSleep = TimeStamp::Now();
     TimeDuration targetSleepDuration = targetSleepEndTime - beforeSleep;
     double sleepTime = std::max(
         0.0, (targetSleepDuration - lastSleepOvershoot).ToMicroseconds());
     SleepMicro(static_cast<uint32_t>(sleepTime));
-    sampleStart = TimeStamp::NowUnfuzzed();
+    sampleStart = TimeStamp::Now();
     lastSleepOvershoot =
         sampleStart - (beforeSleep + TimeDuration::FromMicroseconds(sleepTime));
   }
@@ -2486,7 +2449,7 @@ void SamplerThread::Run() {
 namespace mozilla {
 namespace baseprofiler {
 
-UniquePlatformData AllocPlatformData(int aThreadId) {
+UniquePlatformData AllocPlatformData(BaseProfilerThreadId aThreadId) {
   return UniquePlatformData(new PlatformData(aThreadId));
 }
 
@@ -2533,7 +2496,7 @@ uint32_t ParseFeaturesFromStringArray(const char** aFeatures,
 // Find the RegisteredThread for the current thread. This should only be called
 // in places where TLSRegisteredThread can't be used.
 static RegisteredThread* FindCurrentThreadRegisteredThread(PSLockRef aLock) {
-  int id = profiler_current_thread_id();
+  BaseProfilerThreadId id = profiler_current_thread_id();
   const Vector<UniquePtr<RegisteredThread>>& registeredThreads =
       CorePS::RegisteredThreads(aLock);
   for (auto& registeredThread : registeredThreads) {
@@ -2609,7 +2572,7 @@ static Vector<const char*> SplitAtCommas(const char* aString,
 void profiler_init(void* aStackTop) {
   LOG("profiler_init");
 
-  scProfilerMainThreadId = profiler_current_thread_id();
+  detail::scProfilerMainThreadId = profiler_current_thread_id();
 
   VTUNE_INIT();
 
@@ -3403,12 +3366,13 @@ ProfilingStack* profiler_register_thread(const char* aName,
   if (RegisteredThread* thread = FindCurrentThreadRegisteredThread(lock);
       thread) {
     LOG("profiler_register_thread(%s) - thread %d already registered as %s",
-        aName, profiler_current_thread_id(), thread->Info()->Name());
+        aName, int(profiler_current_thread_id().ToNumber()),
+        thread->Info()->Name());
     // TODO: Use new name. This is currently not possible because the
     // RegisteredThread's ThreadInfo cannot be changed.
     // In the meantime, we record a marker that could be used in the frontend.
     std::string text("Thread ");
-    text += std::to_string(profiler_current_thread_id());
+    text += std::to_string(profiler_current_thread_id().ToNumber());
     text += " \"";
     text += thread->Info()->Name();
     text += "\" attempted to re-register as \"";
@@ -3453,16 +3417,17 @@ void profiler_unregister_thread() {
     CorePS::RemoveRegisteredThread(lock, registeredThread);
   } else {
     LOG("profiler_unregister_thread() - thread %d already unregistered",
-        profiler_current_thread_id());
+        (profiler_current_thread_id().ToNumber()));
     // We cannot record a marker on this thread because it was already
     // unregistered. Send it to the main thread (unless this *is* already the
     // main thread, which has been unregistered); this may be useful to catch
     // mismatched register/unregister pairs in Firefox.
-    if (int tid = profiler_current_thread_id();
+    if (BaseProfilerThreadId tid = profiler_current_thread_id();
         tid != profiler_main_thread_id()) {
-      BASE_PROFILER_MARKER_TEXT("profiler_unregister_thread again",
-                                OTHER_Profiling, MarkerThreadId::MainThread(),
-                                std::to_string(profiler_current_thread_id()));
+      BASE_PROFILER_MARKER_TEXT(
+          "profiler_unregister_thread again", OTHER_Profiling,
+          MarkerThreadId::MainThread(),
+          std::to_string(profiler_current_thread_id().ToNumber()));
     }
     // There are two ways FindCurrentThreadRegisteredThread() might have failed.
     //
@@ -3585,7 +3550,7 @@ bool profiler_thread_is_sleeping() {
 double profiler_time() {
   MOZ_RELEASE_ASSERT(CorePS::Exists());
 
-  TimeDuration delta = TimeStamp::NowUnfuzzed() - CorePS::ProcessStartTime();
+  TimeDuration delta = TimeStamp::Now() - CorePS::ProcessStartTime();
   return delta.ToMilliseconds();
 }
 
@@ -3616,8 +3581,8 @@ bool profiler_capture_backtrace_into(ProfileChunkedBuffer& aChunkedBuffer,
   regs.Clear();
 #endif
 
-  DoSyncSample(lock, *registeredThread, TimeStamp::NowUnfuzzed(), regs,
-               profileBuffer, aCaptureOptions);
+  DoSyncSample(lock, *registeredThread, TimeStamp::Now(), regs, profileBuffer,
+               aCaptureOptions);
 
   return true;
 }
@@ -3682,12 +3647,13 @@ void profiler_add_js_marker(const char* aMarkerName, const char* aMarkerText) {
 // NOTE: aCollector's methods will be called while the target thread is paused.
 // Doing things in those methods like allocating -- which may try to claim
 // locks -- is a surefire way to deadlock.
-void profiler_suspend_and_sample_thread(int aThreadId, uint32_t aFeatures,
+void profiler_suspend_and_sample_thread(BaseProfilerThreadId aThreadId,
+                                        uint32_t aFeatures,
                                         ProfilerStackCollector& aCollector,
                                         bool aSampleNative /* = true */) {
   const bool isSynchronous = [&aThreadId]() {
-    const int currentThreadId = profiler_current_thread_id();
-    if (aThreadId == 0) {
+    const BaseProfilerThreadId currentThreadId = profiler_current_thread_id();
+    if (!aThreadId.IsSpecified()) {
       aThreadId = currentThreadId;
       return true;
     }
@@ -3753,7 +3719,7 @@ void profiler_suspend_and_sample_thread(int aThreadId, uint32_t aFeatures,
       } else {
         // Suspend, sample, and then resume the target thread.
         Sampler sampler(lock);
-        TimeStamp now = TimeStamp::NowUnfuzzed();
+        TimeStamp now = TimeStamp::Now();
         sampler.SuspendAndSampleAndResumeThread(lock, registeredThread, now,
                                                 collectStack);
 

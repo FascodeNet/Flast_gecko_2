@@ -256,6 +256,18 @@ var whitelist = [
     file: "resource://gre/localization/en-US/toolkit/about/aboutThirdParty.ftl",
     platforms: ["linux", "macosx"],
   },
+  // Bug 1721741:
+  // (The references to these files are dynamically generated, so the test can't
+  // find the references)
+  { file: "chrome://browser/content/screenshots/copied-notification.svg" },
+  {
+    file:
+      "chrome://browser/content/screenshots/icon-welcome-face-without-eyes.svg",
+  },
+  { file: "chrome://browser/content/screenshots/menu-fullpage.svg" },
+  { file: "chrome://browser/content/screenshots/menu-visible.svg" },
+
+  { file: "resource://app/modules/SnapshotSelector.jsm" },
 ];
 
 if (AppConstants.NIGHTLY_BUILD && AppConstants.platform != "win") {
@@ -710,6 +722,7 @@ function chromeFileExists(aURI) {
     let channel = NetUtil.newChannel({
       uri: aURI,
       loadUsingSystemPrincipal: true,
+      contentPolicyType: Ci.nsIContentPolicy.TYPE_FETCH,
     });
     let stream = channel.open();
     let sstream = Cc["@mozilla.org/scriptableinputstream;1"].createInstance(

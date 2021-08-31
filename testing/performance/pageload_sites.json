@@ -16,12 +16,6 @@
       "test_url": "https://www.amazon.com/s/ref=nb_sb_noss_2/139-6317191-5622045?url=search-alias%3Daps&field-keywords=mobile+phone"
     },
     {
-      "login": true,
-      "comment": "not login test but fails to load",
-      "name": "bbc",
-      "test_url": "https://www.bbc.com/news/business-47245877"
-    },
-    {
       "login": false,
       "name": "bing",
       "test_url": "https://www.bing.com/"
@@ -45,6 +39,11 @@
       "login": false,
       "name": "cnn-ampstories",
       "test_url": "https://cnn.com/ampstories/us/why-hurricane-michael-is-a-monster-unlike-any-other"
+    },
+    {
+      "login": false,
+      "name": "dailymail",
+      "test_url": "https://www.dailymail.co.uk/sciencetech/article-9749081/Experts-say-Hubble-repair-despite-NASA-insisting-multiple-options-fix.html"
     },
     {
       "login": false,
@@ -97,10 +96,9 @@
       "test_url": "https://www.instagram.com"
     },
     {
-      "login": true,
-      "comment": "not login test but fails to load properly",
-      "name": "jianshu",
-      "test_url": "https://www.jianshu.com/"
+      "login": false,
+      "name": "sina",
+      "test_url": "https://www.sina.com.cn/"
     },
     {
       "login": false,
@@ -145,21 +143,6 @@
       "test_url": "https://www.amazon.com/s?k=laptop&ref=nb_sb_noss_1"
     },
     {
-      "login": true,
-      "name": "facebook",
-      "test_url": "https://www.facebook.com"
-    },
-    {
-      "login": true,
-      "name": "google",
-      "test_url": "https://www.google.com/search?hl=en&q=barack+obama&cad=h"
-    },
-    {
-      "login": false,
-      "name": "youtube",
-      "test_url": "https://www.youtube.com"
-    },
-    {
       "login": false,
       "name": "bing-search",
       "test_url": "https://www.bing.com/search?q=barack+obama"
@@ -190,6 +173,16 @@
       "test_url": "https://expedia.com/Hotel-Search?destination=New+York%2C+New+York&latLong=40.756680%2C-73.986470&regionId=178293&startDate=&endDate=&rooms=1&_xpid=11905%7C1&adults=2"
     },
     {
+      "login": true,
+      "name": "facebook",
+      "test_url": "https://www.facebook.com"
+    },
+    {
+      "login": true,
+      "name": "google",
+      "test_url": "https://www.google.com/search?hl=en&q=barack+obama&cad=h"
+    },
+    {
       "login": false,
       "name": "fandom",
       "test_url": "https://www.fandom.com/articles/fallout-76-will-live-and-die-on-the-creativity-of-its-playerbase"
@@ -198,6 +191,11 @@
       "login": false,
       "name": "google-docs",
       "test_url": "https://docs.google.com/document/d/1US-07msg12slQtI_xchzYxcKlTs6Fp7WqIc6W5GK5M8/edit?usp=sharing"
+    },
+    {
+      "login": false,
+      "name": "google-docs-canvas",
+      "test_url": "https://docs.google.com/document/d/1vUnn0ePU-ynArE1OdxyEHXR2G0sl74ja_st_4OOzlgE/preview"
     },
     {
       "login": true,
@@ -298,6 +296,11 @@
       "login": true,
       "name": "yahoo-mail",
       "test_url": "https://mail.yahoo.com/"
+    },
+    {
+      "login": false,
+      "name": "youtube",
+      "test_url": "https://www.youtube.com"
     }
   ]
 }

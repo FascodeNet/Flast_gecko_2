@@ -99,23 +99,39 @@ var Sanitizer = {
   shouldSanitizeNewTabContainer: false,
 
   /**
-   * Shows a sanitization dialog to the user.
+   * Shows a sanitization dialog to the user. Returns after the dialog box has
+   * closed.
    *
-   * @param [optional] parentWindow the window to use as
-   *                   parent for the created dialog.
+   * @param parentWindow the browser window to use as parent for the created
+   *        dialog.
+   * @throws if parentWindow is undefined or doesn't have a gDialogBox.
    */
   showUI(parentWindow) {
-    let win =
-      AppConstants.platform == "macosx"
-        ? null // make this an app-modal window on Mac
-        : parentWindow;
-    Services.ww.openWindow(
-      win,
-      "chrome://browser/content/sanitize.xhtml",
-      "Sanitize",
-      "chrome,titlebar,dialog,centerscreen,modal",
-      null
-    );
+    // Treat the hidden window as not being a parent window:
+    if (
+      parentWindow?.document.documentURI ==
+      "chrome://browser/content/hiddenWindowMac.xhtml"
+    ) {
+      parentWindow = null;
+    }
+    if (parentWindow?.gDialogBox) {
+      parentWindow.gDialogBox.open("chrome://browser/content/sanitize.xhtml", {
+        inBrowserWindow: true,
+      });
+    } else {
+      let arg = {
+        needNativeUI: true,
+        QueryInterface: ChromeUtils.generateQI([]),
+      };
+      arg.wrappedJSObject = arg;
+      Services.ww.openWindow(
+        parentWindow,
+        "chrome://browser/content/sanitize.xhtml",
+        "Sanitize",
+        "chrome,titlebar,dialog,centerscreen,modal",
+        arg
+      );
+    }
   },
 
   /**

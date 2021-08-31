@@ -622,7 +622,7 @@ hb_face_t* gfxFontEntry::GetHBFace() {
 
 struct gfxFontEntry::GrSandboxData {
   rlbox_sandbox_gr sandbox;
-  sandbox_callback_gr<const void* (*)(const void*, unsigned int, size_t*)>
+  sandbox_callback_gr<const void* (*)(const void*, unsigned int, unsigned int*)>
       grGetTableCallback;
   sandbox_callback_gr<void (*)(const void*, const void*)>
       grReleaseTableCallback;
@@ -632,6 +632,7 @@ struct gfxFontEntry::GrSandboxData {
 
   GrSandboxData() {
 #ifdef MOZ_WASM_SANDBOXING_GRAPHITE
+#  ifdef LUCETC_WASM_SANDBOXING
     // Firefox preloads the library externally to ensure we won't be stopped by
     // the content sandbox
     const bool external_loads_exist = true;
@@ -641,6 +642,9 @@ struct gfxFontEntry::GrSandboxData {
     const bool allow_stdio = false;
     sandbox.create_sandbox(mozilla::ipc::GetSandboxedRLBoxPath().get(),
                            external_loads_exist, allow_stdio);
+#  else
+    sandbox.create_sandbox(mozilla::ipc::GetSandboxedRLBoxPath().get());
+#  endif
 #else
     sandbox.create_sandbox();
 #endif
@@ -664,9 +668,10 @@ static thread_local gfxFontEntry* tl_grGetFontTableCallbackData = nullptr;
 tainted_opaque_gr<const void*> gfxFontEntry::GrGetTable(
     rlbox_sandbox_gr& sandbox,
     tainted_opaque_gr<const void*> /* aAppFaceHandle */,
-    tainted_opaque_gr<unsigned int> aName, tainted_opaque_gr<size_t*> aLen) {
+    tainted_opaque_gr<unsigned int> aName,
+    tainted_opaque_gr<unsigned int*> aLen) {
   gfxFontEntry* fontEntry = tl_grGetFontTableCallbackData;
-  tainted_gr<size_t*> t_aLen = rlbox::from_opaque(aLen);
+  tainted_gr<unsigned int*> t_aLen = rlbox::from_opaque(aLen);
   *t_aLen = 0;
   tainted_gr<const void*> ret = nullptr;
 

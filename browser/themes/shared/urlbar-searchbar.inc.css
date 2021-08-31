@@ -4,7 +4,6 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 %endif
 
-%define fieldHoverBorderColor hsla(240,5%,5%,.35)
 %define urlbarMarginInline 5px
 %define urlbarSearchButtonWidth calc(16px + 2 * var(--urlbar-icon-padding))
 
@@ -36,20 +35,15 @@
 #searchbar {
   min-height: var(--urlbar-min-height);
   text-shadow: none;
-  color: var(--toolbar-field-non-lwt-color, FieldText);
+  color: var(--toolbar-field-color);
 }
 
 #urlbar-background,
 #searchbar {
-  background-color: Field;
+  background-color: var(--toolbar-field-background-color);
   background-clip: border-box;
   border: 1px solid var(--toolbar-field-border-color);
   border-radius: var(--toolbarbutton-border-radius);
-}
-
-#urlbar:not([focused="true"], [open]) > #urlbar-background,
-#searchbar:not(:focus-within) {
-  background-color: var(--toolbar-field-non-lwt-bgcolor, Field);
 }
 
 #urlbar-input-container,
@@ -101,39 +95,19 @@
   border-color: var(--toolbar-field-focus-border-color);
 }
 
-#urlbar:-moz-lwtheme,
-#searchbar:-moz-lwtheme {
-  color: var(--lwt-toolbar-field-color, black);
+#urlbar:is([focused="true"], [open]),
+#searchbar:focus-within {
+  color: var(--toolbar-field-focus-color);
 }
 
-#urlbar:-moz-lwtheme > #urlbar-background,
-#searchbar:-moz-lwtheme {
-  background-color: var(--lwt-toolbar-field-background-color, hsla(0,0%,100%,.8));
+#urlbar:is([focused="true"], [open]) > #urlbar-background,
+#searchbar:focus-within {
+  background-color: var(--toolbar-field-focus-background-color);
 }
 
-#urlbar:not([focused="true"], [open]):-moz-lwtheme > #urlbar-background,
-#searchbar:not(:focus-within):-moz-lwtheme {
-  border-color: var(--lwt-toolbar-field-border-color, var(--toolbar-field-border-color));
-}
-
-#urlbar:not([focused="true"], [open]):-moz-lwtheme:hover > #urlbar-background,
-#searchbar:not(:focus-within):-moz-lwtheme:hover {
-  border-color: var(--lwt-toolbar-field-border-color, @fieldHoverBorderColor@);
-}
-
-#urlbar:-moz-lwtheme:hover > #urlbar-background,
-#searchbar:-moz-lwtheme:hover {
-  background-color: var(--lwt-toolbar-field-background-color, white);
-}
-
-#urlbar:is([focused="true"], [open]):-moz-lwtheme,
-#searchbar:focus-within:-moz-lwtheme {
-  color: var(--lwt-toolbar-field-focus-color);
-}
-
-#urlbar:is([focused="true"], [open]):-moz-lwtheme > #urlbar-background,
-#searchbar:focus-within:-moz-lwtheme {
-  background-color: var(--lwt-toolbar-field-focus);
+#urlbar-input::placeholder,
+.searchbar-textbox::placeholder {
+  opacity: 0.69;
 }
 
 #TabsToolbar #searchbar:not(:focus-within) {
@@ -176,7 +150,6 @@
   background-position: center;
   -moz-context-properties: fill, fill-opacity;
   fill: var(--toolbarbutton-icon-fill);
-  fill-opacity: var(--toolbarbutton-icon-fill-opacity);
 }
 
 #urlbar.searchButton > #urlbar-input-container[pageproxystate="invalid"] > #urlbar-search-button {
@@ -324,20 +297,6 @@
   display: none;
 }
 
-/* Use system colors for low/high contrast mode */
-@media (prefers-contrast) {
-  #urlbar-search-mode-indicator {
-    background-color: Highlight;
-    outline-color: Highlight;
-    color: HighlightText;
-  }
-}
-
-#urlbar-search-mode-indicator-title {
-  padding-inline: 0 3px;
-  opacity: var(--identity-box-label-opacity);
-}
-
 #urlbar-search-mode-indicator-close {
   background: url(chrome://global/skin/icons/close.svg) no-repeat center;
   background-size: 10px 10px;
@@ -346,7 +305,7 @@
   -moz-context-properties: fill, fill-opacity;
   fill-opacity: 0.6;
   stroke-opacity: var(--identity-box-label-opacity);
-  fill: var(--lwt-toolbar-field-focus-color);
+  fill: currentColor;
   border-radius: var(--urlbar-icon-border-radius);
 }
 
@@ -357,11 +316,22 @@
   background-color: hsla(0,0%,70%,.3);
 }
 
+/* Use system colors for low/high contrast mode */
 @media (prefers-contrast) {
+  #urlbar-search-mode-indicator {
+    background-color: Highlight;
+    outline-color: Highlight;
+    color: HighlightText;
+  }
+
   #urlbar-search-mode-indicator-close {
-    fill: HighlightText;
     fill-opacity: 1.0;
   }
+}
+
+#urlbar-search-mode-indicator-title {
+  padding-inline: 0 3px;
+  opacity: var(--identity-box-label-opacity);
 }
 
 /* Page action panel */
@@ -407,38 +377,43 @@
 }
 
 .urlbar-icon {
-  width: calc(var(--urlbar-min-height) - 2px /* border */ - 2 * var(--urlbar-container-padding));
-  height: calc(var(--urlbar-min-height) - 2px /* border */ - 2 * var(--urlbar-container-padding));
-  padding: var(--urlbar-icon-padding);
+  width: 16px;
+  height: 16px;
   -moz-context-properties: fill, fill-opacity;
   fill: currentColor;
   fill-opacity: var(--urlbar-icon-fill-opacity);
+}
+
+.urlbar-page-action,
+#urlbar-go-button,
+.search-go-button {
+  width: calc(var(--urlbar-min-height) - 2px /* border */ - 2 * var(--urlbar-container-padding));
+  height: calc(var(--urlbar-min-height) - 2px /* border */ - 2 * var(--urlbar-container-padding));
+  border-radius: var(--urlbar-icon-border-radius);
+  padding: var(--urlbar-icon-padding);
   color: inherit;
 }
 
-.urlbar-icon,
-.urlbar-icon-wrapper {
-  border-radius: var(--urlbar-icon-border-radius);
-}
-
-:root[uidensity=compact] .urlbar-icon {
+:root[uidensity=compact] .urlbar-page-action,
+:root[uidensity=compact] #urlbar-go-button,
+:root[uidensity=compact] .search-go-button {
   margin-inline: 1px;
 }
 
-:not(.urlbar-icon-wrapper) > .urlbar-icon:not([disabled]):hover,
-.urlbar-icon-wrapper:not([disabled]):hover {
+.urlbar-page-action:not([disabled]):hover,
+#urlbar-go-button:hover,
+.search-go-button:hover {
   background-color: hsla(0,0%,70%,.2);
 }
 
-:not(.urlbar-icon-wrapper) > .urlbar-icon:not([disabled])[open],
-:not(.urlbar-icon-wrapper) > .urlbar-icon:not([disabled]):hover:active,
-.urlbar-icon-wrapper:not([disabled])[open],
-.urlbar-icon-wrapper:not([disabled]):hover:active {
+.urlbar-page-action:not([disabled])[open],
+.urlbar-page-action:not([disabled]):hover:active,
+#urlbar-go-button:hover:active,
+.search-go-button:hover:active {
   background-color: hsla(0,0%,70%,.3);
 }
 
-.urlbar-icon:-moz-focusring,
-.urlbar-icon-wrapper:-moz-focusring {
+.urlbar-page-action:-moz-focusring {
   outline: var(--toolbarbutton-focus-outline);
   outline-offset: -2px;
 }
@@ -739,9 +714,4 @@ moz-input-box > menupopup .context-menu-add-engine > .menu-iconic-left::after {
 }
 .searchbar-engine-one-off-add-engine[image]:hover > .button-box > .button-icon {
   opacity: 1;
-}
-
-#urlbar-input::placeholder,
-.searchbar-textbox::placeholder {
-  opacity: 0.69;
 }

@@ -12,6 +12,7 @@
 #include "GeckoProfiler.h"
 #include "mozilla/ProfilerMarkerTypes.h"
 #include "mozilla/ProfilerMarkers.h"
+#include "NetworkMarker.h"
 #include "platform.h"
 #include "ProfileBuffer.h"
 
@@ -42,6 +43,50 @@
 // (which is just an RAII wrapper for profiler_init() and profiler_shutdown()).
 
 using namespace mozilla;
+
+TEST(GeckoProfiler, ProfilerUtils)
+{
+  static_assert(std::is_same_v<decltype(profiler_current_process_id()),
+                               ProfilerProcessId>);
+#ifdef MOZ_GECKO_PROFILER
+  MOZ_RELEASE_ASSERT(profiler_current_process_id().IsSpecified());
+#else
+  MOZ_RELEASE_ASSERT(!profiler_current_process_id().IsSpecified());
+#endif
+
+  static_assert(
+      std::is_same_v<decltype(profiler_current_thread_id()), ProfilerThreadId>);
+#ifdef MOZ_GECKO_PROFILER
+  ProfilerThreadId mainTestThreadId = profiler_current_thread_id();
+  MOZ_RELEASE_ASSERT(mainTestThreadId.IsSpecified());
+
+  ProfilerThreadId mainThreadId = profiler_main_thread_id();
+  if (!mainThreadId.IsSpecified()) {
+    // Special case: This may happen if the profiler has not yet been
+    // initialized. We only need to set scProfilerMainThreadId.
+    mozilla::profiler::detail::scProfilerMainThreadId = mainTestThreadId;
+    // After which `profiler_main_thread_id` should work.
+    mainThreadId = profiler_main_thread_id();
+  }
+  MOZ_RELEASE_ASSERT(mainThreadId.IsSpecified());
+
+  MOZ_RELEASE_ASSERT(mainThreadId == mainTestThreadId,
+                     "Test should run on the main thread");
+  MOZ_RELEASE_ASSERT(profiler_is_main_thread());
+
+  std::thread testThread([&]() {
+    const ProfilerThreadId testThreadId = profiler_current_thread_id();
+    MOZ_RELEASE_ASSERT(testThreadId.IsSpecified());
+    MOZ_RELEASE_ASSERT(testThreadId != mainThreadId);
+    MOZ_RELEASE_ASSERT(!profiler_is_main_thread());
+  });
+  testThread.join();
+#else
+  MOZ_RELEASE_ASSERT(!profiler_current_thread_id().IsSpecified());
+  MOZ_RELEASE_ASSERT(!profiler_main_thread_id().IsSpecified());
+  MOZ_RELEASE_ASSERT(!profiler_is_main_thread());
+#endif
+}
 
 TEST(BaseProfiler, BlocksRingBuffer)
 {
@@ -288,13 +333,13 @@ TEST(GeckoProfiler, Utilities)
 {
   // We'll assume that this test runs in the main thread (which should be true
   // when called from the `main` function).
-  const int mainThreadId = profiler_current_thread_id();
+  const ProfilerThreadId mainThreadId = profiler_current_thread_id();
 
   MOZ_RELEASE_ASSERT(profiler_main_thread_id() == mainThreadId);
   MOZ_RELEASE_ASSERT(profiler_is_main_thread());
 
   std::thread testThread([&]() {
-    const int testThreadId = profiler_current_thread_id();
+    const ProfilerThreadId testThreadId = profiler_current_thread_id();
     MOZ_RELEASE_ASSERT(testThreadId != mainThreadId);
 
     MOZ_RELEASE_ASSERT(profiler_main_thread_id() != testThreadId);
@@ -802,14 +847,14 @@ TEST(GeckoProfiler, Markers)
       ::geckoprofiler::markers::NoPayload{}));
 
   // Used in markers below.
-  TimeStamp ts1 = TimeStamp::NowUnfuzzed();
+  TimeStamp ts1 = TimeStamp::Now();
 
   // Sleep briefly to ensure a sample is taken and the pending markers are
   // processed.
   PR_Sleep(PR_MillisecondsToInterval(500));
 
   // Used in markers below.
-  TimeStamp ts2 = TimeStamp::NowUnfuzzed();
+  TimeStamp ts2 = TimeStamp::Now();
   // ts1 and ts2 should be different thanks to the sleep.
   EXPECT_NE(ts1, ts2);
 
@@ -925,7 +970,7 @@ TEST(GeckoProfiler, Markers)
       /* const nsACString& aRequestMethod */ "GET"_ns,
       /* int32_t aPriority */ 34,
       /* uint64_t aChannelId */ 1,
-      /* NetworkLoadType aType */ NetworkLoadType::LOAD_START,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_START,
       /* mozilla::TimeStamp aStart */ ts1,
       /* mozilla::TimeStamp aEnd */ ts2,
       /* int64_t aCount */ 56,
@@ -946,7 +991,7 @@ TEST(GeckoProfiler, Markers)
       /* const nsACString& aRequestMethod */ "GET"_ns,
       /* int32_t aPriority */ 34,
       /* uint64_t aChannelId */ 2,
-      /* NetworkLoadType aType */ NetworkLoadType::LOAD_STOP,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_STOP,
       /* mozilla::TimeStamp aStart */ ts1,
       /* mozilla::TimeStamp aEnd */ ts2,
       /* int64_t aCount */ 56,
@@ -971,7 +1016,7 @@ TEST(GeckoProfiler, Markers)
       /* const nsACString& aRequestMethod */ "GET"_ns,
       /* int32_t aPriority */ 34,
       /* uint64_t aChannelId */ 3,
-      /* NetworkLoadType aType */ NetworkLoadType::LOAD_REDIRECT,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_REDIRECT,
       /* mozilla::TimeStamp aStart */ ts1,
       /* mozilla::TimeStamp aEnd */ ts2,
       /* int64_t aCount */ 56,
@@ -995,7 +1040,7 @@ TEST(GeckoProfiler, Markers)
       /* const nsACString& aRequestMethod */ "GET"_ns,
       /* int32_t aPriority */ 34,
       /* uint64_t aChannelId */ 4,
-      /* NetworkLoadType aType */ NetworkLoadType::LOAD_REDIRECT,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_REDIRECT,
       /* mozilla::TimeStamp aStart */ ts1,
       /* mozilla::TimeStamp aEnd */ ts2,
       /* int64_t aCount */ 56,
@@ -1019,7 +1064,7 @@ TEST(GeckoProfiler, Markers)
       /* const nsACString& aRequestMethod */ "GET"_ns,
       /* int32_t aPriority */ 34,
       /* uint64_t aChannelId */ 5,
-      /* NetworkLoadType aType */ NetworkLoadType::LOAD_REDIRECT,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_REDIRECT,
       /* mozilla::TimeStamp aStart */ ts1,
       /* mozilla::TimeStamp aEnd */ ts2,
       /* int64_t aCount */ 56,
@@ -1042,7 +1087,7 @@ TEST(GeckoProfiler, Markers)
       /* const nsACString& aRequestMethod */ "GET"_ns,
       /* int32_t aPriority */ 34,
       /* uint64_t aChannelId */ 6,
-      /* NetworkLoadType aType */ NetworkLoadType::LOAD_REDIRECT,
+      /* NetworkLoadType aType */ net::NetworkLoadType::LOAD_REDIRECT,
       /* mozilla::TimeStamp aStart */ ts1,
       /* mozilla::TimeStamp aEnd */ ts2,
       /* int64_t aCount */ 56,
@@ -2138,7 +2183,8 @@ class GTestStackCollector final : public ProfilerStackCollector {
   int mFrames;
 };
 
-void DoSuspendAndSample(int aTidToSample, nsIThread* aSamplingThread) {
+void DoSuspendAndSample(ProfilerThreadId aTidToSample,
+                        nsIThread* aSamplingThread) {
   aSamplingThread->Dispatch(
       NS_NewRunnableFunction(
           "GeckoProfiler_SuspendAndSample_Test::TestBody",
@@ -2162,14 +2208,14 @@ TEST(GeckoProfiler, SuspendAndSample)
   nsresult rv = NS_NewNamedThread("GeckoProfGTest", getter_AddRefs(thread));
   ASSERT_TRUE(NS_SUCCEEDED(rv));
 
-  int tid = profiler_current_thread_id();
+  ProfilerThreadId tid = profiler_current_thread_id();
 
   ASSERT_TRUE(!profiler_is_active());
 
   // Suspend and sample while the profiler is inactive.
   DoSuspendAndSample(tid, thread);
 
-  DoSuspendAndSample(0, thread);
+  DoSuspendAndSample(ProfilerThreadId{}, thread);
 
   uint32_t features = ProfilerFeature::JS | ProfilerFeature::Threads;
   const char* filters[] = {"GeckoMain", "Compositor"};
@@ -2182,7 +2228,7 @@ TEST(GeckoProfiler, SuspendAndSample)
   // Suspend and sample while the profiler is active.
   DoSuspendAndSample(tid, thread);
 
-  DoSuspendAndSample(0, thread);
+  DoSuspendAndSample(ProfilerThreadId{}, thread);
 
   profiler_stop();
 

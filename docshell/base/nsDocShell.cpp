@@ -596,7 +596,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(nsDocShell)
   NS_INTERFACE_MAP_ENTRY(nsILoadContext)
   NS_INTERFACE_MAP_ENTRY_CONDITIONAL(nsINetworkInterceptController,
                                      mInterceptController)
-  NS_INTERFACE_MAP_ENTRY(nsIDeprecationWarner)
 NS_INTERFACE_MAP_END_INHERITING(nsDocLoader)
 
 NS_IMETHODIMP
@@ -6428,17 +6427,17 @@ nsresult nsDocShell::EnsureContentViewer() {
   }
 
   nsresult rv = CreateAboutBlankContentViewer(
-      principal, partitionedPrincipal, cspToInheritForAboutBlank, baseURI);
+      principal, partitionedPrincipal, cspToInheritForAboutBlank, baseURI,
+      /* aIsInitialDocument */ true);
 
   NS_ENSURE_STATE(mContentViewer);
 
   if (NS_SUCCEEDED(rv)) {
     RefPtr<Document> doc(GetDocument());
-    NS_ASSERTION(doc,
-                 "Should have doc if CreateAboutBlankContentViewer "
-                 "succeeded!");
-
-    doc->SetIsInitialDocument(true);
+    MOZ_ASSERT(doc,
+               "Should have doc if CreateAboutBlankContentViewer "
+               "succeeded!");
+    MOZ_ASSERT(doc->IsInitialDocument(), "Document should be initial document");
 
     // Documents created using EnsureContentViewer may be transient
     // placeholders created by framescripts before content has a
@@ -6455,7 +6454,7 @@ nsresult nsDocShell::EnsureContentViewer() {
 
 nsresult nsDocShell::CreateAboutBlankContentViewer(
     nsIPrincipal* aPrincipal, nsIPrincipal* aPartitionedPrincipal,
-    nsIContentSecurityPolicy* aCSP, nsIURI* aBaseURI,
+    nsIContentSecurityPolicy* aCSP, nsIURI* aBaseURI, bool aIsInitialDocument,
     const Maybe<nsILoadInfo::CrossOriginEmbedderPolicy>& aCOEP,
     bool aTryToSaveOldPresentation, bool aCheckPermitUnload,
     WindowGlobalChild* aActor) {
@@ -6593,6 +6592,8 @@ nsresult nsDocShell::CreateAboutBlankContentViewer(
         blankDoc->SetCsp(cspToInherit);
       }
 
+      blankDoc->SetIsInitialDocument(aIsInitialDocument);
+
       blankDoc->SetEmbedderPolicy(aCOEP);
 
       // Hack: set the base URI manually, since this document never
@@ -6640,7 +6641,7 @@ nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal,
                                           nsIPrincipal* aPartitionedPrincipal,
                                           nsIContentSecurityPolicy* aCSP) {
   return CreateAboutBlankContentViewer(aPrincipal, aPartitionedPrincipal, aCSP,
-                                       nullptr);
+                                       nullptr, /* aIsInitialDocument */ false);
 }
 
 nsresult nsDocShell::CreateContentViewerForActor(
@@ -6648,13 +6649,16 @@ nsresult nsDocShell::CreateContentViewerForActor(
   MOZ_ASSERT(aWindowActor);
 
   // FIXME: WindowGlobalChild should provide the PartitionedPrincipal.
+  // FIXME: We may want to support non-initial documents here.
   nsresult rv = CreateAboutBlankContentViewer(
       aWindowActor->DocumentPrincipal(), aWindowActor->DocumentPrincipal(),
       /* aCsp */ nullptr,
       /* aBaseURI */ nullptr,
+      /* aIsInitialDocument */ true,
       /* aCOEP */ Nothing(),
       /* aTryToSaveOldPresentation */ true,
       /* aCheckPermitUnload */ true, aWindowActor);
+#ifdef DEBUG
   if (NS_SUCCEEDED(rv)) {
     RefPtr<Document> doc(GetDocument());
     MOZ_ASSERT(
@@ -6662,10 +6666,10 @@ nsresult nsDocShell::CreateContentViewerForActor(
         "Should have a document if CreateAboutBlankContentViewer succeeded");
     MOZ_ASSERT(doc->GetOwnerGlobal() == aWindowActor->GetWindowGlobal(),
                "New document should be in the same global as our actor");
-
-    // FIXME: We may want to support non-initial documents here.
-    doc->SetIsInitialDocument(true);
+    MOZ_ASSERT(doc->IsInitialDocument(),
+               "New document should be an initial document");
   }
+#endif
 
   return rv;
 }
@@ -7832,13 +7836,13 @@ nsresult nsDocShell::CreateContentViewer(const nsACString& aContentType,
       NS_ENSURE_SUCCESS(rv, rv);
 
       if (!parentSite.Equals(thisSite)) {
-#ifdef MOZ_GECKO_PROFILER
-        nsCOMPtr<nsIURI> prinURI;
-        BasePrincipal::Cast(thisPrincipal)->GetURI(getter_AddRefs(prinURI));
-        nsPrintfCString marker("Iframe loaded in background: %s",
-                               prinURI->GetSpecOrDefault().get());
-        PROFILER_MARKER_TEXT("Background Iframe", DOM, {}, marker);
-#endif
+        if (profiler_can_accept_markers()) {
+          nsCOMPtr<nsIURI> prinURI;
+          BasePrincipal::Cast(thisPrincipal)->GetURI(getter_AddRefs(prinURI));
+          nsPrintfCString marker("Iframe loaded in background: %s",
+                                 prinURI->GetSpecOrDefault().get());
+          PROFILER_MARKER_TEXT("Background Iframe", DOM, {}, marker);
+        }
         SetBackgroundLoadIframe();
       }
     }
@@ -9186,7 +9190,8 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
     }
 
     // clear the decks to prevent context bleed-through (bug 298255)
-    rv = CreateAboutBlankContentViewer(nullptr, nullptr, nullptr, nullptr);
+    rv = CreateAboutBlankContentViewer(nullptr, nullptr, nullptr, nullptr,
+                                       /* aIsInitialDocument */ false);
     if (NS_FAILED(rv)) {
       return NS_ERROR_FAILURE;
     }
@@ -11719,7 +11724,7 @@ nsresult nsDocShell::LoadHistoryEntry(nsDocShellLoadState* aLoadState,
     rv = CreateAboutBlankContentViewer(
         aLoadState->PrincipalToInherit(),
         aLoadState->PartitionedPrincipalToInherit(), nullptr, nullptr,
-        Nothing(), !aReloadingActiveEntry);
+        /* aIsInitialDocument */ false, Nothing(), !aReloadingActiveEntry);
 
     if (NS_FAILED(rv)) {
       // The creation of the intermittent about:blank content
@@ -13145,17 +13150,6 @@ bool nsDocShell::InFrameSwap() {
 
 UniquePtr<ClientSource> nsDocShell::TakeInitialClientSource() {
   return std::move(mInitialClientSource);
-}
-
-NS_IMETHODIMP
-nsDocShell::IssueWarning(uint32_t aWarning, bool aAsError) {
-  if (mContentViewer) {
-    RefPtr<Document> doc = mContentViewer->GetDocument();
-    if (doc) {
-      doc->WarnOnceAbout(DeprecatedOperations(aWarning), aAsError);
-    }
-  }
-  return NS_OK;
 }
 
 NS_IMETHODIMP

@@ -17,8 +17,6 @@ const { AppConstants } = ChromeUtils.import(
   "resource://gre/modules/AppConstants.jsm"
 );
 
-Cu.importGlobalProperties(["Glean"]);
-
 XPCOMUtils.defineLazyModuleGetters(this, {
   AboutNewTab: "resource:///modules/AboutNewTab.jsm",
   ActorManagerParent: "resource://gre/modules/ActorManagerParent.jsm",
@@ -54,6 +52,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Interactions: "resource:///modules/Interactions.jsm",
   Log: "resource://gre/modules/Log.jsm",
   LoginBreaches: "resource:///modules/LoginBreaches.jsm",
+  PageDataService: "resource:///modules/pagedata/PageDataService.jsm",
   NetUtil: "resource://gre/modules/NetUtil.jsm",
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
@@ -79,6 +78,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
   SaveToPocket: "chrome://pocket/content/SaveToPocket.jsm",
+  ScreenshotsUtils: "resource:///modules/ScreenshotsUtils.jsm",
   SearchSERPTelemetry: "resource:///modules/SearchSERPTelemetry.jsm",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
@@ -466,7 +466,6 @@ let JSWINDOWACTORS = {
 
     child: {
       moduleURI: "resource:///actors/DOMFullscreenChild.jsm",
-      group: "browsers",
       events: {
         "MozDOMFullscreen:Request": {},
         "MozDOMFullscreen:Entered": {},
@@ -476,6 +475,7 @@ let JSWINDOWACTORS = {
       },
     },
 
+    messageManagerGroups: ["browsers"],
     allFrames: true,
   },
 
@@ -1061,7 +1061,6 @@ BrowserGlue.prototype = {
         }
         break;
       case "fxaccounts:commands:open-uri":
-      case "weave:engine:clients:display-uris":
         this._onDisplaySyncURIs(subject);
         break;
       case "session-save":
@@ -1217,7 +1216,6 @@ BrowserGlue.prototype = {
     os.addObserver(this, "fxaccounts:verify_login");
     os.addObserver(this, "fxaccounts:device_disconnected");
     os.addObserver(this, "fxaccounts:commands:open-uri");
-    os.addObserver(this, "weave:engine:clients:display-uris");
     os.addObserver(this, "session-save");
     os.addObserver(this, "places-init-complete");
     os.addObserver(this, "distribution-customization-complete");
@@ -1271,7 +1269,6 @@ BrowserGlue.prototype = {
     os.removeObserver(this, "fxaccounts:verify_login");
     os.removeObserver(this, "fxaccounts:device_disconnected");
     os.removeObserver(this, "fxaccounts:commands:open-uri");
-    os.removeObserver(this, "weave:engine:clients:display-uris");
     os.removeObserver(this, "session-save");
     if (this._bookmarksBackupIdleTime) {
       this._userIdleService.removeIdleObserver(
@@ -1556,11 +1553,11 @@ BrowserGlue.prototype = {
       },
     ];
 
-    win.gHighPriorityNotificationBox.appendNotification(
+    win.gNotificationBox.appendNotification(
       message,
       "unsigned-addons-disabled",
       "",
-      win.gHighPriorityNotificationBox.PRIORITY_WARNING_MEDIUM,
+      win.gNotificationBox.PRIORITY_WARNING_MEDIUM,
       buttons
     );
   },
@@ -1937,6 +1934,7 @@ BrowserGlue.prototype = {
     BrowserUsageTelemetry.uninit();
     SearchSERPTelemetry.uninit();
     Interactions.uninit();
+    PageDataService.uninit();
     PageThumbs.uninit();
     NewTabUtils.uninit();
 
@@ -1982,6 +1980,16 @@ BrowserGlue.prototype = {
   _monitorTranslationsPref() {
     const PREF = "extensions.translations.disabled";
     const ID = "firefox-translations@mozilla.org";
+    const oldID = "firefox-infobar-ui-bergamot-browser-extension@browser.mt";
+
+    // First, try to uninstall the old extension, if exists.
+    (async () => {
+      let addon = await AddonManager.getAddonByID(oldID);
+      if (addon) {
+        addon.uninstall().catch(Cu.reportError);
+      }
+    })();
+
     const _checkTranslationsPref = async () => {
       let addon = await AddonManager.getAddonByID(ID);
       let disabled = Services.prefs.getBoolPref(PREF, false);
@@ -1994,7 +2002,7 @@ BrowserGlue.prototype = {
         addon =
           (await AddonManager.maybeInstallBuiltinAddon(
             ID,
-            "0.4.0",
+            "0.4.3",
             "resource://builtin-addons/translations/"
           )) || addon;
         await addon.enable();
@@ -2142,6 +2150,7 @@ BrowserGlue.prototype = {
     SearchSERPTelemetry.init();
 
     Interactions.init();
+    PageDataService.init();
     ExtensionsUI.init();
 
     let signingRequired;
@@ -2402,6 +2411,16 @@ BrowserGlue.prototype = {
 
       {
         task: () => {
+          if (
+            Services.prefs.getBoolPref("screenshots.browser.component.enabled")
+          ) {
+            ScreenshotsUtils.initialize();
+          }
+        },
+      },
+
+      {
+        task: () => {
           UrlbarQuickSuggest.maybeShowOnboardingDialog();
         },
       },
@@ -2450,6 +2469,16 @@ BrowserGlue.prototype = {
       {
         task: () => {
           TabUnloader.init();
+        },
+      },
+
+      {
+        task: () => {
+          // Init the url query stripping list.
+          let urlQueryStrippingListService = Cc[
+            "@mozilla.org/query-stripping-list-service;1"
+          ].getService(Ci.nsIURLQueryStrippingListService);
+          urlQueryStrippingListService.init();
         },
       },
 
@@ -2549,12 +2578,6 @@ BrowserGlue.prototype = {
           if (!disabledForTesting) {
             BackgroundUpdate.maybeScheduleBackgroundUpdateTask();
           }
-        },
-      },
-
-      {
-        task: () => {
-          this._collectProtonTelemetry();
         },
       },
 
@@ -4218,7 +4241,7 @@ BrowserGlue.prototype = {
 
   _updateFxaBadges(win) {
     let fxaButton = win.document.getElementById("fxa-toolbar-menu-button");
-    let badge = fxaButton.querySelector(".toolbarbutton-badge");
+    let badge = fxaButton?.querySelector(".toolbarbutton-badge");
 
     let state = UIState.get();
     if (
@@ -4231,26 +4254,18 @@ BrowserGlue.prototype = {
       let isFxAButtonShown = navToolbox.contains(fxaButton);
       if (isFxAButtonShown) {
         state.status == UIState.STATUS_LOGIN_FAILED
-          ? fxaButton.setAttribute("badge-status", state.status)
-          : badge.classList.add("feature-callout");
+          ? fxaButton?.setAttribute("badge-status", state.status)
+          : badge?.classList.add("feature-callout");
       } else {
         AppMenuNotifications.showBadgeOnlyNotification(
           "fxa-needs-authentication"
         );
       }
     } else {
-      fxaButton.removeAttribute("badge-status");
-      badge.classList.remove("feature-callout");
+      fxaButton?.removeAttribute("badge-status");
+      badge?.classList.remove("feature-callout");
       AppMenuNotifications.removeNotification("fxa-needs-authentication");
     }
-  },
-
-  _collectProtonTelemetry() {
-    let protonEnabled = Services.prefs.getBoolPref(
-      "browser.proton.enabled",
-      true
-    );
-    Glean.browserUi.protonEnabled.set(protonEnabled);
   },
 
   QueryInterface: ChromeUtils.generateQI([

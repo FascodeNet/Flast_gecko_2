@@ -214,21 +214,15 @@ nsresult CSSStyleRule::SelectorMatchesElement(Element* aElement,
                                               const nsAString& aPseudo,
                                               bool aRelevantLinkVisited,
                                               bool* aMatches) {
-  PseudoStyleType pseudoType = PseudoStyleType::NotPseudo;
-  if (!aPseudo.IsEmpty()) {
-    RefPtr<nsAtom> pseudoElt = NS_Atomize(aPseudo);
-    pseudoType = nsCSSPseudoElements::GetPseudoType(
-        pseudoElt, CSSEnabledState::IgnoreEnabledState);
-
-    if (pseudoType == PseudoStyleType::NotPseudo) {
-      *aMatches = false;
-      return NS_OK;
-    }
+  Maybe<PseudoStyleType> pseudoType = nsCSSPseudoElements::GetPseudoType(
+      aPseudo, CSSEnabledState::IgnoreEnabledState);
+  if (!pseudoType) {
+    *aMatches = false;
+    return NS_OK;
   }
 
   *aMatches = Servo_StyleRule_SelectorMatchesElement(
-      mRawRule, aElement, aSelectorIndex, pseudoType, aRelevantLinkVisited);
-
+      mRawRule, aElement, aSelectorIndex, *pseudoType, aRelevantLinkVisited);
   return NS_OK;
 }
 

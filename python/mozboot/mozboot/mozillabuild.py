@@ -109,11 +109,6 @@ def is_windefender_affecting_srcdir(srcdir):
 class MozillaBuildBootstrapper(BaseBootstrapper):
     """Bootstrapper for MozillaBuild to install rustup."""
 
-    INSTALL_PYTHON_GUIDANCE = (
-        "Python is provided by MozillaBuild; ensure your MozillaBuild "
-        "installation is up to date."
-    )
-
     def __init__(self, no_interactive=False, no_system_changes=False):
         BaseBootstrapper.__init__(
             self, no_interactive=no_interactive, no_system_changes=no_system_changes
@@ -154,13 +149,7 @@ class MozillaBuildBootstrapper(BaseBootstrapper):
     def install_browser_artifact_mode_packages(self, mozconfig_builder):
         pass
 
-    def install_mobile_android_packages(self, mozconfig_builder):
-        self.ensure_mobile_android_packages(mozconfig_builder)
-
-    def install_mobile_android_artifact_mode_packages(self, mozconfig_builder):
-        self.ensure_mobile_android_packages(mozconfig_builder, artifact_mode=True)
-
-    def ensure_mobile_android_packages(self, mozconfig_builder, artifact_mode=False):
+    def install_mobile_android_packages(self, mozconfig_builder, artifact_mode=False):
         java_bin_dir = self.ensure_java(mozconfig_builder)
         from mach.util import setenv
 
@@ -227,13 +216,6 @@ class MozillaBuildBootstrapper(BaseBootstrapper):
         # runs x86 binaries, so just use the x86 packages for such hosts.
         node_artifact = node.WIN32 if is_aarch64_host() else node.WIN64
         self.install_toolchain_artifact(state_dir, checkout_root, node_artifact)
-
-    def ensure_dump_syms_packages(self, state_dir, checkout_root):
-        from mozboot import dump_syms
-
-        self.install_toolchain_artifact(
-            state_dir, checkout_root, dump_syms.WIN64_DUMP_SYMS
-        )
 
     def ensure_fix_stacks_packages(self, state_dir, checkout_root):
         from mozboot import fix_stacks

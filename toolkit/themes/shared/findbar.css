@@ -31,6 +31,7 @@ findbar[noanim] {
 .findbar-container {
   margin-inline-start: 8px;
   height: 28px;
+  min-width: calc(100vw - 48px);
 }
 
 /* Remove start margin when close button is on the left side (on macOS) */
@@ -43,17 +44,17 @@ findbar[noanim] {
 /* Don't apply theme colors on findbar when header image is applied to avoid
 contrast issues, see bug 1506913 */
 html|html[lwtheme-image] findbar {
-  --lwt-toolbar-field-background-color: initial;
-  --lwt-toolbar-field-color: initial;
-  --lwt-toolbar-field-border-color: initial;
-  --lwt-toolbar-field-focus: initial;
-  --lwt-toolbar-field-focus-color: initial;
+  --toolbar-field-background-color: initial;
+  --toolbar-field-color: initial;
+  --toolbar-field-border-color: initial;
+  --toolbar-field-focus-background-color: initial;
+  --toolbar-field-focus-color: initial;
 }
 
 html|input.findbar-textbox {
   appearance: none;
   background-color: Field;
-  border: 1px solid var(--input-border-color, var(--lwt-toolbar-field-border-color, ThreeDShadow));
+  border: 1px solid var(--input-border-color, var(--toolbar-field-border-color));
   border-radius: 4px;
   outline: none;
   margin: 0;
@@ -63,8 +64,8 @@ html|input.findbar-textbox {
 }
 
 html|input.findbar-textbox:-moz-lwtheme {
-  background-color: var(--input-bgcolor, var(--lwt-toolbar-field-background-color, Field));
-  color: var(--input-color, var(--lwt-toolbar-field-color, FieldText));
+  background-color: var(--input-bgcolor, var(--toolbar-field-background-color));
+  color: var(--input-color, var(--toolbar-field-color));
 }
 
 html|input.findbar-textbox:focus {
@@ -72,6 +73,26 @@ html|input.findbar-textbox:focus {
   outline: 2px solid color-mix(in srgb, var(--focus-outline-color, -moz-accent-color) 50%, transparent);
   outline-offset: -1px; /* Prevents antialising around the corners */
 }
+
+html|input.findbar-textbox:-moz-lwtheme::selection {
+  background-color: var(--lwt-toolbar-field-highlight, -moz-system-color(text-select-background, light));
+  color: var(--lwt-toolbar-field-highlight-text, -moz-system-color(text-select-foreground, light));
+}
+
+html|input.findbar-textbox:not(:focus):-moz-lwtheme::selection {
+  background-color: var(--lwt-toolbar-field-highlight, -moz-system-color(text-select-background-disabled, light));
+}
+
+:root[lwt-toolbar-field-focus-brighttext] html|input.findbar-textbox:focus::selection {
+  background-color: var(--lwt-toolbar-field-highlight, -moz-system-color(text-select-background, dark));
+  color: var(--lwt-toolbar-field-highlight-text, -moz-system-color(text-select-foreground, dark));
+}
+
+:root[lwt-toolbar-field-brighttext] html|input.findbar-textbox:not(:focus)::selection {
+  background-color: var(--lwt-toolbar-field-highlight, -moz-system-color(text-select-background-disabled, dark));
+  color: var(--lwt-toolbar-field-highlight-text, -moz-system-color(text-select-foreground, dark));
+}
+
 
 html|input.findbar-textbox[status="notfound"] {
   border-color: transparent;
@@ -168,6 +189,9 @@ html|input.findbar-textbox::placeholder,
 }
 
 /* Close button */
+#findbar-close-container {
+  position: relative;
+}
 
 /* Increase specificity to override close-icon.css */
 .close-icon.findbar-closebutton {

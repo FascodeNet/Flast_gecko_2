@@ -4,12 +4,13 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "EventStateManager.h"
+
 #include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/EditorBase.h"
 #include "mozilla/EventDispatcher.h"
 #include "mozilla/EventForwards.h"
-#include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
 #include "mozilla/IMEStateManager.h"
@@ -21,6 +22,7 @@
 #include "mozilla/ScopeExit.h"
 #include "mozilla/ScrollTypes.h"
 #include "mozilla/TextComposition.h"
+#include "mozilla/TextControlElement.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/TouchEvents.h"
@@ -254,6 +256,7 @@ EventStateManager::EventStateManager()
       mRClickCount(0),
       mShouldAlwaysUseLineDeltas(false),
       mShouldAlwaysUseLineDeltasInitialized(false),
+      mGestureDownInTextControl(false),
       mInTouchDrag(false),
       m_haveShutdown(false) {
   if (sESMInstanceCount == 0) {
@@ -1134,6 +1137,7 @@ bool EventStateManager::LookForAccessKeyAndExecute(
     AppendUCS4ToUTF16(ch, accessKey);
     for (count = 1; count <= length; ++count) {
       // mAccessKeys always stores Element instances.
+      MOZ_DIAGNOSTIC_ASSERT(length == mAccessKeys.Count());
       element = mAccessKeys[(start + count) % length];
       if (IsAccessKeyTarget(element, accessKey)) {
         if (!aExecute) {
@@ -1879,6 +1883,10 @@ void EventStateManager::BeginTrackingRemoteDragGesture(
     nsIContent* aContent, RemoteDragStartData* aDragStartData) {
   mGestureDownContent = aContent;
   mGestureDownFrameOwner = aContent;
+  mGestureDownInTextControl =
+      aContent && aContent->IsInNativeAnonymousSubtree() &&
+      TextControlElement::FromNodeOrNull(
+          aContent->GetClosestNativeAnonymousSubtreeRootParent());
   mGestureDownDragStartData = aDragStartData;
 }
 
@@ -1891,6 +1899,7 @@ void EventStateManager::BeginTrackingRemoteDragGesture(
 void EventStateManager::StopTrackingDragGesture(bool aClearInChildProcesses) {
   mGestureDownContent = nullptr;
   mGestureDownFrameOwner = nullptr;
+  mGestureDownInTextControl = false;
   mGestureDownDragStartData = nullptr;
 
   // If a content process starts a drag but the mouse is released before the
@@ -4901,16 +4910,22 @@ void EventStateManager::GenerateDragDropEnterExit(nsPresContext* aPresContext,
         nsCOMPtr<nsIContent> targetContent;
         mCurrentTarget->GetContentForEvent(aDragEvent,
                                            getter_AddRefs(targetContent));
+        if (targetContent && targetContent->IsText()) {
+          targetContent = targetContent->GetFlattenedTreeParent();
+        }
 
         if (sLastDragOverFrame) {
           // The frame has changed but the content may not have. Check before
           // dispatching to content
           sLastDragOverFrame->GetContentForEvent(aDragEvent,
                                                  getter_AddRefs(lastContent));
+          if (lastContent && lastContent->IsText()) {
+            lastContent = lastContent->GetFlattenedTreeParent();
+          }
 
-          FireDragEnterOrExit(sLastDragOverFrame->PresContext(), aDragEvent,
-                              eDragExit, targetContent, lastContent,
-                              sLastDragOverFrame);
+          RefPtr<nsPresContext> presContext = sLastDragOverFrame->PresContext();
+          FireDragEnterOrExit(presContext, aDragEvent, eDragExit, targetContent,
+                              lastContent, sLastDragOverFrame);
           nsIContent* target = sLastDragOverFrame
                                    ? sLastDragOverFrame.GetFrame()->GetContent()
                                    : nullptr;
@@ -4936,9 +4951,9 @@ void EventStateManager::GenerateDragDropEnterExit(nsPresContext* aPresContext,
                             targetContent, currentTraget);
 
         if (sLastDragOverFrame) {
-          FireDragEnterOrExit(sLastDragOverFrame->PresContext(), aDragEvent,
-                              eDragLeave, targetContent, lastContent,
-                              sLastDragOverFrame);
+          RefPtr<nsPresContext> presContext = sLastDragOverFrame->PresContext();
+          FireDragEnterOrExit(presContext, aDragEvent, eDragLeave,
+                              targetContent, lastContent, sLastDragOverFrame);
         }
 
         sLastDragOverFrame = mCurrentTarget;
@@ -4989,6 +5004,10 @@ void EventStateManager::FireDragEnterOrExit(nsPresContext* aPresContext,
   event.mFlags.mIsSynthesizedForTests =
       aDragEvent->mFlags.mIsSynthesizedForTests;
   event.mRelatedTarget = aRelatedTarget;
+  if (aMessage == eDragExit && !StaticPrefs::dom_event_dragexit_enabled()) {
+    event.mFlags.mOnlyChromeDispatch = true;
+  }
+
   mCurrentTargetContent = aTargetContent;
 
   if (aTargetContent != aRelatedTarget) {
@@ -5785,6 +5804,38 @@ void EventStateManager::ContentRemoved(Document* aDocument,
   for (const auto& entry : mPointersEnterLeaveHelper) {
     ResetLastOverForContent(entry.GetKey(), entry.GetData(), aContent);
   }
+}
+
+void EventStateManager::TextControlRootWillBeRemoved(
+    TextControlElement& aTextControlElement) {
+  if (!mGestureDownInTextControl || !mGestureDownFrameOwner ||
+      !mGestureDownFrameOwner->IsInNativeAnonymousSubtree()) {
+    return;
+  }
+  // If we track gesture to start drag in aTextControlElement, we should keep
+  // tracking it with aTextContrlElement itself for now because this may be
+  // caused by reframing aTextControlElement which may not be intended by the
+  // user.
+  if (&aTextControlElement ==
+      mGestureDownFrameOwner->GetClosestNativeAnonymousSubtreeRootParent()) {
+    mGestureDownFrameOwner = &aTextControlElement;
+  }
+}
+
+void EventStateManager::TextControlRootAdded(
+    Element& aAnonymousDivElement, TextControlElement& aTextControlElement) {
+  if (!mGestureDownInTextControl ||
+      mGestureDownFrameOwner != &aTextControlElement) {
+    return;
+  }
+  // If we track gesture to start drag in aTextControlElement, but the frame
+  // owner is the text control element itself, the anonymous nodes in it are
+  // recreated by a reframe.  If so, we should keep tracking it with the
+  // recreated native anonymous node.
+  mGestureDownFrameOwner =
+      aAnonymousDivElement.GetFirstChild()
+          ? aAnonymousDivElement.GetFirstChild()
+          : static_cast<nsIContent*>(&aAnonymousDivElement);
 }
 
 bool EventStateManager::EventStatusOK(WidgetGUIEvent* aEvent) {

@@ -221,6 +221,25 @@ pref("general.config.obscure_value", 13); // for MCD .cfg files
 pref("general.warnOnAboutConfig", true);
 #endif
 
+// Whether middle button click with a modifier key starts to autoscroll or
+// does nothing.
+pref("general.autoscroll.prevent_to_start.shiftKey", true); // Shift
+pref("general.autoscroll.prevent_to_start.ctrlKey", false); // Control
+pref("general.autoscroll.prevent_to_start.altKey", false);  // Alt
+pref("general.autoscroll.prevent_to_start.metaKey", false); // Command on macOS
+pref("general.autoscroll.prevent_to_start.osKey", false);   // Windows key on Windows or Super key on Linux
+
+// When this pref is set to true, middle click on non-editable content keeps
+// selected range rather than collapsing selection at the clicked position.
+// This behavior is incompatible with Chrome, so enabling this could cause
+// breaking some web apps.
+// Note that this pref is ignored when "general.autoScroll" is set to false
+// or "middlemouse.paste" is set to true.  For the former case, there is no
+// reason do be incompatible with Chrome.  For the latter case, the selection
+// change is important for "paste" event listeners even if it's non-editable
+// content.
+pref("general.autoscroll.prevent_to_collapse_selection_by_middle_mouse_down", false);
+
 // maximum number of dated backups to keep at any time
 pref("browser.bookmarks.max_backups",       5);
 
@@ -872,7 +891,6 @@ pref("devtools.performance.recording.threads.remote", "[\"GeckoMain\",\"Composit
 // the host machine. This is used in order to look up symbol information from
 // build artifacts of local builds.
 pref("devtools.performance.recording.objdirs", "[]");
-pref("devtools.performance.recording.objdirs.remote", "[]");
 // The popup will display some introductory text the first time it is displayed.
 pref("devtools.performance.popup.intro-displayed", false);
 
@@ -1218,6 +1236,7 @@ pref("network.protocol-handler.external.data", false);
 pref("network.protocol-handler.external.ie.http", false);
 pref("network.protocol-handler.external.iehistory", false);
 pref("network.protocol-handler.external.ierss", false);
+pref("network.protocol-handler.external.mk", false);
 pref("network.protocol-handler.external.ms-help", false);
 pref("network.protocol-handler.external.res", false);
 pref("network.protocol-handler.external.shell", false);
@@ -1859,9 +1878,6 @@ pref("network.http.tailing.delay-max", 6000);
 // Total limit we delay tailed requests since a page load beginning.
 pref("network.http.tailing.total-max", 45000);
 
-// Enable or disable the whole fix from bug 1563538
-pref("network.http.spdy.bug1563538", true);
-
 pref("network.proxy.http",                  "");
 pref("network.proxy.http_port",             0);
 pref("network.proxy.ssl",                   "");
@@ -2230,7 +2246,7 @@ pref("middlemouse.scrollbarPosition", false);
 // Clipboard only supports text/plain
 pref("clipboard.plainTextOnly", false);
 
-#if defined(XP_WIN) || defined(MOZ_WIDGET_GTK)
+#if defined(XP_WIN) || defined(XP_MACOSX) || defined(MOZ_WIDGET_GTK)
   // Setting false you can disable 4th button and/or 5th button of your mouse.
   // 4th button is typically mapped to "Back" and 5th button is typically mapped
   // to "Forward" button.
@@ -4427,17 +4443,6 @@ pref("services.common.log.logger.tokenserverclient", "Debug");
   // Delay server startup until a modal dialogue has been clicked to allow time
   // for user to set breakpoints in the Browser Toolbox.
   pref("marionette.debugging.clicktostart", false);
-
-  // Verbosity of Marionette logger repository.
-  //
-  // Available levels are, in descending order of severity, "trace", "debug",
-  // "config", "info", "warn", "error", and "fatal". The value is treated
-  // case-insensitively.
-  pref("marionette.log.level", "Info");
-
-  // Certain log messages that are known to be long are truncated. This
-  // preference causes them to not be truncated.
-  pref("marionette.log.truncate", true);
 
   // Port to start Marionette server on.
   pref("marionette.port", 2828);

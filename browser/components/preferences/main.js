@@ -17,9 +17,6 @@ var { TransientPrefs } = ChromeUtils.import(
 var { AppConstants } = ChromeUtils.import(
   "resource://gre/modules/AppConstants.jsm"
 );
-var { L10nRegistry } = ChromeUtils.import(
-  "resource://gre/modules/L10nRegistry.jsm"
-);
 var { HomePage } = ChromeUtils.import("resource:///modules/HomePage.jsm");
 ChromeUtils.defineModuleGetter(
   this,
@@ -239,6 +236,16 @@ if (AppConstants.MOZ_UPDATER) {
   }
 }
 
+XPCOMUtils.defineLazyGetter(this, "gHasWinPackageId", () => {
+  let hasWinPackageId = false;
+  try {
+    hasWinPackageId = Services.sysinfo.getProperty("hasWinPackageId");
+  } catch (_ex) {
+    // The hasWinPackageId property doesn't exist; assume it would be false.
+  }
+  return hasWinPackageId;
+});
+
 // A promise that resolves when the list of application handlers is loaded.
 // We store this in a global so tests can await it.
 var promiseLoadHandlersList;
@@ -252,13 +259,11 @@ function getBundleForLocales(newLocales) {
       Services.locale.lastFallbackLocale,
     ])
   );
-  function generateBundles(resourceIds) {
-    return L10nRegistry.generateBundles(locales, resourceIds);
-  }
   return new Localization(
     ["browser/preferences/preferences.ftl", "branding/brand.ftl"],
     false,
-    { generateBundles }
+    undefined,
+    locales
   );
 }
 
@@ -500,6 +505,11 @@ var gMainPane = {
       "command",
       gMainPane.showTranslationExceptions
     );
+    setEventListener(
+      "fxtranslateButton",
+      "command",
+      gMainPane.showTranslationExceptions
+    );
     Preferences.get("font.language.group").on(
       "change",
       gMainPane._rebuildFonts.bind(gMainPane)
@@ -548,8 +558,8 @@ var gMainPane = {
     this.updateOnScreenKeyboardVisibility();
 
     // Show translation preferences if we may:
-    const prefName = "browser.translation.ui.show";
-    if (Services.prefs.getBoolPref(prefName)) {
+    const translationsPrefName = "browser.translation.ui.show";
+    if (Services.prefs.getBoolPref(translationsPrefName)) {
       let row = document.getElementById("translationBox");
       row.removeAttribute("hidden");
       // Showing attribution only for Bing Translator.
@@ -559,6 +569,13 @@ var gMainPane = {
       if (Translation.translationEngine == "Bing") {
         document.getElementById("bingAttribution").removeAttribute("hidden");
       }
+    }
+
+    // Firefox Translations settings panel
+    const fxtranslationsDisabledPrefName = "extensions.translations.disabled";
+    if (!Services.prefs.getBoolPref(fxtranslationsDisabledPrefName, true)) {
+      let fxtranslationRow = document.getElementById("fxtranslationsBox");
+      fxtranslationRow.hidden = false;
     }
 
     let drmInfoURL =
@@ -651,7 +668,20 @@ var gMainPane = {
 
       let updateDisabled =
         Services.policies && !Services.policies.isAllowed("appUpdate");
-      if (
+
+      if (gHasWinPackageId) {
+        // When we're running inside an app package, there's no point in
+        // displaying any update content here, and it would get confusing if we
+        // did, because our updater is not enabled.
+        // We can't rely on the hidden attribute for the toplevel elements,
+        // because of the pane hiding/showing code interfering.
+        document
+          .getElementById("updatesCategory")
+          .setAttribute("style", "display: none !important");
+        document
+          .getElementById("updateApp")
+          .setAttribute("style", "display: none !important");
+      } else if (
         updateDisabled ||
         UpdateUtils.appUpdateAutoSettingIsLocked() ||
         gApplicationUpdateService.manualUpdateOnly
@@ -1792,7 +1822,8 @@ var gMainPane = {
   async readUpdateAutoPref() {
     if (
       AppConstants.MOZ_UPDATER &&
-      (!Services.policies || Services.policies.isAllowed("appUpdate"))
+      (!Services.policies || Services.policies.isAllowed("appUpdate")) &&
+      !gHasWinPackageId
     ) {
       let radiogroup = document.getElementById("updateRadioGroup");
 
@@ -1811,7 +1842,8 @@ var gMainPane = {
   async writeUpdateAutoPref() {
     if (
       AppConstants.MOZ_UPDATER &&
-      (!Services.policies || Services.policies.isAllowed("appUpdate"))
+      (!Services.policies || Services.policies.isAllowed("appUpdate")) &&
+      !gHasWinPackageId
     ) {
       let radiogroup = document.getElementById("updateRadioGroup");
       let updateAutoValue = radiogroup.value == "true";
@@ -1848,6 +1880,7 @@ var gMainPane = {
       // properly if per-installation prefs aren't supported.
       UpdateUtils.PER_INSTALLATION_PREFS_SUPPORTED &&
       (!Services.policies || Services.policies.isAllowed("appUpdate")) &&
+      !gHasWinPackageId &&
       !UpdateUtils.appUpdateSettingIsLocked("app.update.background.enabled")
     );
   },
@@ -2775,7 +2808,7 @@ var gMainPane = {
     var fph = Services.io
       .getProtocolHandler("file")
       .QueryInterface(Ci.nsIFileProtocolHandler);
-    var urlSpec = fph.getURLSpecFromFile(aFile);
+    var urlSpec = fph.getURLSpecFromActualFile(aFile);
 
     return "moz-icon://" + urlSpec + "?size=16";
   },
@@ -3031,19 +3064,19 @@ var gMainPane = {
       downloadFolder.value = currentDirPref.value
         ? `\u2066${currentDirPref.value.path}\u2069`
         : "";
-      iconUrlSpec = fph.getURLSpecFromFile(currentDirPref.value);
+      iconUrlSpec = fph.getURLSpecFromDir(currentDirPref.value);
     } else if (folderIndex == 1) {
       // 'Downloads'
       [downloadFolder.value] = await document.l10n.formatValues([
         { id: "downloads-folder-name" },
       ]);
-      iconUrlSpec = fph.getURLSpecFromFile(await this._indexToFolder(1));
+      iconUrlSpec = fph.getURLSpecFromDir(await this._indexToFolder(1));
     } else {
       // 'Desktop'
       [downloadFolder.value] = await document.l10n.formatValues([
         { id: "desktop-folder-name" },
       ]);
-      iconUrlSpec = fph.getURLSpecFromFile(
+      iconUrlSpec = fph.getURLSpecFromDir(
         await this._getDownloadsFolder("Desktop")
       );
     }

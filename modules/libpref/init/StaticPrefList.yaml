@@ -1132,6 +1132,14 @@
   value: @IS_NOT_ANDROID@
   mirror: always
 
+#if defined(XP_MACOSX)
+# Whether pressing Esc will exit fullscreen.
+- name: browser.fullscreen.exit_on_escape
+  type: bool
+  value: false
+  mirror: always
+#endif
+
 # The max url length we'll store in history.
 #
 # The default value is mostly a guess based on various facts:
@@ -1186,7 +1194,7 @@
   type: RelaxedAtomicUint32
   value: 3000
   mirror: always
-  
+
 # Force usage of in-memory (rather than file on disk) media cache for video streaming when private browsing
 - name: browser.privatebrowsing.forceMediaMemoryCache
   type: bool
@@ -1499,7 +1507,7 @@
   value: 1
   mirror: always
 
-# How long to stay off the event loop in interactive mode.
+# How long to stay off the event loop in interactive mode (microseconds).
 - name: content.sink.interactive_parse_time
   type: int32_t
   value: 3000
@@ -1735,7 +1743,7 @@
 # Block Insecure downloads from Secure Origins
 - name: dom.block_download_insecure
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
 # Block all downloads in iframes with the sandboxed attribute
@@ -1935,6 +1943,11 @@
   value: true
   mirror: always
 
+- name: dom.event.dragexit.enabled
+  type: bool
+  value: @IS_NOT_NIGHTLY_BUILD@
+  mirror: always
+
 # Whether WheelEvent should return pixels instead of lines for
 # WheelEvent.deltaX/Y/Z, when deltaMode hasn't been checked.
 #
@@ -2034,7 +2047,7 @@
 # are sent.
 - name: dom.events.coalesce.touchmove
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # Whether to expose test interfaces of various sorts
@@ -2134,7 +2147,7 @@
 - name: dom.image-lazy-loading.root-margin.top
   type: float
 #if defined(EARLY_BETA_OR_EARLIER)
-  value: 1000
+  value: 800
 #else
   value: 300
 #endif
@@ -2148,7 +2161,7 @@
 - name: dom.image-lazy-loading.root-margin.bottom
   type: float
 #if defined(EARLY_BETA_OR_EARLIER)
-  value: 1000
+  value: 800
 #else
   value: 300
 #endif
@@ -2162,7 +2175,7 @@
 - name: dom.image-lazy-loading.root-margin.left
   type: float
 #if defined(EARLY_BETA_OR_EARLIER)
-  value: 1000
+  value: 800
 #else
   value: 300
 #endif
@@ -2176,7 +2189,7 @@
 - name: dom.image-lazy-loading.root-margin.right
   type: float
 #if defined(EARLY_BETA_OR_EARLIER)
-  value: 1000
+  value: 800
 #else
   value: 300
 #endif
@@ -3101,7 +3114,12 @@
   mirror: always
 
 # Whether or not selection events on text controls are enabled.
-- name: dom.select_events.textcontrols.enabled
+- name: dom.select_events.textcontrols.selectionchange.enabled
+  type: bool
+  value: true
+  mirror: always
+
+- name: dom.select_events.textcontrols.selectstart.enabled
   type: bool
   value: @IS_NIGHTLY_BUILD@
   mirror: always
@@ -3145,6 +3163,16 @@
   mirror: always
 
 - name: dom.serviceWorkers.testing.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# Whether ServiceWorkerManager should persist the service worker
+# registered by temporary installed extension (only meant to be used
+# for testing purpose, to make it easier to test some particular scenario
+# with a temporary installed addon, which doesn't need to be signed to be
+# installed on release channel builds).
+- name: dom.serviceWorkers.testing.persistTemporarilyInstalledAddons
   type: RelaxedAtomicBool
   value: false
   mirror: always
@@ -3233,13 +3261,10 @@
   mirror: always
 
 # Whether or not LSNG (Next Generation Local Storage) is enabled.
-# See bug 1517090 for enabling this on Nightly.
-# See bug 1534736 for changing it to EARLY_BETA_OR_EARLIER.
-# See bug 1539835 for enabling this unconditionally.
-# See bug 1619948 for changing it back to EARLY_BETA_OR_EARLIER.
+# See bug 1599979 for enabling this unconditionally (second attempt).
 - name: dom.storage.next_gen
   type: RelaxedAtomicBool
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
   mirror: always
   do_not_use_directly: true
 
@@ -3666,11 +3691,23 @@
   value: @IS_NOT_ANDROID@
   mirror: always
 
+# Is the 'assign' API for slot element enabled?
+- name: dom.shadowdom.slot.assign.enabled
+  type: bool
+  value: true
+  mirror: always
+
 # NOTE: This preference is used in unit tests. If it is removed or its default
 # value changes, please update test_sharedMap_static_prefs.js accordingly.
 - name: dom.webcomponents.shadowdom.report_usage
   type: bool
   value: false
+  mirror: always
+
+# Is support for custom element disabledFeatures enabled?
+- name: dom.webcomponents.disabledFeatures.enabled
+  type: bool
+  value: true
   mirror: always
 
 # Is support for form-associated custom element enabled?
@@ -3842,7 +3879,11 @@
 # WebShare API - exposes navigator.share()
 - name: dom.webshare.enabled
   type: bool
+#ifdef XP_WIN
+  value: @IS_EARLY_BETA_OR_EARLIER@
+#else
   value: false
+#endif
   mirror: always
 
 # WebShare API - allows WebShare without user interaction (for tests only).
@@ -4525,7 +4566,7 @@
 
 - name: gfx.color_management.enablev4
   type: RelaxedAtomicBool
-#if defined(XP_MACOSX) && defined(NIGHTLY_BUILD)
+#if defined(XP_MACOSX) || defined(NIGHTLY_BUILD)
   value: true
 #else
   value: false
@@ -4764,6 +4805,11 @@
 - name: gfx.font_rendering.fallback.async
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+- name: gfx.basic_layer_manager.force_enabled
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 #  Whether to enable LayerScope tool and default listening port.
@@ -5008,7 +5054,7 @@
 # Also expose a pref to allow users to force-disable WR. This is exposed
 # on all channels because WR can be enabled on qualified hardware on all
 # channels.
-- name: gfx.webrender.force-disabled
+- name: gfx.webrender.force-legacy-layers
   type: bool
   value: false
   mirror: once
@@ -5061,11 +5107,7 @@
 
 - name: gfx.webrender.compositor.max_update_rects
   type: uint32_t
-#if defined(XP_WIN) || defined(XP_MACOSX)
   value: 1
-#else
-  value: 0
-#endif
   mirror: once
 
 - name: gfx.webrender.compositor.surface-pool-size
@@ -5109,21 +5151,13 @@
 # Whether or not to fallback from WebRender/WebRender Software to Basic.
 - name: gfx.webrender.fallback.basic
   type: bool
-#if defined(MOZ_WIDGET_ANDROID)
-  value: true
-#else
-  value: @IS_NOT_EARLY_BETA_OR_EARLIER@
-#endif
+  value: false
   mirror: once
 
 # Whether or not to fallback from WebRender to Software WebRender.
 - name: gfx.webrender.fallback.software
   type: bool
-#if defined(MOZ_WIDGET_ANDROID)
-  value: false
-#else
   value: true
-#endif
   mirror: once
 
 #ifdef XP_WIN
@@ -5614,7 +5648,7 @@
 - name: image.avif.enabled
   type: RelaxedAtomicBool
 #if defined(MOZ_AV1)
-  value: false
+  value: true
 #else
   value: false
 #endif
@@ -5627,7 +5661,7 @@
 # 2 = Strict: reject violations of "should" specification directives
 - name: image.avif.compliance_strictness
   type: RelaxedAtomicInt32
-  value: 1
+  value: 0
   mirror: always
 
 # Whether we apply container-level transforms like mirroring and rotation
@@ -5985,6 +6019,13 @@
     mirror: always
 #endif  // defined(ENABLE_WASM_RELAXED_SIMD)
 
+#if defined(ENABLE_WASM_MOZ_INTGEMM)
+-   name: javascript.options.wasm_moz_intgemm
+    type: bool
+    value: @IS_NIGHTLY_BUILD@
+    mirror: always
+#endif  // defined(ENABLE_WASM_MOZ_INTGEMM)
+
 #if defined(ENABLE_WASM_EXTENDED_CONST)
 -   name: javascript.options.wasm_extended_const
     type: bool
@@ -6023,6 +6064,13 @@
     value: false
     mirror: always
 #endif
+
+#if defined(ENABLE_WASM_MEMORY64)
+-   name: javascript.options.wasm_memory64
+    type: bool
+    value: true
+    mirror: always
+#endif  // defined(ENABLE_WASM_MEMORY64)
 
 # Support for ArrayBuffers larger than 2 GB on 64-bit systems
 - name: javascript.options.large_arraybuffers
@@ -6797,9 +6845,37 @@
 # Whether the `accent-color` css property is enabled.
 - name: layout.css.accent-color.enabled
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
   rust: true
+
+# Whether the `color-scheme` css property and meta tags are enabled.
+- name: layout.css.color-scheme.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+  rust: true
+
+# The minimum contrast ratio between the accent color foreground and background
+# colors.
+#
+# We don't use this for text, so we need a contrast of at least AA (for user
+# interface components and graphical objects), which per WCAG is 3:1
+- name: layout.css.accent-color.min-contrast-ratio
+  type: AtomicFloat
+  value: 3.0
+  mirror: always
+
+# The target contrast ratio between the accent color foreground and background
+# colors when darkening.
+#
+# We aim a bit further than the minimum contrast ratio, which seems to provide
+# nice results in practice.
+- name: layout.css.accent-color.darkening-target-contrast-ratio
+  type: AtomicFloat
+  value: 6.0
+  mirror: always
+
 
 # Whether the `aspect-ratio` in css-sizing-4 is enabled.
 - name: layout.css.aspect-ratio.enabled
@@ -6814,25 +6890,28 @@
   value: true
   mirror: always
 
-# Is path() supported in clip-path?
-- name: layout.css.clip-path-path.enabled
-  type: RelaxedAtomicBool
-  value: true
+# Whether we should throw on invalid pseudo-elements passed to
+# getComputedStyle() as per spec.
+#
+# Old behavior is a bit odd: returning an empty style if the string starts with
+# a double colon, and return the regular style otherwise.
+- name: layout.css.computed-style.throw-on-invalid-pseudo
+  type: bool
+  value: false
   mirror: always
-  rust: true
-
-# Is the image-set() function enabled?
-- name: layout.css.image-set.enabled
-  type: RelaxedAtomicBool
-  value: true
-  mirror: always
-  rust: true
 
 # Are implicit tracks in computed grid templates serialized?
 - name: layout.css.serialize-grid-implicit-tracks
   type: RelaxedAtomicBool
   value: true
   mirror: always
+
+# Whether the system-ui generic family is enabled.
+- name: layout.css.system-ui.enabled
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+  rust: true
 
 # Whether the bloom filter optimization is applied to attribute names too, not
 # only classes / id / namespaces / etc.
@@ -6950,14 +7029,14 @@
 # Is support for the size-adjust @font-face descriptor enabled?
 - name: layout.css.size-adjust.enabled
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
   rust: true
 
 # Is the optional adjustment-basis value for font-size-adjust enabled?
 - name: layout.css.font-size-adjust.basis.enabled
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
   rust: true
 
@@ -7122,12 +7201,6 @@
 - name: layout.css.prefixes.box-sizing
   type: bool
   value: true
-  mirror: always
-
-# Is support for -moz-prefixed multi-column properties (including column-gap) enabled?
-- name: layout.css.prefixes.columns
-  type: bool
-  value: false
   mirror: always
 
 # Is support for -moz-prefixed font feature properties enabled?
@@ -9171,6 +9244,14 @@
   value: 2
   mirror: always
 
+# Set to ignore referrer policies which is less restricted than the default for
+# cross-site requests, including 'unsafe-url', 'no-referrer-when-downgrade' and
+# 'origin-when-cross-origin'.
+- name: network.http.referer.disallowCrossSiteRelaxingDefault
+  type: bool
+  value: @IS_EARLY_BETA_OR_EARLIER@
+  mirror: always
+
 # Set the Private Browsing Default Referrer Policy applied to third-party
 # trackers when the default cookie policy is set to reject third-party
 # trackers, to be used unless overriden by the site.
@@ -9194,6 +9275,13 @@
 - name: network.http.windows-sso.enabled
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+
+# The factor by which to increase the keepalive timeout when the
+# NS_HTTP_LARGE_KEEPALIVE flag is used for a connection
+- name: network.http.largeKeepaliveFactor
+  type: RelaxedAtomicUint32
+  value: 10
   mirror: always
 
 # If set to true, IOService.offline depends on IOService.connectivity.
@@ -9774,13 +9862,13 @@
 # available.
 - name: network.dns.upgrade_with_https_rr
   type: RelaxedAtomicBool
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
   mirror: always
 
 # Whether to use HTTPS RR as AltSvc
 - name: network.dns.use_https_rr_as_altsvc
   type: RelaxedAtomicBool
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
   mirror: always
 
 # Whether to check for NAT64 using the system resolver
@@ -10045,6 +10133,14 @@
 - name: print.save_as_pdf.links.enabled
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# Whether we attempt to generate and use document-internal PDF destinations.
+# This currently sometimes results in an internal cairo error, see bug 1725743;
+# disabled by default until that is resolved.
+- name: print.save_as_pdf.internal_destinations.enabled
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 # The default DPI for printing.
@@ -10424,6 +10520,12 @@
   value: false
   mirror: always
 
+#  Partition the websocket pending connection queue by OriginAttributes.
+- name: privacy.partition.network_state.ws_connection_queue
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # The global switch to control the URL query sting stripping which strips query
 # parameters from loading URIs to prevent bounce (redirect) tracking.
 - name: privacy.query_stripping.enabled
@@ -10616,32 +10718,29 @@
     value: true
     mirror: always
 
-  # Whether CET Shadow Stacks Strict mode is enabled for the content processes.
--   name: security.sandbox.content.shadow-stacks-strict
+  # Whether CET User Shadow Stack compatible modules only is enabled for the
+  # relevant process type.
+-   name: security.sandbox.content.shadow-stack.enabled
     type: RelaxedAtomicBool
     value: false
     mirror: always
 
-  # Whether CET Shadow Stacks Strict mode is enabled for the RDD processes.
--   name: security.sandbox.rdd.shadow-stacks-strict
+-   name: security.sandbox.rdd.shadow-stack.enabled
     type: RelaxedAtomicBool
     value: false
     mirror: always
 
-  # Whether CET Shadow Stacks Strict mode is enabled for the socket processes.
--   name: security.sandbox.socket.shadow-stacks-strict
+-   name: security.sandbox.socket.shadow-stack.enabled
+    type: RelaxedAtomicBool
+    value: @IS_NIGHTLY_BUILD@
+    mirror: always
+
+-   name: security.sandbox.gpu.shadow-stack.enabled
     type: RelaxedAtomicBool
     value: false
     mirror: always
 
-  # Whether CET Shadow Stacks Strict mode is enabled for the GPU processes.
--   name: security.sandbox.gpu.shadow-stacks-strict
-    type: RelaxedAtomicBool
-    value: false
-    mirror: always
-
-  # Whether CET Shadow Stacks Strict mode is enabled for the GMP processes.
--   name: security.sandbox.gmp.shadow-stacks-strict
+-   name: security.sandbox.gmp.shadow-stack.enabled
     type: RelaxedAtomicBool
     value: false
     mirror: always
@@ -11342,6 +11441,11 @@
   value: false
   mirror: always
 
+- name: webgl.enable-renderer-query
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 - name: webgl.enable-surface-texture
   type: RelaxedAtomicBool
   value: true
@@ -11426,6 +11530,16 @@
   value: 100000 # 100KB
   mirror: always
 
+- name: webgl.override-unmasked-renderer
+  type: String
+  value: ""
+  mirror: never
+
+- name: webgl.override-unmasked-vendor
+  type: String
+  value: ""
+  mirror: never
+
 - name: webgl.power-preference-override
   type: RelaxedAtomicInt32
   value: 0
@@ -11434,6 +11548,11 @@
 - name: webgl.prefer-16bpp
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+
+- name: webgl.sanitize-unmasked-renderer
+  type: RelaxedAtomicBool
+  value: true
   mirror: always
 
 - name: webgl.allow-immediate-queries
@@ -11529,8 +11648,8 @@
 # TODO(emilio): This should probably do the right thing in most other
 # platforms, but stick to the standard colors on those.
 - name: widget.non-native-theme.use-theme-accent
-  type: bool
-#if defined(MOZ_WIDGET_GTK) || defined(XP_MACOSX)
+  type: RelaxedAtomicBool
+#if defined(MOZ_WIDGET_GTK) || defined(XP_MACOSX) || defined(ANDROID)
   value: true
 #else
   value: false
@@ -11583,7 +11702,7 @@
 
 # Whether to allow gtk dark themes in content.
 - name: widget.content.allow-gtk-dark-theme
-  type: bool
+  type: RelaxedAtomicBool
   value: false
   mirror: always
 
@@ -11688,7 +11807,7 @@
 
 - name: widget.wayland.multi-buffer-software-backend.enabled
   type: bool
-  value: false
+  value: true
   mirror: once
 
 # Use opaque region for MozContainer wl_surface
@@ -11702,6 +11821,20 @@
   type: bool
   value: true
   mirror: once
+#endif
+
+#ifdef XP_WIN
+# WindowsUIUtils::Share to wait for user action on Windows share dialog
+# `true` means the promise resolves when user completes or cancels the share
+# action. This can be unsafe since selecting copy action fires no DataPackage
+# event as of 21H1.
+# `false` means the promise resolves when the share data is passed to
+# DataPackage.
+# This affects the behavior of `navigator.share()`.
+- name: widget.windows.share.wait_action.enabled
+  type: bool
+  value: false
+  mirror: always
 #endif
 
 #---------------------------------------------------------------------------

@@ -63,3 +63,30 @@ add_task(async function test_openURL_visit_counter_withPattern() {
     "Third call should have count 2 for http://example.com"
   );
 });
+
+add_task(async function test_captivePortalLogin() {
+  const stub = sinon.stub();
+  const captivePortalTrigger = ASRouterTriggerListeners.get(
+    "captivePortalLogin"
+  );
+
+  captivePortalTrigger.init(stub);
+
+  Services.obs.notifyObservers(
+    this,
+    "captive-portal-login-success-after-button-pressed",
+    {}
+  );
+
+  Assert.ok(stub.called, "Called after button press and login");
+
+  captivePortalTrigger.uninit();
+
+  Services.obs.notifyObservers(
+    this,
+    "captive-portal-login-success-after-button-pressed",
+    {}
+  );
+
+  Assert.equal(stub.callCount, 1, "Not called after uninit");
+});
