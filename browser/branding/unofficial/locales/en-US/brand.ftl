@@ -16,11 +16,11 @@
 ## For further details, consult:
 ## https://mozilla-l10n.github.io/styleguides/mozilla_general/#brands-copyright-and-trademark
 
--brand-shorter-name = Umekou
--brand-short-name = Umekou
--brand-full-name = NightlyUmekou
+-brand-shorter-name = Flast G
+-brand-short-name = Flast G
+-brand-full-name = Flast G
 # This brand name can be used in messages where the product name needs to
 # remain unchanged across different versions (Nightly, Beta, etc.).
--brand-product-name = Umekou
--vendor-short-name = Umekou
+-brand-product-name = Flast G
+-vendor-short-name = Flast G
 trademarkInfo = { " " }
