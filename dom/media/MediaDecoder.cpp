@@ -973,10 +973,10 @@ void MediaDecoder::DurationChanged() {
 already_AddRefed<KnowsCompositor> MediaDecoder::GetCompositor() {
   MediaDecoderOwner* owner = GetOwner();
   Document* ownerDoc = owner ? owner->GetDocument() : nullptr;
-  RefPtr<LayerManager> layerManager =
-      ownerDoc ? nsContentUtils::LayerManagerForDocument(ownerDoc) : nullptr;
+  WindowRenderer* renderer =
+      ownerDoc ? nsContentUtils::WindowRendererForDocument(ownerDoc) : nullptr;
   RefPtr<KnowsCompositor> knows =
-      layerManager ? layerManager->AsKnowsCompositor() : nullptr;
+      renderer ? renderer->AsKnowsCompositor() : nullptr;
   return knows ? knows->GetForMedia().forget() : nullptr;
 }
 
@@ -1398,6 +1398,10 @@ void MediaDecoder::NotifyAudibleStateChanged() {
 
 double MediaDecoder::GetTotalPlayTimeInSeconds() const {
   return mTelemetryProbesReporter->GetTotalPlayTimeInSeconds();
+}
+
+double MediaDecoder::GetVisibleVideoPlayTimeInSeconds() const {
+  return mTelemetryProbesReporter->GetVisibleVideoPlayTimeInSeconds();
 }
 
 double MediaDecoder::GetInvisibleVideoPlayTimeInSeconds() const {

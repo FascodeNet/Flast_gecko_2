@@ -22,7 +22,6 @@
 #include "nsDocLoader.h"
 #include "nsIAuthPromptProvider.h"
 #include "nsIBaseWindow.h"
-#include "nsIDeprecationWarner.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeItem.h"
 #include "nsIInterfaceRequestor.h"
@@ -101,7 +100,6 @@ class nsDocShell final : public nsDocLoader,
                          public nsIAuthPromptProvider,
                          public nsILoadContext,
                          public nsINetworkInterceptController,
-                         public nsIDeprecationWarner,
                          public mozilla::SupportsWeakPtr {
  public:
   enum InternalLoad : uint32_t {
@@ -173,7 +171,6 @@ class nsDocShell final : public nsDocLoader,
   NS_DECL_NSIWEBPAGEDESCRIPTOR
   NS_DECL_NSIAUTHPROMPTPROVIDER
   NS_DECL_NSINETWORKINTERCEPTCONTROLLER
-  NS_DECL_NSIDEPRECATIONWARNER
 
   // Create a new nsDocShell object.
   static already_AddRefed<nsDocShell> Create(
@@ -522,6 +519,7 @@ class nsDocShell final : public nsDocLoader,
                               nsresult aStatusCode) override;
 
  private:  // member functions
+  friend class nsAppShellService;
   friend class nsDSURIContentListener;
   friend class FramingChecker;
   friend class OnLinkClickEvent;
@@ -588,7 +586,7 @@ class nsDocShell final : public nsDocLoader,
   // aCSP, if any, will be used for the new about:blank load.
   nsresult CreateAboutBlankContentViewer(
       nsIPrincipal* aPrincipal, nsIPrincipal* aPartitionedPrincipal,
-      nsIContentSecurityPolicy* aCSP, nsIURI* aBaseURI,
+      nsIContentSecurityPolicy* aCSP, nsIURI* aBaseURI, bool aIsInitialDocument,
       const mozilla::Maybe<nsILoadInfo::CrossOriginEmbedderPolicy>& aCOEP =
           mozilla::Nothing(),
       bool aTryToSaveOldPresentation = true, bool aCheckPermitUnload = true,

@@ -14,6 +14,10 @@ const {
   fetchHeaders,
 } = require("devtools/client/netmonitor/src/utils/request-utils");
 
+const {
+  getLongStringFullText,
+} = require("devtools/client/shared/string-utils");
+
 /**
  * This object is responsible for fetching additional HTTP
  * data from the backend over RDP protocol.
@@ -289,10 +293,10 @@ class FirefoxDataProvider {
    *         are available, or rejected if something goes wrong.
    */
   async getLongString(stringGrip) {
-    const webConsoleFront = await this.commands.targetCommand.targetFront.getFront(
-      "console"
+    const payload = await getLongStringFullText(
+      this.commands.client,
+      stringGrip
     );
-    const payload = await webConsoleFront.getString(stringGrip);
     this.emitForTests(TEST_EVENTS.LONGSTRING_RESOLVED, { payload });
     return payload;
   }
@@ -307,12 +311,18 @@ class FirefoxDataProvider {
    * @return {object}
    */
   async _getStackTraceFromWatcher(actor) {
-    const networkContentFront = await actor.targetFront.getFront(
-      "networkContent"
-    );
-    const stacktrace = await networkContentFront.getStackTrace(
-      actor.stacktraceResourceId
-    );
+    // If we request the stack trace for the navigation request,
+    // t was coming from previous page content process, which may no longer be around.
+    // In any case, the previous target is destroyed and we can't fetch the stack anymore.
+    let stacktrace = [];
+    if (!actor.targetFront.isDestroyed()) {
+      const networkContentFront = await actor.targetFront.getFront(
+        "networkContent"
+      );
+      stacktrace = await networkContentFront.getStackTrace(
+        actor.stacktraceResourceId
+      );
+    }
     return { stacktrace };
   }
 
@@ -563,6 +573,7 @@ class FirefoxDataProvider {
     ) {
       const requestInfo = this.stackTraceRequestInfoByActorID.get(actorID);
       const { stacktrace } = await this._getStackTraceFromWatcher(requestInfo);
+      this.stackTraceRequestInfoByActorID.delete(actorID);
       response = { from: actor, stacktrace };
     } else {
       // We don't create fronts for NetworkEvent actors,

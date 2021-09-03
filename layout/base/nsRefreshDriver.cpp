@@ -681,11 +681,7 @@ class VsyncRefreshDriverTimer : public RefreshDriverTimer {
       // monotonic because the underlying system apis produce non-monontonic
       // results. (bug 1306896)
 #if !defined(_WIN32)
-      // Do not compare timestamps unless they are both canonical or fuzzy
-      DebugOnly<TimeStamp> rightnow = TimeStamp::Now();
-      MOZ_ASSERT_IF(
-          (*&rightnow).UsedCanonicalNow() == aVsyncTimestamp.UsedCanonicalNow(),
-          aVsyncTimestamp <= *&rightnow);
+      MOZ_ASSERT(aVsyncTimestamp <= TimeStamp::Now());
 #endif
 
       // Let also non-RefreshDriver code to run at least for awhile if we have
@@ -1110,6 +1106,10 @@ RefreshDriverTimer* nsRefreshDriver::ChooseTimer() {
   return sRegularRateTimer;
 }
 
+static nsDocShell* GetDocShell(nsPresContext* aPresContext) {
+  return static_cast<nsDocShell*>(aPresContext->GetDocShell());
+}
+
 nsRefreshDriver::nsRefreshDriver(nsPresContext* aPresContext)
     : mActiveTimer(nullptr),
       mOwnTimer(nullptr),
@@ -1337,19 +1337,44 @@ bool nsRefreshDriver::AddImageRequest(imgIRequest* aRequest) {
 
   EnsureTimerStarted();
 
+  if (profiler_can_accept_markers()) {
+    nsCOMPtr<nsIURI> uri;
+    aRequest->GetURI(getter_AddRefs(uri));
+    nsAutoCString uristr;
+    uri->GetAsciiSpec(uristr);
+
+    PROFILER_MARKER_TEXT("Image Animation", GRAPHICS,
+                         MarkerOptions(MarkerTiming::IntervalStart(),
+                                       MarkerInnerWindowIdFromDocShell(
+                                           GetDocShell(mPresContext))),
+                         uristr);
+  }
+
   return true;
 }
 
 void nsRefreshDriver::RemoveImageRequest(imgIRequest* aRequest) {
-  // Try to remove from both places, just in case, because we can't tell
-  // whether RemoveEntry() succeeds.
-  mRequests.Remove(aRequest);
+  // Try to remove from both places, just in case.
+  bool removed = mRequests.EnsureRemoved(aRequest);
   uint32_t delay = GetFirstFrameDelay(aRequest);
   if (delay != 0) {
     ImageStartData* start = mStartTable.Get(delay);
     if (start) {
-      start->mEntries.Remove(aRequest);
+      removed = removed | start->mEntries.EnsureRemoved(aRequest);
     }
+  }
+
+  if (removed && profiler_can_accept_markers()) {
+    nsCOMPtr<nsIURI> uri;
+    aRequest->GetURI(getter_AddRefs(uri));
+    nsAutoCString uristr;
+    uri->GetAsciiSpec(uristr);
+
+    PROFILER_MARKER_TEXT("Image Animation", GRAPHICS,
+                         MarkerOptions(MarkerTiming::IntervalEnd(),
+                                       MarkerInnerWindowIdFromDocShell(
+                                           GetDocShell(mPresContext))),
+                         uristr);
   }
 }
 
@@ -1703,7 +1728,7 @@ void nsRefreshDriver::AppendTickReasonsToString(TickReasons aReasons,
     aStr.AppendLiteral(")");
   }
   if (aReasons & TickReasons::eHasImageRequests) {
-    aStr.AppendLiteral(" HasImageRequests");
+    aStr.AppendLiteral(" HasImageAnimations");
   }
   if (aReasons & TickReasons::eNeedsToUpdateIntersectionObservations) {
     aStr.AppendLiteral(" NeedsToUpdateIntersectionObservations");
@@ -1816,10 +1841,6 @@ struct DocumentFrameCallbacks {
   RefPtr<Document> mDocument;
   nsTArray<Document::FrameRequest> mCallbacks;
 };
-
-static nsDocShell* GetDocShell(nsPresContext* aPresContext) {
-  return static_cast<nsDocShell*>(aPresContext->GetDocShell());
-}
 
 static bool HasPendingAnimations(PresShell* aPresShell) {
   Document* doc = aPresShell->GetDocument();
@@ -2439,9 +2460,9 @@ void nsRefreshDriver::Tick(VsyncId aId, TimeStamp aNowTime,
     // Forward our composition payloads to the layer manager.
     if (!mCompositionPayloads.IsEmpty()) {
       nsIWidget* widget = mPresContext->GetRootWidget();
-      layers::LayerManager* lm = widget ? widget->GetLayerManager() : nullptr;
-      if (lm) {
-        lm->RegisterPayloads(mCompositionPayloads);
+      WindowRenderer* renderer = widget ? widget->GetWindowRenderer() : nullptr;
+      if (renderer && renderer->AsLayerManager()) {
+        renderer->AsLayerManager()->RegisterPayloads(mCompositionPayloads);
       }
       mCompositionPayloads.Clear();
     }
@@ -2888,6 +2909,8 @@ void nsRefreshDriver::Disconnect() {
   MOZ_ASSERT(NS_IsMainThread());
 
   StopTimer();
+
+  mEarlyRunners.Clear();
 
   if (mPresContext) {
     mPresContext = nullptr;

@@ -45,11 +45,8 @@ pref("dom.push.enabled", true);
 // enable external storage API
 pref("dom.storageManager.enabled", true);
 
-// enable LocalStorage NextGen (LSNG) for all GeckoView channels.  (LSNG is
-// enabled for all of Gecko on nightly and early beta, but the rollout to
-// release has been slow because of legacy profile breakage issues that are not
-// shared by GeckoView.)
-pref("dom.storage.next_gen", true);
+// enable storage access API
+pref("dom.storage_access.enabled", true);
 
 // Inherit locale from the OS, used for multi-locale builds
 pref("intl.locale.requested", "");

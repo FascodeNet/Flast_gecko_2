@@ -868,7 +868,7 @@ BlobURLProtocolHandler::GetFlagsForURI(nsIURI* aURI, uint32_t* aResult) {
 
   return NS_MutateURI(new BlobURL::Mutator())
       .SetSpec(aSpec)
-      .Apply(NS_MutatorMethod(&nsIBlobURLMutator::SetRevoked, revoked))
+      .Apply(&nsIBlobURLMutator::SetRevoked, revoked)
       .Finalize(aResult);
 }
 
@@ -927,6 +927,12 @@ bool BlobURLProtocolHandler::GetBlobURLPrincipal(nsIURI* aURI,
 
   principal.forget(aPrincipal);
   return true;
+}
+
+bool BlobURLProtocolHandler::IsBlobURLBroadcastPrincipal(
+    nsIPrincipal* aPrincipal) {
+  return aPrincipal->IsSystemPrincipal() ||
+         aPrincipal->GetIsAddonOrExpandedAddonPrincipal();
 }
 
 }  // namespace dom

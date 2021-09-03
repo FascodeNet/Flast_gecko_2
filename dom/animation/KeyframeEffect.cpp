@@ -39,6 +39,7 @@
 #include "nsIScrollableFrame.h"
 #include "nsPresContextInlines.h"
 #include "nsRefreshDriver.h"
+#include "js/PropertyAndElement.h"  // JS_DefineProperty
 
 namespace mozilla {
 
@@ -735,8 +736,8 @@ void KeyframeEffect::ResetPartialPrerendered() {
     return;
   }
 
-  if (layers::LayerManager* layerManager = widget->GetLayerManager()) {
-    layerManager->RemovePartialPrerenderedAnimation(
+  if (WindowRenderer* windowRenderer = widget->GetWindowRenderer()) {
+    windowRenderer->RemovePartialPrerenderedAnimation(
         mAnimation->IdOnCompositor(), mAnimation);
   }
 }
@@ -781,9 +782,9 @@ static KeyframeEffectParams KeyframeEffectParamsFromUnion(
     return result;
   }
 
-  RefPtr<nsAtom> pseudoAtom =
-      nsCSSPseudoElements::GetPseudoAtom(options.mPseudoElement);
-  if (!pseudoAtom) {
+  Maybe<PseudoStyleType> pseudoType =
+      nsCSSPseudoElements::GetPseudoType(options.mPseudoElement);
+  if (!pseudoType) {
     // Per the spec, we throw SyntaxError for syntactically invalid pseudos.
     aRv.ThrowSyntaxError(
         nsPrintfCString("'%s' is a syntactically invalid pseudo-element.",
@@ -791,8 +792,7 @@ static KeyframeEffectParams KeyframeEffectParamsFromUnion(
     return result;
   }
 
-  result.mPseudoType = nsCSSPseudoElements::GetPseudoType(
-      pseudoAtom, CSSEnabledState::ForAllContent);
+  result.mPseudoType = *pseudoType;
   if (!IsSupportedPseudoForWebAnimation(result.mPseudoType)) {
     // Per the spec, we throw SyntaxError for unsupported pseudos.
     aRv.ThrowSyntaxError(
@@ -1014,16 +1014,13 @@ already_AddRefed<ComputedStyle> KeyframeEffect::GetTargetComputedStyle(
   MOZ_ASSERT(mTarget,
              "Should only have a document when we have a target element");
 
-  nsAtom* pseudo = PseudoStyle::IsPseudoElement(mTarget.mPseudoType)
-                       ? nsCSSPseudoElements::GetPseudoAtom(mTarget.mPseudoType)
-                       : nullptr;
-
   OwningAnimationTarget kungfuDeathGrip(mTarget.mElement, mTarget.mPseudoType);
 
   return aFlushType == Flush::Style
-             ? nsComputedDOMStyle::GetComputedStyle(mTarget.mElement, pseudo)
+             ? nsComputedDOMStyle::GetComputedStyle(mTarget.mElement,
+                                                    mTarget.mPseudoType)
              : nsComputedDOMStyle::GetComputedStyleNoFlush(mTarget.mElement,
-                                                           pseudo);
+                                                           mTarget.mPseudoType);
 }
 
 #ifdef DEBUG
@@ -1087,17 +1084,16 @@ already_AddRefed<KeyframeEffect> KeyframeEffect::Constructor(
 
 void KeyframeEffect::SetPseudoElement(const nsAString& aPseudoElement,
                                       ErrorResult& aRv) {
-  PseudoStyleType pseudoType = PseudoStyleType::NotPseudo;
   if (DOMStringIsNull(aPseudoElement)) {
-    UpdateTarget(mTarget.mElement, pseudoType);
+    UpdateTarget(mTarget.mElement, PseudoStyleType::NotPseudo);
     return;
   }
 
-  // Note: GetPseudoAtom() also returns nullptr for the null string,
+  // Note: GetPseudoType() returns Some(NotPseudo) for the null string,
   // so we handle null case before this.
-  RefPtr<nsAtom> pseudoAtom =
-      nsCSSPseudoElements::GetPseudoAtom(aPseudoElement);
-  if (!pseudoAtom) {
+  Maybe<PseudoStyleType> pseudoType =
+      nsCSSPseudoElements::GetPseudoType(aPseudoElement);
+  if (!pseudoType || *pseudoType == PseudoStyleType::NotPseudo) {
     // Per the spec, we throw SyntaxError for syntactically invalid pseudos.
     aRv.ThrowSyntaxError(
         nsPrintfCString("'%s' is a syntactically invalid pseudo-element.",
@@ -1105,9 +1101,7 @@ void KeyframeEffect::SetPseudoElement(const nsAString& aPseudoElement,
     return;
   }
 
-  pseudoType = nsCSSPseudoElements::GetPseudoType(
-      pseudoAtom, CSSEnabledState::ForAllContent);
-  if (!IsSupportedPseudoForWebAnimation(pseudoType)) {
+  if (!IsSupportedPseudoForWebAnimation(*pseudoType)) {
     // Per the spec, we throw SyntaxError for unsupported pseudos.
     aRv.ThrowSyntaxError(
         nsPrintfCString("'%s' is an unsupported pseudo-element.",
@@ -1115,7 +1109,7 @@ void KeyframeEffect::SetPseudoElement(const nsAString& aPseudoElement,
     return;
   }
 
-  UpdateTarget(mTarget.mElement, pseudoType);
+  UpdateTarget(mTarget.mElement, *pseudoType);
 }
 
 static void CreatePropertyValue(
@@ -1538,26 +1532,16 @@ bool KeyframeEffect::CanThrottleOverflowChangesInScrollable(
     return true;
   }
 
-  bool hasIntersectionObservers = doc->HasIntersectionObservers();
-
   // If we know that the animation cannot cause overflow,
   // we can just disable flushes for this animation.
 
-  // If we don't show scrollbars and have no intersection observers, we don't
-  // care about overflow.
-  if (LookAndFeel::GetInt(LookAndFeel::IntID::ShowHideScrollbars) == 0 &&
-      !hasIntersectionObservers) {
+  // If we have no intersection observers, we don't care about overflow.
+  if (!doc->HasIntersectionObservers()) {
     return true;
   }
 
   if (CanThrottleOverflowChanges(aFrame)) {
     return true;
-  }
-
-  // If we have any intersection observers, we unthrottle this transform
-  // animation periodically.
-  if (hasIntersectionObservers) {
-    return false;
   }
 
   // If the nearest scrollable ancestor has overflow:hidden,

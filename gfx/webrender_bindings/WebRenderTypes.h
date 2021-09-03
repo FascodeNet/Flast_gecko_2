@@ -755,8 +755,9 @@ struct WrClipChainId {
   }
 };
 
-WrSpaceAndClip RootScrollNode();
+WrSpatialId RootScrollNode();
 WrSpaceAndClipChain RootScrollNodeWithChain();
+WrSpaceAndClipChain InvalidScrollNodeWithChain();
 
 enum class WebRenderError : int8_t {
   INITIALIZE = 0,

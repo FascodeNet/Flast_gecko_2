@@ -10,6 +10,7 @@
 #include "prsystem.h"
 
 #include "AltServiceChild.h"
+#include "nsCORSListenerProxy.h"
 #include "nsError.h"
 #include "nsHttp.h"
 #include "nsHttpHandler.h"
@@ -97,6 +98,10 @@
 #  include "nsCocoaFeatures.h"
 #endif
 
+#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
+#  include "mozilla/browser/NimbusFeatures.h"
+#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
+
 //-----------------------------------------------------------------------------
 #include "mozilla/net/HttpChannelChild.h"
 
@@ -123,6 +128,11 @@
 #define NS_HTTP_PROTOCOL_FLAGS \
   (URI_STD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP | URI_LOADABLE_BY_ANYONE)
 
+#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
+#  define UA_EXPERIMENT_NAME "firefox100"_ns
+#  define UA_EXPERIMENT_VAR "firefoxVersion"_ns
+#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
+
 //-----------------------------------------------------------------------------
 
 using mozilla::dom::Promise;
@@ -130,6 +140,42 @@ using mozilla::dom::Promise;
 namespace mozilla::net {
 
 LazyLogModule gHttpLog("nsHttp");
+
+#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
+static void ExperimentUserAgentUpdated(const char* /* aNimbusPref */,
+                                       void* aUserData) {
+  MOZ_ASSERT(aUserData != nullptr);
+  nsACString* aExperimentUserAgent = static_cast<nsACString*>(aUserData);
+
+  // Is this user enrolled in the Firefox 100 experiment?
+  int firefoxVersion =
+      NimbusFeatures::GetInt(UA_EXPERIMENT_NAME, UA_EXPERIMENT_VAR, 0);
+  if (firefoxVersion <= 0) {
+    aExperimentUserAgent->SetIsVoid(true);
+    return;
+  }
+
+  const char uaFormat[] =
+#  ifdef XP_WIN
+#    ifdef HAVE_64BIT_BUILD
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:%d.0) Gecko/20100101 "
+      "Firefox/%d.0"
+#    else
+      "Mozilla/5.0 (Windows NT 10.0; rv:%d.0) Gecko/20100101 Firefox/%d.0"
+#    endif
+#  elif defined(XP_MACOSX)
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:%d.0) Gecko/20100101 "
+      "Firefox/%d.0"
+#  else
+      // Linux, Android, FreeBSD, etc
+      "Mozilla/5.0 (X11; Linux x86_64; rv:%d.0) Gecko/20100101 Firefox/%d.0"
+#  endif
+      ;
+
+  aExperimentUserAgent->Truncate();
+  aExperimentUserAgent->AppendPrintf(uaFormat, firefoxVersion, firefoxVersion);
+}
+#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
 
 #ifdef ANDROID
 static nsCString GetDeviceModelId() {
@@ -231,6 +277,10 @@ nsHttpHandler::nsHttpHandler()
   LOG(("Creating nsHttpHandler [this=%p].\n", this));
 
   mUserAgentOverride.SetIsVoid(true);
+
+#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
+  mExperimentUserAgent.SetIsVoid(true);
+#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
 
   MOZ_ASSERT(!gHttpHandler, "HTTP handler already created!");
 
@@ -337,6 +387,13 @@ nsresult nsHttpHandler::Init() {
   Preferences::RegisterPrefixCallbacks(nsHttpHandler::PrefsChanged,
                                        gCallbackPrefs, this);
   PrefsChanged(nullptr);
+
+#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
+  // monitor Firefox Version Experiment enrollment
+  NimbusFeatures::OnUpdate(UA_EXPERIMENT_NAME, UA_EXPERIMENT_VAR,
+                           ExperimentUserAgentUpdated, &mExperimentUserAgent);
+#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
+
   Telemetry::ScalarSet(Telemetry::ScalarID::NETWORKING_HTTP3_ENABLED,
                        mHttp3Enabled);
 
@@ -697,6 +754,14 @@ const nsCString& nsHttpHandler::UserAgent() {
     LOG(("using general.useragent.override : %s\n", mUserAgentOverride.get()));
     return mUserAgentOverride;
   }
+
+#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
+  if (!mExperimentUserAgent.IsVoid()) {
+    LOG(("using Firefox 100 Experiment User-Agent : %s\n",
+         mExperimentUserAgent.get()));
+    return mExperimentUserAgent;
+  }
+#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
 
   if (mUserAgentIsDirty) {
     BuildUserAgent();
@@ -1711,13 +1776,6 @@ void nsHttpHandler::PrefsChanged(const char* pref) {
     }
   }
 
-  if (PREF_CHANGED(HTTP_PREF("spdy.bug1563538"))) {
-    rv = Preferences::GetBool(HTTP_PREF("spdy.bug1563538"), &cVar);
-    if (NS_SUCCEEDED(rv)) {
-      mBug1563538 = cVar;
-    }
-  }
-
   if (PREF_CHANGED(HTTP_PREF("http3.enabled"))) {
     rv = Preferences::GetBool(HTTP_PREF("http3.enabled"), &cVar);
     if (NS_SUCCEEDED(rv)) {
@@ -2534,6 +2592,12 @@ nsHttpHandler::EnsureHSTSDataReady(JSContext* aCx, Promise** aPromise) {
   return EnsureHSTSDataReadyNative(wrapper);
 }
 
+NS_IMETHODIMP
+nsHttpHandler::ClearCORSPreflightCache() {
+  nsCORSListenerProxy::ClearCache();
+  return NS_OK;
+}
+
 void nsHttpHandler::ShutdownConnectionManager() {
   // ensure connection manager is shutdown
   if (mConnMgr) {
@@ -2653,7 +2717,7 @@ bool nsHttpHandler::IsHttp3SupportedByServer(
   for (uint32_t i = 0; i < kHttp3VersionCount; i++) {
     nsAutoCString value(kHttp3Versions[i]);
     value.Append("="_ns);
-    if (PL_strstr(altSvc.get(), value.get())) {
+    if (strstr(altSvc.get(), value.get())) {
       return true;
     }
   }

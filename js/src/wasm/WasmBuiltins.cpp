@@ -38,9 +38,9 @@
 #include "vm/BigIntType.h"
 #include "vm/ErrorObject.h"
 #include "wasm/TypedObject.h"
+#include "wasm/WasmCodegenTypes.h"
 #include "wasm/WasmInstance.h"
 #include "wasm/WasmStubs.h"
-#include "wasm/WasmTypes.h"
 
 #include "debugger/DebugAPI-inl.h"
 #include "vm/ErrorObject-inl.h"
@@ -251,7 +251,13 @@ const SymbolicAddressSignature SASigArrayNew = {SymbolicAddress::ArrayNew,
 const SymbolicAddressSignature SASigRefTest = {
     SymbolicAddress::RefTest, _I32, _Infallible, 3, {_PTR, _RoN, _RoN, _END}};
 const SymbolicAddressSignature SASigRttSub = {
-    SymbolicAddress::RttSub, _RoN, _FailOnNullPtr, 2, {_PTR, _RoN, _END}};
+    SymbolicAddress::RttSub, _RoN, _FailOnNullPtr, 3, {_PTR, _RoN, _RoN, _END}};
+const SymbolicAddressSignature SASigIntrI8VecMul = {
+    SymbolicAddress::IntrI8VecMul,
+    _VOID,
+    _FailOnNegI32,
+    6,
+    {_PTR, _I32, _I32, _I32, _I32, _PTR, _END}};
 
 }  // namespace wasm
 }  // namespace js
@@ -499,8 +505,7 @@ bool wasm::HandleThrow(JSContext* cx, WasmFrameIter& iter,
 
       if (tryNote) {
         cx->clearPendingException();
-        if (!exn.isObject() ||
-            !exn.toObject().is<WasmRuntimeExceptionObject>()) {
+        if (!exn.isObject() || !exn.toObject().is<WasmExceptionObject>()) {
           RootedObject obj(cx, WasmJSExceptionObject::create(cx, &exn));
           if (!obj) {
             MOZ_ASSERT(cx->isThrowingOutOfMemory());
@@ -1220,8 +1225,8 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
       MOZ_ASSERT(*abiType == ToABIType(SASigRefTest));
       return FuncCast(Instance::refTest, *abiType);
     case SymbolicAddress::RttSub:
-      *abiType = MakeABIFunctionType(ArgType_General,
-                                     {ArgType_General, ArgType_General});
+      *abiType = MakeABIFunctionType(
+          ArgType_General, {ArgType_General, ArgType_General, ArgType_General});
       MOZ_ASSERT(*abiType == ToABIType(SASigRttSub));
       return FuncCast(Instance::rttSub, *abiType);
     case SymbolicAddress::InlineTypedObjectClass:
@@ -1271,6 +1276,12 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
       *abiType = Args_General1;
       return FuncCast(PrintText, *abiType);
 #endif
+    case SymbolicAddress::IntrI8VecMul:
+      *abiType = MakeABIFunctionType(
+          ArgType_Int32, {ArgType_General, ArgType_Int32, ArgType_Int32,
+                          ArgType_Int32, ArgType_Int32, ArgType_General});
+      MOZ_ASSERT(*abiType == ToABIType(SASigIntrI8VecMul));
+      return FuncCast(Instance::intrI8VecMul, *abiType);
     case SymbolicAddress::Limit:
       break;
   }
@@ -1397,6 +1408,7 @@ bool wasm::NeedsBuiltinThunk(SymbolicAddress sym) {
     case SymbolicAddress::ArrayNew:
     case SymbolicAddress::RefTest:
     case SymbolicAddress::RttSub:
+    case SymbolicAddress::IntrI8VecMul:
       return true;
     case SymbolicAddress::Limit:
       break;

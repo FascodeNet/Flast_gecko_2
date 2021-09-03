@@ -48,7 +48,8 @@ win32-mingwclang/opt:
             - linux64-clang-mingw-x86
             - linux64-mingw32-nsis
             - linux64-mingw-fxc2-x86
-            - linux64-dump-syms
+            - linux64-dump_syms
+            - sysroot-x86_64-linux-gnu
 
 win32-mingwclang/debug:
     description: "Win32 MinGW-Clang Debug"
@@ -83,7 +84,8 @@ win32-mingwclang/debug:
             - linux64-clang-mingw-x86
             - linux64-mingw32-nsis
             - linux64-mingw-fxc2-x86
-            - linux64-dump-syms
+            - linux64-dump_syms
+            - sysroot-x86_64-linux-gnu
 
 win64-mingwclang/opt:
     description: "Win64 MinGW-Clang Opt"
@@ -118,7 +120,8 @@ win64-mingwclang/opt:
             - linux64-clang-mingw-x64
             - linux64-mingw32-nsis
             - linux64-mingw-fxc2-x86
-            - linux64-dump-syms
+            - linux64-dump_syms
+            - sysroot-x86_64-linux-gnu
 
 win64-mingwclang/debug:
     description: "Win64 MinGW-Clang Debug"
@@ -153,4 +156,5 @@ win64-mingwclang/debug:
             - linux64-clang-mingw-x64
             - linux64-mingw32-nsis
             - linux64-mingw-fxc2-x86
-            - linux64-dump-syms
+            - linux64-dump_syms
+            - sysroot-x86_64-linux-gnu

@@ -2971,6 +2971,7 @@ exports.CSS_PROPERTIES = {
       "-moz-user-focus",
       "caret-color",
       "accent-color",
+      "color-scheme",
       "scrollbar-color",
       "list-style-position",
       "list-style-type",
@@ -5241,6 +5242,8 @@ exports.CSS_PROPERTIES = {
     "values": [
       "auto",
       "avoid",
+      "avoid-column",
+      "avoid-page",
       "inherit",
       "initial",
       "revert",
@@ -8949,6 +8952,8 @@ exports.CSS_PROPERTIES = {
     "values": [
       "auto",
       "avoid",
+      "avoid-column",
+      "avoid-page",
       "inherit",
       "initial",
       "revert",
@@ -10908,23 +10913,23 @@ exports.CSS_PROPERTIES = {
  * A list of the pseudo elements.
  */
 exports.PSEUDO_ELEMENTS = [
-  ":after",
-  ":before",
-  ":marker",
-  ":backdrop",
-  ":cue",
-  ":first-letter",
-  ":first-line",
-  ":selection",
-  ":-moz-focus-inner",
-  ":-moz-progress-bar",
-  ":-moz-range-track",
-  ":-moz-range-progress",
-  ":-moz-range-thumb",
-  ":-moz-meter-bar",
-  ":placeholder",
-  ":-moz-color-swatch",
-  ":file-selector-button"
+  "::after",
+  "::before",
+  "::marker",
+  "::backdrop",
+  "::cue",
+  "::first-letter",
+  "::first-line",
+  "::selection",
+  "::-moz-focus-inner",
+  "::-moz-progress-bar",
+  "::-moz-range-track",
+  "::-moz-range-progress",
+  "::-moz-range-thumb",
+  "::-moz-meter-bar",
+  "::placeholder",
+  "::-moz-color-swatch",
+  "::file-selector-button"
 ];
 
 /**
@@ -11023,6 +11028,10 @@ exports.PREFERENCES = [
   [
     "backdrop-filter",
     "layout.css.backdrop-filter.enabled"
+  ],
+  [
+    "color-scheme",
+    "layout.css.color-scheme.enabled"
   ],
   [
     "d",
@@ -11157,34 +11166,6 @@ exports.PREFERENCES = [
     "layout.css.prefixes.transforms"
   ],
   [
-    "-moz-column-width",
-    "layout.css.prefixes.columns"
-  ],
-  [
-    "-moz-column-count",
-    "layout.css.prefixes.columns"
-  ],
-  [
-    "-moz-column-fill",
-    "layout.css.prefixes.columns"
-  ],
-  [
-    "-moz-column-rule-width",
-    "layout.css.prefixes.columns"
-  ],
-  [
-    "-moz-column-rule-color",
-    "layout.css.prefixes.columns"
-  ],
-  [
-    "-moz-column-span",
-    "layout.css.prefixes.columns"
-  ],
-  [
-    "-moz-column-rule-style",
-    "layout.css.prefixes.columns"
-  ],
-  [
     "-moz-font-feature-settings",
     "layout.css.prefixes.font-features"
   ],
@@ -11197,10 +11178,6 @@ exports.PREFERENCES = [
     "layout.css.prefixes.box-sizing"
   ],
   [
-    "-moz-column-gap",
-    "layout.css.prefixes.columns"
-  ],
-  [
     "-moz-border-image",
     "layout.css.prefixes.border-image"
   ],
@@ -11211,13 +11188,5 @@ exports.PREFERENCES = [
   [
     "-moz-animation",
     "layout.css.prefixes.animations"
-  ],
-  [
-    "-moz-columns",
-    "layout.css.prefixes.columns"
-  ],
-  [
-    "-moz-column-rule",
-    "layout.css.prefixes.columns"
   ]
 ];

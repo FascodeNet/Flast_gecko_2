@@ -614,7 +614,8 @@ static bool DecodeFunctionBodyExprs(const ModuleEnvironment& env,
             CHECK(iter.readRttCanon(&unusedTy));
           }
           case uint16_t(GcOp::RttSub): {
-            CHECK(iter.readRttSub(&nothing));
+            uint32_t unusedRttTypeIndex;
+            CHECK(iter.readRttSub(&nothing, &unusedRttTypeIndex));
           }
           case uint16_t(GcOp::RefTest): {
             uint32_t unusedRttTypeIndex;
@@ -1690,55 +1691,64 @@ static bool DecodeFuncTypeIndex(Decoder& d, const TypeContext& types,
   return true;
 }
 
-static bool DecodeLimits(Decoder& d, Limits* limits,
-                         Shareable allowShared = Shareable::False) {
+static bool DecodeLimits(Decoder& d, LimitsKind kind, Limits* limits) {
   uint8_t flags;
   if (!d.readFixedU8(&flags)) {
     return d.fail("expected flags");
   }
 
-  uint8_t mask = allowShared == Shareable::True
-                     ? uint8_t(MemoryMasks::AllowShared)
-                     : uint8_t(MemoryMasks::AllowUnshared);
+  uint8_t mask = kind == LimitsKind::Memory ? uint8_t(LimitsMask::Memory)
+                                            : uint8_t(LimitsMask::Table);
 
   if (flags & ~uint8_t(mask)) {
     return d.failf("unexpected bits set in flags: %" PRIu32,
                    uint32_t(flags & ~uint8_t(mask)));
   }
 
-  uint32_t initial;
-  if (!d.readVarU32(&initial)) {
+  uint64_t initial;
+  if (!d.readVarU64(&initial)) {
     return d.fail("expected initial length");
   }
   limits->initial = initial;
 
-  if (flags & uint8_t(MemoryTableFlags::HasMaximum)) {
-    uint32_t maximum;
-    if (!d.readVarU32(&maximum)) {
+  if (flags & uint8_t(LimitsFlags::HasMaximum)) {
+    uint64_t maximum;
+    if (!d.readVarU64(&maximum)) {
       return d.fail("expected maximum length");
     }
 
     if (limits->initial > maximum) {
       return d.failf(
           "memory size minimum must not be greater than maximum; "
-          "maximum length %" PRIu32 " is less than initial length %" PRIu64,
+          "maximum length %" PRIu64 " is less than initial length %" PRIu64,
           maximum, limits->initial);
     }
 
-    limits->maximum.emplace(uint64_t(maximum));
+    limits->maximum.emplace(maximum);
   }
 
   limits->shared = Shareable::False;
+  limits->indexType = IndexType::I32;
 
-  if (allowShared == Shareable::True) {
-    if ((flags & uint8_t(MemoryTableFlags::IsShared)) &&
-        !(flags & uint8_t(MemoryTableFlags::HasMaximum))) {
+  // Memory limits may be shared or specify an alternate index type
+  if (kind == LimitsKind::Memory) {
+    if ((flags & uint8_t(LimitsFlags::IsShared)) &&
+        !(flags & uint8_t(LimitsFlags::HasMaximum))) {
       return d.fail("maximum length required for shared memory");
     }
 
-    limits->shared = (flags & uint8_t(MemoryTableFlags::IsShared))
+    limits->shared = (flags & uint8_t(LimitsFlags::IsShared))
                          ? Shareable::True
                          : Shareable::False;
+
+#ifdef ENABLE_WASM_MEMORY64
+    limits->indexType =
+        (flags & uint8_t(LimitsFlags::IsI64)) ? IndexType::I64 : IndexType::I32;
+#else
+    if (flags & uint8_t(LimitsFlags::IsI64)) {
+      return d.fail("i64 is not supported for memory limits");
+    }
+#endif
   }
 
   return true;
@@ -1756,9 +1766,12 @@ static bool DecodeTableTypeAndLimits(Decoder& d, const FeatureArgs& features,
   }
 
   Limits limits;
-  if (!DecodeLimits(d, &limits)) {
+  if (!DecodeLimits(d, LimitsKind::Table, &limits)) {
     return false;
   }
+
+  // Decoding limits for a table only supports i32
+  MOZ_ASSERT(limits.indexType == IndexType::I32);
 
   // If there's a maximum, check it is in range.  The check to exclude
   // initial > maximum is carried out by the DecodeLimits call above, so
@@ -1840,21 +1853,23 @@ static bool DecodeGlobalType(Decoder& d, const TypeContext& types,
   return true;
 }
 
-static bool DecodeMemoryLimits(Decoder& d, ModuleEnvironment* env) {
+static bool DecodeMemoryTypeAndLimits(Decoder& d, ModuleEnvironment* env) {
   if (env->usesMemory()) {
     return d.fail("already have default memory");
   }
 
   Limits limits;
-  if (!DecodeLimits(d, &limits, Shareable::True)) {
+  if (!DecodeLimits(d, LimitsKind::Memory, &limits)) {
     return false;
   }
 
-  if (limits.initial > MaxMemory32LimitField) {
+  uint64_t maxField = MaxMemoryLimitField(limits.indexType);
+
+  if (limits.initial > maxField) {
     return d.fail("initial memory size too big");
   }
 
-  if (limits.maximum && *limits.maximum > MaxMemory32LimitField) {
+  if (limits.maximum && *limits.maximum > maxField) {
     return d.fail("maximum memory size too big");
   }
 
@@ -1863,12 +1878,16 @@ static bool DecodeMemoryLimits(Decoder& d, ModuleEnvironment* env) {
     return d.fail("shared memory is disabled");
   }
 
-  env->memory = Some(MemoryDesc(MemoryKind::Memory32, limits));
+  if (limits.indexType == IndexType::I64 && !env->memory64Enabled()) {
+    return d.fail("memory64 is disabled");
+  }
+
+  env->memory = Some(MemoryDesc(limits));
   return true;
 }
 
 #ifdef ENABLE_WASM_EXCEPTIONS
-static bool EventIsJSCompatible(Decoder& d, const ValTypeVector& type) {
+static bool TagIsJSCompatible(Decoder& d, const ValTypeVector& type) {
   for (auto t : type) {
     if (t.isTypeIndex()) {
       return d.fail("cannot expose indexed reference type");
@@ -1878,57 +1897,35 @@ static bool EventIsJSCompatible(Decoder& d, const ValTypeVector& type) {
   return true;
 }
 
-static bool DecodeEvent(Decoder& d, ModuleEnvironment* env,
-                        EventKind* eventKind, uint32_t* funcTypeIndex) {
-  uint32_t eventCode;
-  if (!d.readVarU32(&eventCode)) {
-    return d.fail("expected event kind");
+static bool DecodeTag(Decoder& d, ModuleEnvironment* env, TagKind* tagKind,
+                      uint32_t* funcTypeIndex) {
+  uint32_t tagCode;
+  if (!d.readVarU32(&tagCode)) {
+    return d.fail("expected tag kind");
   }
 
-  if (EventKind(eventCode) != EventKind::Exception) {
-    return d.fail("illegal event kind");
+  if (TagKind(tagCode) != TagKind::Exception) {
+    return d.fail("illegal tag kind");
   }
-  *eventKind = EventKind(eventCode);
+  *tagKind = TagKind(tagCode);
 
   if (!d.readVarU32(funcTypeIndex)) {
-    return d.fail("expected function index in event");
+    return d.fail("expected function index in tag");
   }
   if (*funcTypeIndex >= env->numTypes()) {
-    return d.fail("function type index in event out of bounds");
+    return d.fail("function type index in tag out of bounds");
   }
   if (!env->types[*funcTypeIndex].isFuncType()) {
     return d.fail("function type index must index a function type");
   }
   if (env->types[*funcTypeIndex].funcType().results().length() != 0) {
-    return d.fail("exception function types must not return anything");
+    return d.fail("tag function types must not return anything");
   }
   return true;
 }
 #endif
 
-struct CStringPair {
-  const char* first;
-  const char* second;
-
-  CStringPair(const char* first, const char* second)
-      : first(first), second(second) {}
-
-  using Key = CStringPair;
-  using Lookup = CStringPair;
-
-  static mozilla::HashNumber hash(const Lookup& l) {
-    return mozilla::AddToHash(mozilla::HashString(l.first),
-                              mozilla::HashString(l.second));
-  }
-  static bool match(const Key& k, const Lookup& l) {
-    return !strcmp(k.first, l.first) && !strcmp(k.second, l.second);
-  }
-};
-
-using CStringPairSet = HashSet<CStringPair, CStringPair, SystemAllocPolicy>;
-
-static bool DecodeImport(Decoder& d, ModuleEnvironment* env,
-                         CStringPairSet* dupSet) {
+static bool DecodeImport(Decoder& d, ModuleEnvironment* env) {
   UniqueChars moduleName = DecodeName(d);
   if (!moduleName) {
     return d.fail("expected valid import module name");
@@ -1937,16 +1934,6 @@ static bool DecodeImport(Decoder& d, ModuleEnvironment* env,
   UniqueChars funcName = DecodeName(d);
   if (!funcName) {
     return d.fail("expected valid import func name");
-  }
-
-  // It is valid to store raw pointers in dupSet because moduleName and funcName
-  // become owned by env->imports on all non-error paths, outliving dupSet.
-  CStringPair pair(moduleName.get(), funcName.get());
-  CStringPairSet::AddPtr p = dupSet->lookupForAdd(pair);
-  if (p) {
-    env->usesDuplicateImports = true;
-  } else if (!dupSet->add(p, pair)) {
-    return false;
   }
 
   uint8_t rawImportKind;
@@ -1986,7 +1973,7 @@ static bool DecodeImport(Decoder& d, ModuleEnvironment* env,
       break;
     }
     case DefinitionKind::Memory: {
-      if (!DecodeMemoryLimits(d, env)) {
+      if (!DecodeMemoryTypeAndLimits(d, env)) {
         return false;
       }
       break;
@@ -2010,27 +1997,27 @@ static bool DecodeImport(Decoder& d, ModuleEnvironment* env,
       break;
     }
 #ifdef ENABLE_WASM_EXCEPTIONS
-    case DefinitionKind::Event: {
-      EventKind eventKind;
+    case DefinitionKind::Tag: {
+      TagKind tagKind;
       uint32_t funcTypeIndex;
-      if (!DecodeEvent(d, env, &eventKind, &funcTypeIndex)) {
+      if (!DecodeTag(d, env, &tagKind, &funcTypeIndex)) {
         return false;
       }
       const ValTypeVector& args = env->types[funcTypeIndex].funcType().args();
 #  ifdef WASM_PRIVATE_REFTYPES
-      if (!EventIsJSCompatible(d, args)) {
+      if (!TagIsJSCompatible(d, args)) {
         return false;
       }
 #  endif
-      ValTypeVector eventArgs;
-      if (!eventArgs.appendAll(args)) {
+      ValTypeVector tagArgs;
+      if (!tagArgs.appendAll(args)) {
         return false;
       }
-      if (!env->events.emplaceBack(eventKind, std::move(eventArgs))) {
+      if (!env->tags.emplaceBack(tagKind, std::move(tagArgs))) {
         return false;
       }
-      if (env->events.length() > MaxEvents) {
-        return d.fail("too many events");
+      if (env->tags.length() > MaxTags) {
+        return d.fail("too many tags");
       }
       break;
     }
@@ -2061,9 +2048,8 @@ static bool DecodeImportSection(Decoder& d, ModuleEnvironment* env) {
     return d.fail("too many imports");
   }
 
-  CStringPairSet dupSet;
   for (uint32_t i = 0; i < numImports; i++) {
-    if (!DecodeImport(d, env, &dupSet)) {
+    if (!DecodeImport(d, env)) {
       return false;
     }
   }
@@ -2159,7 +2145,7 @@ static bool DecodeMemorySection(Decoder& d, ModuleEnvironment* env) {
   }
 
   for (uint32_t i = 0; i < numMemories; ++i) {
-    if (!DecodeMemoryLimits(d, env)) {
+    if (!DecodeMemoryTypeAndLimits(d, env)) {
       return false;
     }
   }
@@ -2211,9 +2197,9 @@ static bool DecodeGlobalSection(Decoder& d, ModuleEnvironment* env) {
 }
 
 #ifdef ENABLE_WASM_EXCEPTIONS
-static bool DecodeEventSection(Decoder& d, ModuleEnvironment* env) {
+static bool DecodeTagSection(Decoder& d, ModuleEnvironment* env) {
   MaybeSectionRange range;
-  if (!d.startSection(SectionId::Event, env, &range, "event")) {
+  if (!d.startSection(SectionId::Tag, env, &range, "tag")) {
     return false;
   }
   if (!range) {
@@ -2226,34 +2212,34 @@ static bool DecodeEventSection(Decoder& d, ModuleEnvironment* env) {
 
   uint32_t numDefs;
   if (!d.readVarU32(&numDefs)) {
-    return d.fail("expected number of events");
+    return d.fail("expected number of tags");
   }
 
-  CheckedInt<uint32_t> numEvents = env->events.length();
-  numEvents += numDefs;
-  if (!numEvents.isValid() || numEvents.value() > MaxEvents) {
-    return d.fail("too many events");
+  CheckedInt<uint32_t> numTags = env->tags.length();
+  numTags += numDefs;
+  if (!numTags.isValid() || numTags.value() > MaxTags) {
+    return d.fail("too many tags");
   }
 
-  if (!env->events.reserve(numEvents.value())) {
+  if (!env->tags.reserve(numTags.value())) {
     return false;
   }
 
   for (uint32_t i = 0; i < numDefs; i++) {
-    EventKind eventKind;
+    TagKind tagKind;
     uint32_t funcTypeIndex;
-    if (!DecodeEvent(d, env, &eventKind, &funcTypeIndex)) {
+    if (!DecodeTag(d, env, &tagKind, &funcTypeIndex)) {
       return false;
     }
     const ValTypeVector& args = env->types[funcTypeIndex].funcType().args();
-    ValTypeVector eventArgs;
-    if (!eventArgs.appendAll(args)) {
+    ValTypeVector tagArgs;
+    if (!tagArgs.appendAll(args)) {
       return false;
     }
-    env->events.infallibleEmplaceBack(eventKind, std::move(eventArgs));
+    env->tags.infallibleEmplaceBack(tagKind, std::move(tagArgs));
   }
 
-  return d.finishSection(*range, "event");
+  return d.finishSection(*range, "tag");
 }
 #endif
 
@@ -2359,24 +2345,24 @@ static bool DecodeExport(Decoder& d, ModuleEnvironment* env,
                                       DefinitionKind::Global);
     }
 #ifdef ENABLE_WASM_EXCEPTIONS
-    case DefinitionKind::Event: {
-      uint32_t eventIndex;
-      if (!d.readVarU32(&eventIndex)) {
-        return d.fail("expected event index");
+    case DefinitionKind::Tag: {
+      uint32_t tagIndex;
+      if (!d.readVarU32(&tagIndex)) {
+        return d.fail("expected tag index");
       }
-      if (eventIndex >= env->events.length()) {
-        return d.fail("exported event index out of bounds");
+      if (tagIndex >= env->tags.length()) {
+        return d.fail("exported tag index out of bounds");
       }
 
 #  ifdef WASM_PRIVATE_REFTYPES
-      if (!EventIsJSCompatible(d, env->events[eventIndex].type)) {
+      if (!TagIsJSCompatible(d, env->tags[tagIndex].type)) {
         return false;
       }
 #  endif
 
-      env->events[eventIndex].isExport = true;
-      return env->exports.emplaceBack(std::move(fieldName), eventIndex,
-                                      DefinitionKind::Event);
+      env->tags[tagIndex].isExport = true;
+      return env->exports.emplaceBack(std::move(fieldName), tagIndex,
+                                      DefinitionKind::Tag);
     }
 #endif
     default:
@@ -2757,7 +2743,7 @@ bool wasm::DecodeModuleEnvironment(Decoder& d, ModuleEnvironment* env) {
   }
 
 #ifdef ENABLE_WASM_EXCEPTIONS
-  if (!DecodeEventSection(d, env)) {
+  if (!DecodeTagSection(d, env)) {
     return false;
   }
 #endif

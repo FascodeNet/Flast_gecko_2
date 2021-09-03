@@ -71,16 +71,13 @@ if CONFIG['LIBFUZZER']:
 if CONFIG['MOZ_WEBRTC']:
     gkrust_features += ['webrtc']
 
-if CONFIG['ENABLE_WEBDRIVER']:
-    gkrust_features += ['remote_agent']
-
 # We need to tell Glean it is being built with Gecko.
 gkrust_features += ['glean_with_gecko']
 
 if not CONFIG['MOZILLA_OFFICIAL']:
     gkrust_features += ['glean_disable_upload']
 
-if CONFIG['MOZ_USING_WASM_SANDBOXING']:
+if CONFIG['MOZ_USING_WASM_SANDBOXING'] and CONFIG['LUCETC']:
     gkrust_features += ['wasm_library_sandboxing']
 
 if CONFIG['MOZ_ENABLE_DBUS']:

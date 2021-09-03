@@ -58,8 +58,6 @@ class gfxUserFontSet;
 class gfxTextPerfMetrics;
 class nsCSSFontFeatureValuesRule;
 class nsCSSFrameConstructor;
-class nsDisplayList;
-class nsDisplayListBuilder;
 class nsTransitionManager;
 class nsAnimationManager;
 class nsRefreshDriver;
@@ -348,7 +346,7 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
     return mozilla::PreferenceSheet::PrefsFor(*mDocument);
   }
   nscolor DefaultBackgroundColor() const {
-    return PrefSheetPrefs().mDefaultBackgroundColor;
+    return PrefSheetPrefs().mColors.mDefaultBackground;
   }
 
   nsISupports* GetContainerWeak() const;

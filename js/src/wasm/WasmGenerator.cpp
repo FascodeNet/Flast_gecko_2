@@ -307,22 +307,26 @@ bool ModuleGenerator::init(Metadata* maybeAsmJSMetadata) {
     // types that fit in an immediate.
     if (moduleEnv_->functionReferencesEnabled()) {
       // Do a linear pass to create a map from src index to dest index.
-      RenumberMap map;
+      RenumberVector renumbering;
+      if (!renumbering.reserve(moduleEnv_->types.length())) {
+        return false;
+      }
       for (uint32_t srcIndex = 0, destIndex = 0;
            srcIndex < moduleEnv_->types.length(); srcIndex++) {
         const TypeDef& typeDef = moduleEnv_->types[srcIndex];
         if (!TypeIdDesc::isGlobal(typeDef)) {
+          renumbering.infallibleAppend(UINT32_MAX);
           continue;
         }
-        if (!map.put(srcIndex, destIndex++)) {
-          return false;
-        }
+        MOZ_ASSERT(renumbering.length() == srcIndex);
+        renumbering.infallibleAppend(destIndex++);
       }
 
-      // Apply the map
+      // Apply the renumbering
       for (TypeDefWithId& typeDef : metadata_->types) {
-        typeDef.renumber(map);
+        typeDef.renumber(renumbering);
       }
+      metadata_->typesRenumbering = std::move(renumbering);
     }
   }
 
@@ -1099,13 +1103,12 @@ SharedMetadata ModuleGenerator::finishMetadata(const Bytes& bytecode) {
   metadata_->tables = std::move(moduleEnv_->tables);
   metadata_->globals = std::move(moduleEnv_->globals);
 #ifdef ENABLE_WASM_EXCEPTIONS
-  metadata_->events = std::move(moduleEnv_->events);
+  metadata_->tags = std::move(moduleEnv_->tags);
 #endif
   metadata_->nameCustomSectionIndex = moduleEnv_->nameCustomSectionIndex;
   metadata_->moduleName = moduleEnv_->moduleName;
   metadata_->funcNames = std::move(moduleEnv_->funcNames);
   metadata_->omitsBoundsChecks = moduleEnv_->hugeMemoryEnabled();
-  metadata_->usesDuplicateImports = moduleEnv_->usesDuplicateImports;
 
   // Copy over additional debug information.
 

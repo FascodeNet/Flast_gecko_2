@@ -255,13 +255,12 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["browser.search.widget.inNavBar", { what: RECORD_DEFAULTPREF_VALUE }],
   ["browser.startup.homepage", { what: RECORD_PREF_STATE }],
   ["browser.startup.page", { what: RECORD_PREF_VALUE }],
-  ["browser.touchmode.auto", { what: RECORD_PREF_VALUE }],
-  ["browser.uidensity", { what: RECORD_PREF_VALUE }],
   ["browser.urlbar.showSearchSuggestionsFirst", { what: RECORD_PREF_VALUE }],
   ["browser.urlbar.suggest.searches", { what: RECORD_PREF_VALUE }],
   ["devtools.chrome.enabled", { what: RECORD_PREF_VALUE }],
   ["devtools.debugger.enabled", { what: RECORD_PREF_VALUE }],
   ["devtools.debugger.remote-enabled", { what: RECORD_PREF_VALUE }],
+  ["doh-rollout.doorhanger-decision", { what: RECORD_PREF_VALUE }],
   ["dom.ipc.plugins.enabled", { what: RECORD_PREF_VALUE }],
   ["dom.ipc.plugins.sandbox-level.flash", { what: RECORD_PREF_VALUE }],
   ["dom.ipc.processCount", { what: RECORD_PREF_VALUE }],
@@ -291,7 +290,7 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["gfx.direct2d.force-enabled", { what: RECORD_PREF_VALUE }],
   ["gfx.webrender.all", { what: RECORD_PREF_VALUE }],
   ["gfx.webrender.all.qualified", { what: RECORD_PREF_VALUE }],
-  ["gfx.webrender.force-disabled", { what: RECORD_PREF_VALUE }],
+  ["gfx.webrender.force-legacy-layers", { what: RECORD_PREF_VALUE }],
   ["layers.acceleration.disabled", { what: RECORD_PREF_VALUE }],
   ["layers.acceleration.force-enabled", { what: RECORD_PREF_VALUE }],
   ["layers.async-pan-zoom.enabled", { what: RECORD_PREF_VALUE }],
@@ -315,7 +314,6 @@ const DEFAULT_ENVIRONMENT_PREFS = new Map([
   ["pdfjs.disabled", { what: RECORD_PREF_VALUE }],
   ["places.history.enabled", { what: RECORD_PREF_VALUE }],
   ["plugins.show_infobar", { what: RECORD_PREF_VALUE }],
-  ["privacy.fuzzyfox.enabled", { what: RECORD_PREF_VALUE }],
   ["privacy.firstparty.isolate", { what: RECORD_PREF_VALUE }],
   ["privacy.resistFingerprinting", { what: RECORD_PREF_VALUE }],
   ["privacy.trackingprotection.enabled", { what: RECORD_PREF_VALUE }],
@@ -1590,7 +1588,9 @@ EnvironmentCache.prototype = {
     this._currentEnvironment.settings.addonCompatibilityCheckEnabled =
       AddonManager.checkCompatibility;
 
-    this._updateAttribution();
+    if (AppConstants.MOZ_BUILD_APP == "browser") {
+      this._updateAttribution();
+    }
     this._updateDefaultBrowser();
     await this._updateSearchEngine();
     this._loadAsyncUpdateSettingsFromCache();
@@ -2035,6 +2035,7 @@ EnvironmentCache.prototype = {
       hdd: this._getHDDData(),
       gfx: this._getGFXData(),
       appleModelId: getSysinfoProperty("appleModelId", null),
+      hasWinPackageId: getSysinfoProperty("hasWinPackageId", null),
     };
 
     if (AppConstants.platform === "win") {

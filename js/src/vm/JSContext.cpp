@@ -40,11 +40,13 @@
 #include "jit/Ion.h"
 #include "jit/PcScriptCache.h"
 #include "jit/Simulator.h"
+#include "js/CallAndConstruct.h"  // JS::Call
 #include "js/CharacterEncoding.h"
 #include "js/ContextOptions.h"        // JS::ContextOptions
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/friend/StackLimits.h"    // js::ReportOverRecursed
 #include "js/Printf.h"
+#include "js/PropertyAndElement.h"  // JS_GetProperty
 #include "util/DiagnosticAssertions.h"
 #include "util/DifferentialTesting.h"
 #include "util/DoubleToString.h"
@@ -722,6 +724,33 @@ JS_PUBLIC_API bool js::UseInternalJobQueues(JSContext* cx) {
 
   return true;
 }
+
+#ifdef DEBUG
+JSObject* InternalJobQueue::copyJobs(JSContext* cx) {
+  RootedArrayObject jobs(cx, NewDenseEmptyArray(cx));
+  if (!jobs) {
+    return nullptr;
+  }
+
+  for (const JSObject* unwrappedJob : queue.get()) {
+    RootedObject job(cx, const_cast<JSObject*>(unwrappedJob));
+    if (!cx->compartment()->wrap(cx, &job)) {
+      return nullptr;
+    }
+
+    if (!NewbornArrayPush(cx, jobs, ObjectValue(*job))) {
+      return nullptr;
+    }
+  }
+
+  return jobs;
+}
+
+JS_PUBLIC_API JSObject* js::GetJobsInInternalJobQueue(JSContext* cx) {
+  MOZ_ASSERT(cx->internalJobQueue.ref());
+  return cx->internalJobQueue->copyJobs(cx);
+}
+#endif
 
 JS_PUBLIC_API bool js::EnqueueJob(JSContext* cx, JS::HandleObject job) {
   MOZ_ASSERT(cx->jobQueue);

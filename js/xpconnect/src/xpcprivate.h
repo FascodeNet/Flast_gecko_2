@@ -95,7 +95,8 @@
 #include "xpcpublic.h"
 #include "js/HashTable.h"
 #include "js/GCHashTable.h"
-#include "js/Object.h"  // JS::GetClass, JS::GetCompartment, JS::GetPrivate
+#include "js/Object.h"              // JS::GetClass, JS::GetCompartment
+#include "js/PropertyAndElement.h"  // JS_DefineProperty
 #include "js/TracingAPI.h"
 #include "js/WeakMapPtr.h"
 #include "PLDHashTable.h"
@@ -791,8 +792,6 @@ class MOZ_STACK_CLASS XPCCallContext final {
 extern const JSClass XPC_WN_NoHelper_JSClass;
 extern const JSClass XPC_WN_Proto_JSClass;
 extern const JSClass XPC_WN_Tearoff_JSClass;
-#define XPC_WN_TEAROFF_RESERVED_SLOTS 1
-#define XPC_WN_TEAROFF_FLAT_OBJECT_SLOT 0
 extern const JSClass XPC_WN_NoHelper_Proto_JSClass;
 
 extern bool XPC_WN_CallMethod(JSContext* cx, unsigned argc, JS::Value* vp);
@@ -1202,6 +1201,8 @@ class XPCNativeSet final {
 
 class XPCWrappedNativeProto final {
  public:
+  enum Slots { ProtoSlot, SlotCount };
+
   static XPCWrappedNativeProto* GetNewOrUsed(JSContext* cx,
                                              XPCWrappedNativeScope* scope,
                                              nsIClassInfo* classInfo,
@@ -1225,6 +1226,8 @@ class XPCWrappedNativeProto final {
 
   void JSProtoObjectFinalized(JSFreeOp* fop, JSObject* obj);
   void JSProtoObjectMoved(JSObject* obj, const JSObject* old);
+
+  static XPCWrappedNativeProto* Get(JSObject* obj);
 
   void SystemIsBeingShutDown();
 
@@ -1282,6 +1285,8 @@ class XPCWrappedNativeProto final {
 
 class XPCWrappedNativeTearOff final {
  public:
+  enum Slots { FlatObjectSlot, TearOffSlot, SlotCount };
+
   bool IsAvailable() const { return mInterface == nullptr; }
   bool IsReserved() const { return mInterface == (XPCNativeInterface*)1; }
   bool IsValid() const { return !IsAvailable() && !IsReserved(); }
@@ -1298,6 +1303,8 @@ class XPCWrappedNativeTearOff final {
 
   void JSObjectFinalized() { SetJSObject(nullptr); }
   void JSObjectMoved(JSObject* obj, const JSObject* old);
+
+  static XPCWrappedNativeTearOff* Get(JSObject* obj);
 
   XPCWrappedNativeTearOff() : mInterface(nullptr), mJSObject(nullptr) {
     MOZ_COUNT_CTOR(XPCWrappedNativeTearOff);
@@ -1409,7 +1416,7 @@ class XPCWrappedNative final : public nsIXPConnectWrappedNative {
 
   static XPCWrappedNative* Get(JSObject* obj) {
     MOZ_ASSERT(IS_WN_REFLECTOR(obj));
-    return (XPCWrappedNative*)JS::GetPrivate(obj);
+    return JS::GetObjectISupports<XPCWrappedNative>(obj);
   }
 
  private:
@@ -2183,8 +2190,6 @@ class XPCTraceableVariant : public XPCVariant, public XPCRootSetElem {
 /***************************************************************************/
 // Utilities
 
-inline void* xpc_GetJSPrivate(JSObject* obj) { return JS::GetPrivate(obj); }
-
 inline JSContext* xpc_GetSafeJSContext() {
   return XPCJSContext::Get()->Context();
 }
@@ -2214,6 +2219,7 @@ struct GlobalProperties {
   bool DefineInSandbox(JSContext* cx, JS::HandleObject obj);
 
   // Interface objects we can expose.
+  bool AbortController : 1;
   bool Blob : 1;
   bool ChromeUtils : 1;
   bool CSS : 1;
@@ -2242,6 +2248,7 @@ struct GlobalProperties {
   bool URL : 1;
   bool URLSearchParams : 1;
   bool XMLHttpRequest : 1;
+  bool WebSocket : 1;
   bool XMLSerializer : 1;
 
   // Ad-hoc property names we implement.

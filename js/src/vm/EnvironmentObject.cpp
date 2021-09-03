@@ -13,6 +13,7 @@
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/friend/StackLimits.h"    // js::AutoCheckRecursionLimit
 #include "js/friend/WindowProxy.h"    // js::IsWindow, js::IsWindowProxy
+#include "js/PropertyAndElement.h"  // JS_DefineProperty, JS_DefinePropertyById, JS_HasProperty, JS_HasPropertyById
 #include "vm/ArgumentsObject.h"
 #include "vm/AsyncFunction.h"
 #include "vm/BytecodeIterator.h"
@@ -3882,6 +3883,7 @@ bool js::GlobalOrEvalDeclInstantiation(JSContext* cx, HandleObject envChain,
                                        HandleScript script,
                                        GCThingIndex lastFun) {
   MOZ_ASSERT(script->isGlobalCode() || script->isForEval());
+  MOZ_ASSERT(!script->selfHosted());
 
   RootedObject varObj(cx, &GetVariablesObject(envChain));
   Rooted<ExtensibleLexicalEnvironmentObject*> lexicalEnv(cx);

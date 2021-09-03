@@ -8,6 +8,13 @@
 
 // test without target switching
 add_task(async function() {
+  // We have to disable target switching in this first task otherwise the test times out
+  // on the navigation to example.net. With a "cold" server side target switching, the
+  // storage actor gets created very early while the cache isn't created yet, and cache items
+  // are not displayed (See Bug 1712757).
+  // But the second task runs fine with this setup, as it appears that the cache gets
+  // created faster.
+  await pushPref("devtools.target-switching.server.enabled", false);
   await testNavigation();
 });
 
@@ -66,9 +73,22 @@ async function testNavigation() {
   // wait for storage tree refresh, and check host
   info("Waiting for storage tree to update…");
   await waitUntil(() => isInTree(doc, ["Cache", "http://example.net", "foo"]));
+
+  ok(
+    !isInTree(doc, ["Cache", "http://example.com"]),
+    "example.com item is not in the tree anymore"
+  );
+
   // check the table for values
   await selectTreeItem(["Cache", "http://example.net", "foo"]);
   checkCacheData(URL_ROOT_NET + "storage-blank.html", "OK");
+
+  info("Check that the Cache node still has the expected label");
+  is(
+    getTreeNodeLabel(doc, ["Cache"]),
+    "Cache Storage",
+    "Cache item is properly displayed"
+  );
 }
 
 function checkCacheData(url, status) {

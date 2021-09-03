@@ -52,6 +52,7 @@
 #include "mozilla/dom/InspectorFontFace.h"
 #include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/SVGViewportElement.h"
+#include "mozilla/dom/UIEvent.h"
 #include "mozilla/EffectCompositor.h"
 #include "mozilla/EffectSet.h"
 #include "mozilla/EventDispatcher.h"
@@ -1070,6 +1071,15 @@ bool nsLayoutUtils::IsProperAncestorFrameCrossDoc(
 }
 
 // static
+bool nsLayoutUtils::IsProperAncestorFrameCrossDocInProcess(
+    const nsIFrame* aAncestorFrame, const nsIFrame* aFrame,
+    const nsIFrame* aCommonAncestor) {
+  if (aFrame == aAncestorFrame) return false;
+  return IsAncestorFrameCrossDocInProcess(aAncestorFrame, aFrame,
+                                          aCommonAncestor);
+}
+
+// static
 bool nsLayoutUtils::IsAncestorFrameCrossDoc(const nsIFrame* aAncestorFrame,
                                             const nsIFrame* aFrame,
                                             const nsIFrame* aCommonAncestor) {
@@ -1840,8 +1850,19 @@ void nsLayoutUtils::GetContainerAndOffsetAtEvent(PresShell* aPresShell,
     return;
   }
 
+  WidgetEvent* openingEvent = nullptr;
+  // For popupshowing events, redirect via the original mouse event
+  // that triggered the popup to open.
+  if (aEvent->mMessage == eXULPopupShowing) {
+    if (auto* pm = nsXULPopupManager::GetInstance()) {
+      if (Event* openingPopupEvent = pm->GetOpeningPopupEvent()) {
+        openingEvent = openingPopupEvent->WidgetEventPtr();
+      }
+    }
+  }
+
   nsPoint point = nsLayoutUtils::GetEventCoordinatesRelativeTo(
-      aEvent, RelativeTo{targetFrame});
+      openingEvent ? openingEvent : aEvent, RelativeTo{targetFrame});
 
   if (aContainer) {
     // TODO: This result may be useful to change to Selection.  However, this
@@ -2953,7 +2974,7 @@ static RetainedDisplayListBuilder* GetOrCreateRetainedDisplayListBuilder(
 void PrintHitTestInfoStatsInternal(nsDisplayList* aList, int& aTotal,
                                    int& aHitTest, int& aVisible,
                                    int& aSpecial) {
-  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+  for (nsDisplayItem* i : *aList) {
     aTotal++;
 
     if (i->GetChildren()) {
@@ -3249,9 +3270,13 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 
   // If we are in a remote browser, then apply clipping from ancestor browsers
   if (BrowserChild* browserChild = BrowserChild::GetFrom(presShell)) {
-    Maybe<nsRect> unscaledVisibleRect = browserChild->GetVisibleRect();
+    if (!browserChild->IsTopLevel()) {
+      Maybe<nsRect> unscaledVisibleRect = browserChild->GetVisibleRect();
 
-    if (unscaledVisibleRect) {
+      if (!unscaledVisibleRect) {
+        unscaledVisibleRect = Some(nsRect());
+      }
+
       rootInkOverflow.IntersectRect(rootInkOverflow, *unscaledVisibleRect);
     }
   }
@@ -3686,9 +3711,11 @@ void nsLayoutUtils::AddBoxesForFrame(nsIFrame* aFrame,
 
 void nsLayoutUtils::GetAllInFlowBoxes(nsIFrame* aFrame,
                                       BoxCallback* aCallback) {
+  aCallback->mInTargetContinuation = false;
   while (aFrame) {
     AddBoxesForFrame(aFrame, aCallback);
     aFrame = nsLayoutUtils::GetNextContinuationOrIBSplitSibling(aFrame);
+    aCallback->mInTargetContinuation = true;
   }
 }
 
@@ -3731,18 +3758,28 @@ struct BoxToRect : public nsLayoutUtils::BoxCallback {
   const nsIFrame* mRelativeTo;
   RectCallback* mCallback;
   uint32_t mFlags;
+  // If the frame we're measuring relative to is the root, we know all frames
+  // are descendants of it, so we don't need to compute the common ancestor
+  // between a frame and mRelativeTo.
   bool mRelativeToIsRoot;
+  // For the same reason, if the frame we're measuring relative to is the target
+  // (this is useful for IntersectionObserver), we know all frames are
+  // descendants of it except if we're in a continuation or ib-split-sibling of
+  // it.
+  bool mRelativeToIsTarget;
 
-  BoxToRect(const nsIFrame* aRelativeTo, RectCallback* aCallback,
-            uint32_t aFlags)
+  BoxToRect(const nsIFrame* aTargetFrame, const nsIFrame* aRelativeTo,
+            RectCallback* aCallback, uint32_t aFlags)
       : mRelativeTo(aRelativeTo),
         mCallback(aCallback),
         mFlags(aFlags),
-        mRelativeToIsRoot(!aRelativeTo->GetParent()) {}
+        mRelativeToIsRoot(!aRelativeTo->GetParent()),
+        mRelativeToIsTarget(aRelativeTo == aTargetFrame) {}
 
-  virtual void AddBox(nsIFrame* aFrame) override {
+  void AddBox(nsIFrame* aFrame) override {
     nsRect r;
     nsIFrame* outer = SVGUtils::GetOuterSVGFrameAndCoveredRegion(aFrame, &r);
+    const bool usingSVGOuterFrame = !!outer;
     if (!outer) {
       outer = aFrame;
       switch (mFlags & nsLayoutUtils::RECTS_WHICH_BOX_MASK) {
@@ -3760,7 +3797,16 @@ struct BoxToRect : public nsLayoutUtils::BoxCallback {
       }
     }
     if (mFlags & nsLayoutUtils::RECTS_ACCOUNT_FOR_TRANSFORMS) {
-      if (mRelativeToIsRoot) {
+      const bool isAncestorKnown = [&] {
+        if (mRelativeToIsRoot) {
+          return true;
+        }
+        if (mRelativeToIsTarget && !mInTargetContinuation) {
+          return !usingSVGOuterFrame;
+        }
+        return false;
+      }();
+      if (isAncestorKnown) {
         r = nsLayoutUtils::TransformFrameRectToAncestor(outer, r, mRelativeTo);
       } else {
         nsLayoutUtils::TransformRect(outer, mRelativeTo, r);
@@ -3775,9 +3821,11 @@ struct BoxToRect : public nsLayoutUtils::BoxCallback {
 struct MOZ_RAII BoxToRectAndText : public BoxToRect {
   Sequence<nsString>* mTextList;
 
-  BoxToRectAndText(const nsIFrame* aRelativeTo, RectCallback* aCallback,
-                   Sequence<nsString>* aTextList, uint32_t aFlags)
-      : BoxToRect(aRelativeTo, aCallback, aFlags), mTextList(aTextList) {}
+  BoxToRectAndText(const nsIFrame* aTargetFrame, const nsIFrame* aRelativeTo,
+                   RectCallback* aCallback, Sequence<nsString>* aTextList,
+                   uint32_t aFlags)
+      : BoxToRect(aTargetFrame, aRelativeTo, aCallback, aFlags),
+        mTextList(aTextList) {}
 
   static void AccumulateText(nsIFrame* aFrame, nsAString& aResult) {
     MOZ_ASSERT(aFrame);
@@ -3802,7 +3850,7 @@ struct MOZ_RAII BoxToRectAndText : public BoxToRect {
     }
   }
 
-  virtual void AddBox(nsIFrame* aFrame) override {
+  void AddBox(nsIFrame* aFrame) override {
     BoxToRect::AddBox(aFrame);
     if (mTextList) {
       nsString* textForFrame = mTextList->AppendElement(fallible);
@@ -3817,7 +3865,7 @@ void nsLayoutUtils::GetAllInFlowRects(nsIFrame* aFrame,
                                       const nsIFrame* aRelativeTo,
                                       RectCallback* aCallback,
                                       uint32_t aFlags) {
-  BoxToRect converter(aRelativeTo, aCallback, aFlags);
+  BoxToRect converter(aFrame, aRelativeTo, aCallback, aFlags);
   GetAllInFlowBoxes(aFrame, &converter);
 }
 
@@ -3826,7 +3874,7 @@ void nsLayoutUtils::GetAllInFlowRectsAndTexts(nsIFrame* aFrame,
                                               RectCallback* aCallback,
                                               Sequence<nsString>* aTextList,
                                               uint32_t aFlags) {
-  BoxToRectAndText converter(aRelativeTo, aCallback, aTextList, aFlags);
+  BoxToRectAndText converter(aFrame, aRelativeTo, aCallback, aTextList, aFlags);
   GetAllInFlowBoxes(aFrame, &converter);
 }
 
@@ -5551,7 +5599,10 @@ gfxFloat nsLayoutUtils::GetSnappedBaselineY(nsIFrame* aFrame,
   gfxFloat appUnitsPerDevUnit = aFrame->PresContext()->AppUnitsPerDevPixel();
   gfxFloat baseline = gfxFloat(aY) + aAscent;
   gfxRect putativeRect(0, baseline / appUnitsPerDevUnit, 1, 1);
-  if (!aContext->UserToDevicePixelSnapped(putativeRect, true)) return baseline;
+  if (!aContext->UserToDevicePixelSnapped(
+          putativeRect, gfxContext::SnapOption::IgnoreScale)) {
+    return baseline;
+  }
   return aContext->DeviceToUser(putativeRect.TopLeft()).y * appUnitsPerDevUnit;
 }
 
@@ -5561,7 +5612,8 @@ gfxFloat nsLayoutUtils::GetSnappedBaselineX(nsIFrame* aFrame,
   gfxFloat appUnitsPerDevUnit = aFrame->PresContext()->AppUnitsPerDevPixel();
   gfxFloat baseline = gfxFloat(aX) + aAscent;
   gfxRect putativeRect(baseline / appUnitsPerDevUnit, 0, 1, 1);
-  if (!aContext->UserToDevicePixelSnapped(putativeRect, true)) {
+  if (!aContext->UserToDevicePixelSnapped(
+          putativeRect, gfxContext::SnapOption::IgnoreScale)) {
     return baseline;
   }
   return aContext->DeviceToUser(putativeRect.TopLeft()).x * appUnitsPerDevUnit;
@@ -6201,8 +6253,11 @@ static SnappedImageDrawingParameters ComputeSnappedImageDrawingParameters(
   // we have something that's not translation+scale, or if the scale flips in
   // the X or Y direction, because snapped image drawing can't handle that yet.
   if (!currentMatrix.HasNonAxisAlignedTransform() && currentMatrix._11 > 0.0 &&
-      currentMatrix._22 > 0.0 && aCtx->UserToDevicePixelSnapped(fill, true) &&
-      aCtx->UserToDevicePixelSnapped(dest, true)) {
+      currentMatrix._22 > 0.0 &&
+      aCtx->UserToDevicePixelSnapped(fill,
+                                     gfxContext::SnapOption::IgnoreScale) &&
+      aCtx->UserToDevicePixelSnapped(dest,
+                                     gfxContext::SnapOption::IgnoreScale)) {
     // We snapped. On this code path, |fill| and |dest| take into account
     // currentMatrix's transform.
     didSnap = true;

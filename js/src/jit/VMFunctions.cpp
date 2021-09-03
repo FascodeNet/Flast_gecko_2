@@ -20,6 +20,7 @@
 #include "jit/JitRuntime.h"
 #include "jit/mips32/Simulator-mips32.h"
 #include "jit/mips64/Simulator-mips64.h"
+#include "js/CallAndConstruct.h"      // JS::Construct, JS::IsConstructor
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/friend/StackLimits.h"    // js::AutoCheckRecursionLimit
 #include "js/friend/WindowProxy.h"    // js::IsWindow
@@ -1700,19 +1701,15 @@ bool ThrowRuntimeLexicalError(JSContext* cx, unsigned errorNumber) {
   return false;
 }
 
-bool ThrowBadDerivedReturn(JSContext* cx, HandleValue v) {
-  MOZ_ASSERT(!v.isObject() && !v.isUndefined());
-  ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK, v,
-                   nullptr);
-  return false;
-}
-
 bool ThrowBadDerivedReturnOrUninitializedThis(JSContext* cx, HandleValue v) {
   MOZ_ASSERT(!v.isObject());
   if (v.isUndefined()) {
     return js::ThrowUninitializedThis(cx);
   }
-  return ThrowBadDerivedReturn(cx, v);
+
+  ReportValueError(cx, JSMSG_BAD_DERIVED_RETURN, JSDVG_IGNORE_STACK, v,
+                   nullptr);
+  return false;
 }
 
 bool BaselineGetFunctionThis(JSContext* cx, BaselineFrame* frame,
@@ -2249,7 +2246,9 @@ void AllocateAndInitTypedArrayBuffer(JSContext* cx, TypedArrayObject* obj,
                                      int32_t count) {
   AutoUnsafeCallWithABI unsafe;
 
-  obj->initPrivate(nullptr);
+  // Initialize the data slot to UndefinedValue to signal to our JIT caller that
+  // the allocation failed if the slot isn't overwritten below.
+  obj->initFixedSlot(TypedArrayObject::DATA_SLOT, UndefinedValue());
 
   // Negative numbers or zero will bail out to the slow path, which in turn will
   // raise an invalid argument exception or create a correct object with zero
@@ -2269,7 +2268,8 @@ void AllocateAndInitTypedArrayBuffer(JSContext* cx, TypedArrayObject* obj,
   void* buf = cx->nursery().allocateZeroedBuffer(obj, nbytes,
                                                  js::ArrayBufferContentsArena);
   if (buf) {
-    InitObjectPrivate(obj, buf, nbytes, MemoryUse::TypedArrayElements);
+    InitReservedSlot(obj, TypedArrayObject::DATA_SLOT, buf, nbytes,
+                     MemoryUse::TypedArrayElements);
   }
 }
 

@@ -441,8 +441,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   uint32_t DefaultHpackBuffer() const { return mDefaultHpackBuffer; }
 
-  bool Bug1563538() const { return mBug1563538; }
-
   bool IsHttp3VersionSupported(const nsACString& version);
 
   static bool IsHttp3SupportedByServer(nsHttpResponseHead* aResponseHead);
@@ -649,6 +647,11 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   nsCString mUserAgent;
   nsCString mSpoofedUserAgent;
   nsCString mUserAgentOverride;
+
+#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
+  nsCString mExperimentUserAgent;
+#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
+
   bool mUserAgentIsDirty{true};  // true if mUserAgent should be rebuilt
   bool mAcceptLanguagesIsDirty{true};
 
@@ -736,9 +739,6 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   // The default size (in bytes) of the HPACK decompressor table.
   uint32_t mDefaultHpackBuffer{4096};
-
-  // Pref for the whole fix that bug provides
-  Atomic<bool, Relaxed> mBug1563538{true};
 
   Atomic<bool, Relaxed> mHttp3Enabled{true};
   // Http3 parameters

@@ -62,6 +62,7 @@
 #include "FrameLayerBuilder.h"
 #include "AnimationCommon.h"
 #include "LayerAnimationInfo.h"
+#include "mozilla/TimelineConsumers.h"
 
 #include "AudioChannelService.h"
 #include "mozilla/dom/PromiseDebugging.h"
@@ -101,7 +102,6 @@
 #include "MediaDecoder.h"
 #include "mozilla/ClearSiteData.h"
 #include "mozilla/EditorController.h"
-#include "mozilla/Fuzzyfox.h"
 #include "mozilla/HTMLEditorController.h"
 #include "mozilla/ServoBindings.h"
 #include "mozilla/StaticPresData.h"
@@ -236,6 +236,8 @@ nsresult nsLayoutStatics::Initialize() {
   PointerEventHandler::InitializeStatics();
   TouchManager::InitializeStatics();
 
+  TimelineConsumers::Init();
+
   nsWindowMemoryReporter::Init();
 
   SVGElementFactory::Init();
@@ -274,8 +276,6 @@ nsresult nsLayoutStatics::Initialize() {
     // fully initialized.
     mozilla::dom::RemoteWorkerService::Initialize();
   }
-
-  mozilla::Fuzzyfox::Start();
 
   ClearSiteData::Initialize();
 

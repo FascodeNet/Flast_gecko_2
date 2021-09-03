@@ -24,6 +24,7 @@
 
 #include "mozilla/AppShutdown.h"
 #include "mozilla/Attributes.h"
+#include "mozilla/BinarySearch.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Mutex.h"
@@ -412,12 +413,14 @@ void gfxPlatformFontList::ApplyWhitelist(
 
 bool gfxPlatformFontList::FamilyInList(const nsACString& aName,
                                        const char* aList[], size_t aCount) {
-  auto cmp = [&](const char* const aVal) -> int {
-    return nsCaseInsensitiveUTF8StringComparator(aName.BeginReading(), aVal,
-                                                 aName.Length(), strlen(aVal));
-  };
   size_t result;
-  return BinarySearchIf(aList, 0, aCount, cmp, &result);
+  return BinarySearchIf(
+      aList, 0, aCount,
+      [&](const char* const aVal) -> int {
+        return nsCaseInsensitiveUTF8StringComparator(
+            aName.BeginReading(), aVal, aName.Length(), strlen(aVal));
+      },
+      &result);
 }
 
 void gfxPlatformFontList::CheckFamilyList(const char* aList[], size_t aCount) {
@@ -1807,6 +1810,20 @@ void gfxPlatformFontList::RemoveCmap(const gfxCharacterMap* aCharMap) {
   }
 }
 
+static void GetSystemUIFontFamilies([[maybe_unused]] nsAtom* aLangGroup,
+                                    nsTArray<nsCString>& aFamilies) {
+  // TODO: On macOS, use CTCreateUIFontForLanguage or such thing (though the
+  // code below ends up using [NSFont systemFontOfSize: 0.0].
+  nsFont systemFont;
+  gfxFontStyle fontStyle;
+  nsAutoString systemFontName;
+  if (!LookAndFeel::GetFont(StyleSystemFont::Menu, systemFontName, fontStyle)) {
+    return;
+  }
+  systemFontName.Trim("\"'");
+  CopyUTF16toUTF8(systemFontName, *aFamilies.AppendElement());
+}
+
 void gfxPlatformFontList::ResolveGenericFontNames(
     StyleGenericFontFamily aGenericType, eFontPrefLang aPrefLang,
     PrefFontList* aGenericFamilies) {
@@ -1828,7 +1845,11 @@ void gfxPlatformFontList::ResolveGenericFontNames(
                                     genericFamilies);
 
   nsAtom* langGroup = GetLangGroupForPrefLang(aPrefLang);
-  NS_ASSERTION(langGroup, "null lang group for pref lang");
+  MOZ_ASSERT(langGroup, "null lang group for pref lang");
+
+  if (aGenericType == StyleGenericFontFamily::SystemUi) {
+    GetSystemUIFontFamilies(langGroup, genericFamilies);
+  }
 
   GetFontFamiliesFromGenericFamilies(aGenericType, genericFamilies, langGroup,
                                      aGenericFamilies);
@@ -2357,6 +2378,8 @@ nsAtom* gfxPlatformFontList::GetLangGroup(nsAtom* aLanguage) {
       return "cursive";
     case StyleGenericFontFamily::Fantasy:
       return "fantasy";
+    case StyleGenericFontFamily::SystemUi:
+      return "system-ui";
     case StyleGenericFontFamily::MozEmoji:
       return "-moz-emoji";
     case StyleGenericFontFamily::None:

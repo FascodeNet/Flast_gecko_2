@@ -71,7 +71,6 @@
                          ondrop="newTabButtonObserver.onDrop(event)"
                          ondragover="newTabButtonObserver.onDragOver(event)"
                          ondragenter="newTabButtonObserver.onDragOver(event)"
-                         ondragexit="newTabButtonObserver.onDragExit(event)"
                          cui-areatype="toolbar"
                          removable="true"/>
 
@@ -280,6 +279,8 @@
                        data-l10n-id="urlbar-web-rtc-share-microphone-notification-anchor"/>
                 <image id="webRTC-shareScreen-notification-icon" class="notification-anchor-icon screen-icon" role="button"
                        data-l10n-id="urlbar-web-rtc-share-screen-notification-anchor"/>
+                <image id="webRTC-shareSpeaker-notification-icon" class="notification-anchor-icon speaker-icon" role="button"
+                       data-l10n-id="urlbar-web-rtc-share-speaker-notification-anchor"/>
                 <image id="servicesInstall-notification-icon" class="notification-anchor-icon service-icon" role="button"
                        data-l10n-id="urlbar-services-notification-anchor"/>
                 <image id="translate-notification-icon" class="notification-anchor-icon translation-icon" role="button"
@@ -336,7 +337,7 @@
                 </hbox>
                 <hbox id="cfr-button"
                       role="presentation"
-                      class="urlbar-page-action urlbar-icon-wrapper">
+                      class="urlbar-page-action">
                   <image class="urlbar-icon"/>
                 </hbox>
               </hbox>
@@ -345,7 +346,7 @@
                 <image id="userContext-indicator"/>
               </hbox>
               <hbox id="reader-mode-button"
-                    class="urlbar-page-action urlbar-icon-wrapper"
+                    class="urlbar-page-action"
                     role="button"
                     hidden="true"
                     tooltip="dynamic-shortcut-tooltip"
@@ -358,7 +359,7 @@
                      tooltip="dynamic-shortcut-tooltip"
                      hidden="true"/>
               <hbox id="pageActionButton"
-                    class="urlbar-page-action urlbar-icon-wrapper"
+                    class="urlbar-page-action"
                     role="button"
                     data-l10n-id="urlbar-page-action-button"
                     onmousedown="BrowserPageActions.mainButtonClicked(event);"
@@ -368,7 +369,7 @@
               <hbox id="star-button-box"
                     hidden="true"
                     role="button"
-                    class="urlbar-page-action urlbar-icon-wrapper"
+                    class="urlbar-page-action"
                     onclick="BrowserPageActions.doCommandForAction(PageActions.actionForID('bookmark'), event, this);">
                 <image id="star-button"
                        class="urlbar-icon"/>
@@ -567,8 +568,7 @@
                    tooltip="dynamic-shortcut-tooltip"
                    ondrop="newWindowButtonObserver.onDrop(event)"
                    ondragover="newWindowButtonObserver.onDragOver(event)"
-                   ondragenter="newWindowButtonObserver.onDragOver(event)"
-                   ondragexit="newWindowButtonObserver.onDragExit(event)"/>
+                   ondragenter="newWindowButtonObserver.onDragOver(event)"/>
 
     <toolbarbutton id="fullscreen-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
                    observes="View:FullScreen"
@@ -589,7 +589,7 @@
       <menupopup id="BMB_bookmarksPopup"
                  type="arrow"
                  is="places-popup-arrow"
-                 class="cui-widget-panel cui-widget-panelview cui-widget-panelWithFooter PanelUI-subView"
+                 class="cui-widget-panel cui-widget-panelview PanelUI-subView"
                  placespopup="true"
                  context="placesContext"
                  openInTabs="children"
@@ -601,19 +601,19 @@
                                  BookmarkingUI.attachPlacesView(event, this);"
                  tooltip="bhTooltip" popupsinherittooltip="true">
         <menuitem id="BMB_viewBookmarksSidebar"
-                  class="menuitem-iconic subviewbutton"
+                  class="subviewbutton"
                   data-l10n-id="bookmarks-tools-sidebar-visibility"
                   data-l10n-args='{ "isVisible": false }'
                   oncommand="SidebarUI.toggle('viewBookmarksSidebar');"/>
         <!-- NB: temporary solution for bug 985024, this should go away soon. -->
         <menuitem id="BMB_bookmarksShowAllTop"
-                  class="menuitem-iconic subviewbutton"
+                  class="subviewbutton"
                   data-l10n-id="bookmarks-manage-bookmarks"
                   command="Browser:ShowAllBookmarks"
                   key="manBookmarkKb"/>
         <menuseparator/>
         <menu id="BMB_bookmarksToolbar"
-              class="menu-iconic bookmark-item subviewbutton"
+              class="bookmark-item subviewbutton menu-iconic"
               data-l10n-id="bookmarks-toolbar-menu"
               container="true">
           <menupopup id="BMB_bookmarksToolbarPopup"
@@ -625,7 +625,7 @@
                                        new PlacesMenu(event, `place:parent=${PlacesUtils.bookmarks.toolbarGuid}`,
                                                       PlacesUIUtils.getViewForNode(this.parentNode.parentNode).options);">
             <menuitem id="BMB_viewBookmarksToolbar"
-                      class="menuitem-iconic subviewbutton"
+                      class="subviewbutton"
                       data-l10n-id="bookmarks-tools-toolbar-visibility-menuitem"
                       data-l10n-args='{ "isVisible": false }'
                       oncommand="BookmarkingUI.toggleBookmarksToolbar('bookmarks-widget');"/>
@@ -634,7 +634,7 @@
           </menupopup>
         </menu>
         <menu id="BMB_unsortedBookmarks"
-              class="menu-iconic bookmark-item subviewbutton"
+              class="bookmark-item subviewbutton menu-iconic"
               data-l10n-id="bookmarks-other-bookmarks-menu"
               container="true">
           <menupopup id="BMB_unsortedBookmarksPopup"
@@ -664,7 +664,7 @@
         <menuseparator/>
         <!-- Bookmarks menu items will go here -->
         <menuitem id="BMB_bookmarksShowAll"
-                  class="subviewbutton panel-subview-footer-button"
+                  class="subviewbutton"
                   data-l10n-id="bookmarks-manage-bookmarks"
                   command="Browser:ShowAllBookmarks"
                   key="manBookmarkKb"/>
@@ -688,7 +688,6 @@
                    ondragover="homeButtonObserver.onDragOver(event)"
                    ondragenter="homeButtonObserver.onDragOver(event)"
                    ondrop="homeButtonObserver.onDrop(event)"
-                   ondragexit="homeButtonObserver.onDragExit(event)"
                    key="goHome"
                    onclick="BrowserHome(event);"
                    cui-areatype="toolbar"

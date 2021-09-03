@@ -13,7 +13,9 @@
 #include "jit/MoveResolver.h"
 #include "vm/BigIntType.h"
 #include "vm/BytecodeUtil.h"
-#include "wasm/WasmTypes.h"
+#include "wasm/WasmBuiltins.h"
+#include "wasm/WasmCodegenTypes.h"
+#include "wasm/WasmTlsData.h"
 
 namespace js {
 namespace jit {
@@ -558,44 +560,7 @@ class MacroAssemblerARM : public Assembler {
                      Register64 val64, Register memoryBase, Register ptr,
                      Register ptrScratch);
 
- protected:
-  // `outAny` is valid if and only if `out64` == Register64::Invalid().
-  void wasmUnalignedLoadImpl(const wasm::MemoryAccessDesc& access,
-                             Register memoryBase, Register ptr,
-                             Register ptrScratch, AnyRegister outAny,
-                             Register64 out64, Register tmp1, Register tmp2,
-                             Register tmp3);
-
-  // The value to be stored is in `floatValue` (if not invalid), `val64` (if not
-  // invalid), or in `valOrTmp` (if `floatValue` and `val64` are both invalid).
-  // Note `valOrTmp` must always be valid.
-  void wasmUnalignedStoreImpl(const wasm::MemoryAccessDesc& access,
-                              FloatRegister floatValue, Register64 val64,
-                              Register memoryBase, Register ptr,
-                              Register ptrScratch, Register valOrTmp);
-
  private:
-  // Loads `byteSize` bytes, byte by byte, by reading from ptr[offset],
-  // applying the indicated signedness (defined by isSigned).
-  // - all three registers must be different.
-  // - tmp and dest will get clobbered, ptr will remain intact.
-  // - byteSize can be up to 4 bytes and no more (GPR are 32 bits on ARM).
-  // - offset can be 0 or 4
-  // If `access` is not null then emit the appropriate access metadata.
-  void emitUnalignedLoad(const wasm::MemoryAccessDesc* access, bool isSigned,
-                         unsigned byteSize, Register ptr, Register tmp,
-                         Register dest, unsigned offset = 0);
-
-  // Ditto, for a store. Note stores don't care about signedness.
-  // - the two registers must be different.
-  // - val will get clobbered, ptr will remain intact.
-  // - byteSize can be up to 4 bytes and no more (GPR are 32 bits on ARM).
-  // - offset can be 0 or 4
-  // If `access` is not null then emit the appropriate access metadata.
-  void emitUnalignedStore(const wasm::MemoryAccessDesc* access,
-                          unsigned byteSize, Register ptr, Register val,
-                          unsigned offset = 0);
-
   // Implementation for transferMultipleByRuns so we can use different
   // iterators for forward/backward traversals. The sign argument should be 1
   // if we traverse forwards, -1 if we traverse backwards.
@@ -1089,6 +1054,11 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM {
 
     load32(ToPayload(src), temp);
     store32(temp, ToPayload(dest));
+  }
+
+  void storePrivateValue(Register src, const Address& dest) {
+    store32(Imm32(0), ToType(dest));
+    store32(src, ToPayload(dest));
   }
 
   void loadValue(Address src, ValueOperand val);

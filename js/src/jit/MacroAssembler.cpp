@@ -40,7 +40,10 @@
 #include "vm/JSContext.h"
 #include "vm/TraceLogging.h"
 #include "vm/TypedArrayObject.h"
-#include "wasm/WasmTypes.h"
+#include "wasm/WasmBuiltins.h"
+#include "wasm/WasmCodegenTypes.h"
+#include "wasm/WasmMemory.h"
+#include "wasm/WasmTlsData.h"
 #include "wasm/WasmValidate.h"
 
 #include "gc/Nursery-inl.h"
@@ -315,8 +318,9 @@ void MacroAssembler::nurseryAllocateObject(Register result, Register temp,
   // only happens for baseline code.
   if (allocSite.is<Register>()) {
     Register site = allocSite.as<Register>();
-    branch32(Assembler::Equal, Address(site, gc::AllocSite::offsetOfState()),
-             Imm32(int32_t(gc::AllocSite::State::LongLived)), fail);
+    branchTestPtr(Assembler::NonZero,
+                  Address(site, gc::AllocSite::offsetOfScriptAndState()),
+                  Imm32(gc::AllocSite::LONG_LIVED_BIT), fail);
   }
 
   // No explicit check for nursery.isEnabled() is needed, as the comparison
@@ -651,24 +655,22 @@ void MacroAssembler::allocateString(Register result, Register temp,
   freeListAllocate(result, temp, allocKind, fail);
 }
 
-void MacroAssembler::newGCString(Register result, Register temp, Label* fail,
-                                 bool attemptNursery) {
-  allocateString(result, temp, js::gc::AllocKind::STRING,
-                 attemptNursery ? gc::DefaultHeap : gc::TenuredHeap, fail);
+void MacroAssembler::newGCString(Register result, Register temp,
+                                 gc::InitialHeap initialHeap, Label* fail) {
+  allocateString(result, temp, js::gc::AllocKind::STRING, initialHeap, fail);
 }
 
 void MacroAssembler::newGCFatInlineString(Register result, Register temp,
-                                          Label* fail, bool attemptNursery) {
+                                          gc::InitialHeap initialHeap,
+                                          Label* fail) {
   allocateString(result, temp, js::gc::AllocKind::FAT_INLINE_STRING,
-                 attemptNursery ? gc::DefaultHeap : gc::TenuredHeap, fail);
+                 initialHeap, fail);
 }
 
-void MacroAssembler::newGCBigInt(Register result, Register temp, Label* fail,
-                                 bool attemptNursery) {
+void MacroAssembler::newGCBigInt(Register result, Register temp,
+                                 gc::InitialHeap initialHeap, Label* fail) {
   checkAllocatorState(fail);
 
-  gc::InitialHeap initialHeap =
-      attemptNursery ? gc::DefaultHeap : gc::TenuredHeap;
   if (shouldNurseryAllocate(gc::AllocKind::BIGINT, initialHeap)) {
     MOZ_ASSERT(initialHeap == gc::DefaultHeap);
     return nurseryAllocateBigInt(result, temp, fail);
@@ -765,24 +767,11 @@ static void FindStartOfUninitializedAndUndefinedSlots(
   }
 }
 
-template <typename Src>
-inline void MacroAssembler::storeObjPrivate(Src ptr, const Address& address) {
-  // The private pointer is stored as a PrivateValue in a JS::Value, so on 32
-  // bit systems we also need to zero the top word.
-#ifdef JS_PUNBOX64
-  storePtr(ptr, address);
-#else
-  storePtr(ptr, LowWord(address));
-  store32(Imm32(0), HighWord(address));
-#endif
-}
-
 void MacroAssembler::initTypedArraySlots(Register obj, Register temp,
                                          Register lengthReg,
                                          LiveRegisterSet liveRegs, Label* fail,
                                          TypedArrayObject* templateObj,
                                          TypedArrayLength lengthKind) {
-  MOZ_ASSERT(templateObj->hasPrivate());
   MOZ_ASSERT(!templateObj->hasBuffer());
 
   constexpr size_t dataSlotOffset = ArrayBufferViewObject::dataOffset();
@@ -809,7 +798,7 @@ void MacroAssembler::initTypedArraySlots(Register obj, Register temp,
 
     // Store data elements inside the remaining JSObject slots.
     computeEffectiveAddress(Address(obj, dataOffset), temp);
-    storeObjPrivate(temp, Address(obj, dataSlotOffset));
+    storePrivateValue(temp, Address(obj, dataSlotOffset));
 
     // Write enough zero pointers into fixed data to zero every
     // element.  (This zeroes past the end of a byte count that's
@@ -843,8 +832,8 @@ void MacroAssembler::initTypedArraySlots(Register obj, Register temp,
     callWithABI<Fn, AllocateAndInitTypedArrayBuffer>();
     PopRegsInMask(liveRegs);
 
-    // Fail when data elements is set to NULL.
-    branchPtr(Assembler::Equal, Address(obj, dataSlotOffset), ImmWord(0), fail);
+    // Fail when data slot is UndefinedValue.
+    branchTestUndefined(Assembler::Equal, Address(obj, dataSlotOffset), fail);
   }
 }
 
@@ -959,11 +948,9 @@ void MacroAssembler::initGCThing(Register obj, Register temp,
               Address(obj, elementsOffset + ObjectElements::offsetOfLength()));
       store32(Imm32(0),
               Address(obj, elementsOffset + ObjectElements::offsetOfFlags()));
-      MOZ_ASSERT(!ntemplate.hasPrivate());
     } else if (ntemplate.isArgumentsObject()) {
       // The caller will initialize the reserved slots.
       MOZ_ASSERT(!initContents);
-      MOZ_ASSERT(!ntemplate.hasPrivate());
       storePtr(ImmPtr(emptyObjectElements),
                Address(obj, NativeObject::offsetOfElements()));
     } else {
@@ -975,12 +962,6 @@ void MacroAssembler::initGCThing(Register obj, Register temp,
                Address(obj, NativeObject::offsetOfElements()));
 
       initGCSlots(obj, temp, ntemplate, initContents);
-
-      if (ntemplate.hasPrivate() && !ntemplate.isTypedArrayObject()) {
-        uint32_t nfixed = ntemplate.numFixedSlots();
-        Address privateSlot(obj, NativeObject::getPrivateDataOffset(nfixed));
-        storeObjPrivate(ImmPtr(ntemplate.getPrivate()), privateSlot);
-      }
     }
   } else {
     MOZ_CRASH("Unknown object");
@@ -1514,12 +1495,13 @@ void MacroAssembler::initializeBigIntAbsolute(Register bigInt, Register val) {
 }
 
 void MacroAssembler::copyBigIntWithInlineDigits(Register src, Register dest,
-                                                Register temp, Label* fail,
-                                                bool attemptNursery) {
+                                                Register temp,
+                                                gc::InitialHeap initialHeap,
+                                                Label* fail) {
   branch32(Assembler::Above, Address(src, BigInt::offsetOfLength()),
            Imm32(int32_t(BigInt::inlineDigitsLength())), fail);
 
-  newGCBigInt(dest, temp, fail, attemptNursery);
+  newGCBigInt(dest, temp, initialHeap, fail);
 
   // Copy the sign-bit, but not any of the other bits used by the GC.
   load32(Address(src, BigInt::offsetOfFlags()), temp);
@@ -4517,7 +4499,8 @@ static void LoadNativeIterator(MacroAssembler& masm, Register obj,
 #endif
 
   // Load NativeIterator object.
-  masm.loadObjPrivate(obj, PropertyIteratorObject::NUM_FIXED_SLOTS, dest);
+  Address slotAddr(obj, PropertyIteratorObject::offsetOfIteratorSlot());
+  masm.loadPrivate(slotAddr, dest);
 }
 
 void MacroAssembler::iteratorMore(Register obj, ValueOperand output,

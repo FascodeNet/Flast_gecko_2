@@ -210,10 +210,7 @@ class nsWindow final : public nsWindowBase {
                                    bool aDoCapture) override;
   [[nodiscard]] virtual nsresult GetAttention(int32_t aCycleCount) override;
   virtual bool HasPendingInputEvent() override;
-  virtual LayerManager* GetLayerManager(
-      PLayerTransactionChild* aShadowManager = nullptr,
-      LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-      LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
+  virtual WindowRenderer* GetWindowRenderer() override;
   void SetCompositorWidgetDelegate(CompositorWidgetDelegate* delegate) override;
   [[nodiscard]] virtual nsresult OnDefaultButtonLoaded(
       const LayoutDeviceIntRect& aButtonRect) override;
@@ -237,6 +234,12 @@ class nsWindow final : public nsWindowBase {
       LayoutDeviceIntPoint aPoint, uint32_t aNativeMessage, double aDeltaX,
       double aDeltaY, double aDeltaZ, uint32_t aModifierFlags,
       uint32_t aAdditionalFlags, nsIObserver* aObserver) override;
+
+  virtual nsresult SynthesizeNativeTouchpadPan(TouchpadGesturePhase aEventPhase,
+                                               LayoutDeviceIntPoint aPoint,
+                                               double aDeltaX, double aDeltaY,
+                                               int32_t aModifierFlags) override;
+
   virtual void SetInputContext(const InputContext& aContext,
                                const InputContextAction& aAction) override;
   virtual InputContext GetInputContext() override;
@@ -614,7 +617,7 @@ class nsWindow final : public nsWindowBase {
   static TriStateBool sCanQuit;
   static nsWindow* sCurrentWindow;
   static BOOL sIsOleInitialized;
-  static HCURSOR sHCursor;
+  static HCURSOR sCustomHCursor;
   static Cursor sCurrentCursor;
   static bool sSwitchKeyboardLayout;
   static bool sJustGotDeactivate;

@@ -22,6 +22,7 @@
 #include "SDKDeclarations.h"
 
 #import <Cocoa/Cocoa.h>
+#import <AppKit/NSColor.h>
 
 // This must be included last:
 #include "nsObjCExceptions.h"
@@ -101,6 +102,14 @@ nscolor nsLookAndFeel::ProcessSelectionBackground(nscolor aColor, ColorScheme aS
 
 nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme, nscolor& aColor) {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK
+
+  if (@available(macOS 10.14, *)) {
+    // No-op. macOS 10.14+ supports dark mode, so currentAppearance can be set
+    // to either Light or Dark.
+  } else {
+    // System colors before 10.14 are always Light.
+    aScheme = ColorScheme::Light;
+  }
 
   NSAppearance.currentAppearance = NSAppearanceForColorScheme(aScheme);
 
@@ -265,9 +274,16 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme, nscolor
     case ColorID::Windowframe:
       color = GetColorFromNSColor(NSColor.windowFrameColor);
       break;
-    case ColorID::Window:
-      color = GetColorFromNSColor(NSColor.windowBackgroundColor);
+    case ColorID::Window: {
+      if (@available(macOS 10.14, *)) {
+        color = GetColorFromNSColor(NSColor.windowBackgroundColor);
+      } else {
+        // On 10.13 and below, NSColor.windowBackgroundColor is transparent black.
+        // Use a light grey instead (taken from macOS 11.5).
+        color = NS_RGB(0xF6, 0xF6, 0xF6);
+      }
       break;
+    }
     case ColorID::Field:
     case ColorID::MozCombobox:
       color = GetColorFromNSColor(NSColor.controlBackgroundColor);
@@ -336,6 +352,9 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme, nscolor
       break;
     case ColorID::MozNativehyperlinktext:
       color = GetColorFromNSColor(NSColor.linkColor);
+      break;
+    case ColorID::MozNativevisitedhyperlinktext:
+      color = GetColorFromNSColor(NSColor.systemPurpleColor);
       break;
     // The following colors are supposed to be used as font-smoothing background
     // colors, in the chrome-only -moz-font-smoothing-background-color property.

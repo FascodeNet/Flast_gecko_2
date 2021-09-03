@@ -1100,8 +1100,6 @@ void nsLookAndFeel::RestoreSystemTheme() {
 
 template <typename Callback>
 void nsLookAndFeel::WithAltThemeConfigured(const Callback& aFn) {
-  AutoRestore<bool> restoreIgnoreSettings(sIgnoreChangedSettings);
-  sIgnoreChangedSettings = true;
   GtkSettings* settings = gtk_settings_get_default();
 
   bool fellBackToDefaultTheme = false;
@@ -1204,6 +1202,9 @@ void nsLookAndFeel::EnsureInit() {
   }
 
   LOGLNF("nsLookAndFeel::EnsureInit");
+
+  AutoRestore<bool> restoreIgnoreSettings(sIgnoreChangedSettings);
+  sIgnoreChangedSettings = true;
 
   // Gtk manages a screen's CSS in the settings object so we
   // ask Gtk to create it explicitly. Otherwise we may end up
@@ -1809,6 +1810,12 @@ char16_t nsLookAndFeel::GetPasswordCharacterImpl() {
 }
 
 bool nsLookAndFeel::GetEchoPasswordImpl() { return false; }
+
+void nsLookAndFeel::GetThemeInfo(nsACString& aInfo) {
+  aInfo.Append(mSystemTheme.mName);
+  aInfo.Append(" / ");
+  aInfo.Append(mAltTheme.mName);
+}
 
 bool nsLookAndFeel::WidgetUsesImage(WidgetNodeType aNodeType) {
   static constexpr GtkStateFlags sFlagsToCheck[]{

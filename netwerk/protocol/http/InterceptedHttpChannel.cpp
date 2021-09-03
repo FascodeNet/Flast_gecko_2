@@ -5,9 +5,9 @@
  *  file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "InterceptedHttpChannel.h"
+#include "NetworkMarker.h"
 #include "nsContentSecurityManager.h"
 #include "nsEscape.h"
-#include "mozilla/ProfilerMarkers.h"
 #include "mozilla/SchedulerGroup.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/dom/ChannelInfo.h"
@@ -41,6 +41,7 @@ InterceptedHttpChannel::InterceptedHttpChannel(
   // any time spent processing the channel.
   mChannelCreationTime = aCreationTime;
   mChannelCreationTimestamp = aCreationTimestamp;
+  mInterceptedChannelCreationTimestamp = TimeStamp::Now();
   mAsyncOpenTime = aAsyncOpenTimestamp;
 }
 
@@ -523,6 +524,19 @@ InterceptedHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
     return mStatus;
   }
 
+  // This is outside of the if block in case we enable the profiler after
+  // AsyncOpen().
+  mLastStatusReported = TimeStamp::Now();
+  if (profiler_can_accept_markers()) {
+    nsAutoCString requestMethod;
+    GetRequestMethod(requestMethod);
+
+    profiler_add_network_marker(
+        mURI, requestMethod, mPriority, mChannelId, NetworkLoadType::LOAD_START,
+        mChannelCreationTimestamp, mLastStatusReported, 0, kCacheUnknown,
+        mLoadInfo->GetInnerWindowID());
+  }
+
   // After this point we should try to return NS_OK and notify the listener
   // of the result.
   mListener = aListener;
@@ -622,7 +636,6 @@ InterceptedHttpChannel::ResetInterception(bool aBypass) {
                             mLoadFlags);
   NS_ENSURE_SUCCESS(rv, rv);
 
-#ifdef MOZ_GECKO_PROFILER
   if (profiler_can_accept_markers()) {
     nsAutoCString requestMethod;
     GetRequestMethod(requestMethod);
@@ -641,14 +654,14 @@ InterceptedHttpChannel::ResetInterception(bool aBypass) {
     RefPtr<HttpBaseChannel> newBaseChannel = do_QueryObject(newChannel);
     MOZ_ASSERT(newBaseChannel,
                "The redirect channel should be a base channel.");
-    profiler_add_network_marker(
-        mURI, requestMethod, priority, mChannelId,
-        NetworkLoadType::LOAD_REDIRECT, mAsyncOpenTime, TimeStamp::Now(), size,
-        kCacheUnknown, mLoadInfo->GetInnerWindowID(), &mTransactionTimings,
-        std::move(mSource), Some(nsDependentCString(contentType.get())), mURI,
-        flags, newBaseChannel->ChannelId());
+    profiler_add_network_marker(mURI, requestMethod, priority, mChannelId,
+                                NetworkLoadType::LOAD_REDIRECT,
+                                mLastStatusReported, TimeStamp::Now(), size,
+                                kCacheUnknown, mLoadInfo->GetInnerWindowID(),
+                                &mTransactionTimings, std::move(mSource),
+                                Some(nsDependentCString(contentType.get())),
+                                mURI, flags, newBaseChannel->ChannelId());
   }
-#endif
 
   rv = SetupReplacementChannel(mURI, newChannel, true, flags);
   NS_ENSURE_SUCCESS(rv, rv);
@@ -1113,7 +1126,6 @@ InterceptedHttpChannel::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
   // Register entry to the PerformanceStorage resource timing
   MaybeReportTimingData();
 
-#ifdef MOZ_GECKO_PROFILER
   if (profiler_can_accept_markers()) {
     // These do allocations/frees/etc; avoid if not active
     nsAutoCString requestMethod;
@@ -1131,11 +1143,10 @@ InterceptedHttpChannel::OnStopRequest(nsIRequest* aRequest, nsresult aStatus) {
     }
     profiler_add_network_marker(
         mURI, requestMethod, priority, mChannelId, NetworkLoadType::LOAD_STOP,
-        mAsyncOpenTime, TimeStamp::Now(), size, kCacheUnknown,
+        mLastStatusReported, TimeStamp::Now(), size, kCacheUnknown,
         mLoadInfo->GetInnerWindowID(), &mTransactionTimings, std::move(mSource),
         Some(nsDependentCString(contentType.get())));
   }
-#endif
 
   nsresult rv = NS_OK;
   if (mListener) {

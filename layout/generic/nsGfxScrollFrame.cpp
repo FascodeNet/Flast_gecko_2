@@ -36,6 +36,7 @@
 #include "nsStyleTransformMatrix.h"
 #include "mozilla/PresState.h"
 #include "nsContentUtils.h"
+#include "nsDisplayList.h"
 #include "nsHTMLDocument.h"
 #include "nsLayoutUtils.h"
 #include "nsBidiPresUtils.h"
@@ -784,24 +785,22 @@ void nsHTMLScrollFrame::ReflowScrolledFrame(ScrollReflowInput* aState,
   auto* disp = StyleDisplay();
   if (MOZ_UNLIKELY(disp->mOverflowClipBoxInline ==
                    StyleOverflowClipBox::ContentBox)) {
-    // If the scrolled frame can be scrolled in the inline axis, inflate its
-    // scrollable overflow areas with its inline-end padding to prevent its
-    // content from being clipped at scroll container's inline-end padding
-    // edge.
-    //
-    // Note: Inflating scrolled frame's overflow areas is generally wrong if the
-    // scrolled frame's children themselves has any scrollable overflow areas.
-    // However, we can only be here in production for <textarea> and <input>.
-    // Both elements can only have text children, which shouldn't have
-    // scrollable overflow areas themselves, so its fine.
+    // The scrolled frame is scrollable in the inline axis with
+    // `overflow-clip-box:content-box`. To prevent its content from being
+    // clipped at the scroll container's padding edges, we inflate its
+    // children's scrollable overflow area with its inline padding, and union
+    // its scrollable overflow area with its children's inflated scrollable
+    // overflow area.
+    OverflowAreas childOverflow;
+    mHelper.mScrolledFrame->UnionChildOverflow(childOverflow);
+    nsRect childScrollableOverflow = childOverflow.ScrollableOverflow();
+
+    const LogicalMargin inlinePadding =
+        padding.ApplySkipSides(LogicalSides(wm, eLogicalSideBitsBBoth));
+    childScrollableOverflow.Inflate(inlinePadding.GetPhysicalMargin(wm));
+
     nsRect& so = aMetrics->ScrollableOverflow();
-    const nscoord soInlineSize = wm.IsVertical() ? so.Height() : so.Width();
-    if (soInlineSize > availISize) {
-      const LogicalMargin inlinePaddingEnd =
-          padding.ApplySkipSides(LogicalSides(wm, eLogicalSideBitsBBoth) |
-                                 LogicalSides(wm, eLogicalSideBitsIStart));
-      so.Inflate(inlinePaddingEnd.GetPhysicalMargin(wm));
-    }
+    so = so.UnionEdges(childScrollableOverflow);
   }
 
   aState->mContentsOverflowAreas = aMetrics->mOverflowAreas;
@@ -3088,8 +3087,9 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
           PAINT_SKIP_LOG("Skipping due to APZ scroll\n");
         } else if (mScrollableByAPZ) {
           nsIWidget* widget = presContext->GetNearestWidget();
-          LayerManager* manager = widget ? widget->GetLayerManager() : nullptr;
-          if (manager) {
+          WindowRenderer* renderer =
+              widget ? widget->GetWindowRenderer() : nullptr;
+          if (renderer) {
             mozilla::layers::ScrollableLayerGuid::ViewID id;
             bool success = nsLayoutUtils::FindIDFor(content, &id);
             MOZ_ASSERT(success);  // we have a displayport, we better have an ID
@@ -3099,7 +3099,7 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
             // might still get squashed into a full transaction if something
             // happens to trigger one.
             MOZ_ASSERT(!mScrollUpdates.IsEmpty());
-            success = manager->AddPendingScrollUpdateForNextTransaction(
+            success = renderer->AddPendingScrollUpdateForNextTransaction(
                 id, mScrollUpdates.LastElement());
             if (success) {
               schedulePaint = false;
@@ -3204,8 +3204,7 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
 static Maybe<int32_t> MaxZIndexInList(nsDisplayList* aList,
                                       nsDisplayListBuilder* aBuilder) {
   Maybe<int32_t> maxZIndex = Nothing();
-  for (nsDisplayItem* item = aList->GetBottom(); item;
-       item = item->GetAbove()) {
+  for (nsDisplayItem* item : *aList) {
     int32_t zIndex = item->ZIndex();
     if (zIndex < 0) {
       continue;
@@ -3480,7 +3479,7 @@ static void ClipItemsExceptCaret(
     const DisplayItemClipChain* aExtraClip,
     nsTHashMap<nsPtrHashKey<const DisplayItemClipChain>,
                const DisplayItemClipChain*>& aCache) {
-  for (nsDisplayItem* i = aList->GetBottom(); i; i = i->GetAbove()) {
+  for (nsDisplayItem* i : *aList) {
     if (!ShouldBeClippedByFrame(aClipFrame, i->Frame())) {
       continue;
     }
@@ -3575,8 +3574,7 @@ class MOZ_RAII AutoContainsBlendModeCapturer {
 static int32_t MaxZIndexInListOfItemsContainedInFrame(nsDisplayList* aList,
                                                       nsIFrame* aFrame) {
   int32_t maxZIndex = -1;
-  for (nsDisplayItem* item = aList->GetBottom(); item;
-       item = item->GetAbove()) {
+  for (nsDisplayItem* item : *aList) {
     nsIFrame* itemFrame = item->Frame();
     // Perspective items return the scroll frame as their Frame(), so consider
     // their TransformFrame() instead.
@@ -4120,7 +4118,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
       int32_t zIndex = MaxZIndexInListOfItemsContainedInFrame(
           scrolledContent.PositionedDescendants(), mOuter);
       if (aBuilder->IsPartialUpdate()) {
-        for (nsDisplayItemBase* item : mScrolledFrame->DisplayItems()) {
+        for (nsDisplayItem* item : mScrolledFrame->DisplayItems()) {
           if (item->GetType() ==
               DisplayItemType::TYPE_COMPOSITOR_HITTEST_INFO) {
             auto* hitTestItem =
@@ -5187,12 +5185,25 @@ auto ScrollFrameHelper::GetPageLoadingState() -> LoadingState {
              : LoadingState::Loading;
 }
 
-nsresult ScrollFrameHelper::FireScrollPortEvent() {
-  mAsyncScrollPortEvent.Forget();
-
-  // Keep this in sync with PostOverflowEvent().
+ScrollFrameHelper::OverflowState ScrollFrameHelper::GetOverflowState() const {
   nsSize scrollportSize = mScrollPort.Size();
   nsSize childSize = GetScrolledRect().Size();
+
+  OverflowState result = OverflowState::None;
+
+  if (childSize.height > scrollportSize.height) {
+    result |= OverflowState::Vertical;
+  }
+
+  if (childSize.width > scrollportSize.width) {
+    result |= OverflowState::Horizontal;
+  }
+
+  return result;
+}
+
+nsresult ScrollFrameHelper::FireScrollPortEvent() {
+  mAsyncScrollPortEvent.Forget();
 
   // TODO(emilio): why do we need the whole WillPaintObserver infrastructure and
   // can't use AddScriptRunner & co? I guess it made sense when we used
@@ -5200,10 +5211,12 @@ nsresult ScrollFrameHelper::FireScrollPortEvent() {
   //
   // Should we remove this?
 
-  bool newVerticalOverflow = childSize.height > scrollportSize.height;
+  OverflowState overflowState = GetOverflowState();
+
+  bool newVerticalOverflow = !!(overflowState & OverflowState::Vertical);
   bool vertChanged = mVerticalOverflow != newVerticalOverflow;
 
-  bool newHorizontalOverflow = childSize.width > scrollportSize.width;
+  bool newHorizontalOverflow = !!(overflowState & OverflowState::Horizontal);
   bool horizChanged = mHorizontalOverflow != newHorizontalOverflow;
 
   if (!vertChanged && !horizChanged) {
@@ -5951,14 +5964,12 @@ void ScrollFrameHelper::PostOverflowEvent() {
     return;
   }
 
-  // Keep this in sync with FireScrollPortEvent().
-  nsSize scrollportSize = mScrollPort.Size();
-  nsSize childSize = GetScrolledRect().Size();
+  OverflowState overflowState = GetOverflowState();
 
-  bool newVerticalOverflow = childSize.height > scrollportSize.height;
+  bool newVerticalOverflow = !!(overflowState & OverflowState::Vertical);
   bool vertChanged = mVerticalOverflow != newVerticalOverflow;
 
-  bool newHorizontalOverflow = childSize.width > scrollportSize.width;
+  bool newHorizontalOverflow = !!(overflowState & OverflowState::Horizontal);
   bool horizChanged = mHorizontalOverflow != newHorizontalOverflow;
 
   if (!vertChanged && !horizChanged) {
@@ -6433,6 +6444,12 @@ bool ScrollFrameHelper::ReflowFinished() {
         manager->UpdateVisualViewportSizeForPotentialScrollbarChange();
       }
     }
+
+#if defined(MOZ_WIDGET_ANDROID)
+    if (mIsRoot && !(GetOverflowState() & OverflowState::Vertical)) {
+      mOuter->PresShell()->MaybeNotifyShowDynamicToolbar();
+    }
+#endif  // defined(MOZ_WIDGET_ANDROID)
   }
 
   bool doScroll = true;

@@ -42,7 +42,6 @@ static const char kDisableIpv6Pref[] = "network.dns.disableIPv6";
 namespace mozilla {
 namespace net {
 
-TRRService* gTRRService = nullptr;
 StaticRefPtr<nsIThread> sTRRBackgroundThread;
 static Atomic<TRRService*> sTRRServicePtr;
 
@@ -68,6 +67,9 @@ NS_IMPL_RELEASE_USING_AGGREGATOR(TRRService::ConfirmationContext,
 NS_IMPL_QUERY_INTERFACE(TRRService::ConfirmationContext, nsITimerCallback)
 
 TRRService::TRRService() { MOZ_ASSERT(NS_IsMainThread(), "wrong thread"); }
+
+// static
+TRRService* TRRService::Get() { return sTRRServicePtr; }
 
 // static
 void TRRService::AddObserver(nsIObserver* aObserver,
@@ -162,7 +164,6 @@ nsresult TRRService::Init() {
     prefBranch->AddObserver(kRolloutModePref, this, true);
   }
 
-  gTRRService = this;
   sTRRServicePtr = this;
 
   ReadPrefs(nullptr);
@@ -310,12 +311,11 @@ bool TRRService::MaybeSetPrivateURI(const nsACString& aURI) {
     }
 
     nsCOMPtr<nsIURI> url;
-    nsresult rv =
-        NS_MutateURI(NS_STANDARDURLMUTATOR_CONTRACTID)
-            .Apply(NS_MutatorMethod(&nsIStandardURLMutator::Init,
-                                    nsIStandardURL::URLTYPE_STANDARD, 443,
-                                    newURI, nullptr, nullptr, nullptr))
-            .Finalize(url);
+    nsresult rv = NS_MutateURI(NS_STANDARDURLMUTATOR_CONTRACTID)
+                      .Apply(&nsIStandardURLMutator::Init,
+                             nsIStandardURL::URLTYPE_STANDARD, 443, newURI,
+                             nullptr, nullptr, nullptr)
+                      .Finalize(url);
     if (NS_FAILED(rv)) {
       LOG(("TRRService::MaybeSetPrivateURI failed to create URI!\n"));
       return false;
@@ -536,7 +536,6 @@ nsresult TRRService::Start() {
 TRRService::~TRRService() {
   MOZ_ASSERT(NS_IsMainThread(), "wrong thread");
   LOG(("Exiting TRRService\n"));
-  gTRRService = nullptr;
 }
 
 nsresult TRRService::DispatchTRRRequest(TRR* aTrrRequest) {
@@ -865,9 +864,8 @@ bool TRRService::MaybeBootstrap(const nsACString& aPossible,
   nsCOMPtr<nsIURI> url;
   nsresult rv =
       NS_MutateURI(NS_STANDARDURLMUTATOR_CONTRACTID)
-          .Apply(NS_MutatorMethod(&nsIStandardURLMutator::Init,
-                                  nsIStandardURL::URLTYPE_STANDARD, 443,
-                                  mPrivateURI, nullptr, nullptr, nullptr))
+          .Apply(&nsIStandardURLMutator::Init, nsIStandardURL::URLTYPE_STANDARD,
+                 443, mPrivateURI, nullptr, nullptr, nullptr)
           .Finalize(url);
   if (NS_FAILED(rv)) {
     LOG(("TRRService::MaybeBootstrap failed to create URI!\n"));

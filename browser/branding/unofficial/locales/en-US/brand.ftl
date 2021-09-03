@@ -16,11 +16,11 @@
 ## For further details, consult:
 ## https://mozilla-l10n.github.io/styleguides/mozilla_general/#brands-copyright-and-trademark
 
--brand-shorter-name = Umekou
--brand-short-name = Umekou
--brand-full-name = NightlyUmekou
+-brand-shorter-name = Ume Browser
+-brand-short-name = Ume Browser
+-brand-full-name = Ume Browser
 # This brand name can be used in messages where the product name needs to
 # remain unchanged across different versions (Nightly, Beta, etc.).
--brand-product-name = Umekou
--vendor-short-name = Umekou
+-brand-product-name = Ume Browser
+-vendor-short-name = Ume Browser
 trademarkInfo = { " " }

@@ -1,5 +1,6 @@
-/* global Handlebars:false, thePKT_PANEL:false */
+/* global Handlebars:false */
 /* import-globals-from messages.js */
+/* import-globals-from main.js */
 
 /*
 PKT_PANEL_OVERLAY is the view itself and contains all of the methods to manipute the overlay and messaging.
@@ -36,7 +37,7 @@ var PKT_PANEL_OVERLAY = function(options) {
     }
   };
   this.fillUserTags = function() {
-    thePKT_PANEL.sendMessage("PKT_getTags", {}, function(resp) {
+    pktPanelMessaging.sendMessage("PKT_getTags", {}, function(resp) {
       const { data } = resp;
       if (typeof data == "object" && typeof data.tags == "object") {
         myself.userTags = data.tags;
@@ -51,7 +52,7 @@ var PKT_PANEL_OVERLAY = function(options) {
 
     document.querySelector(`.pkt_ext_subshell`).style.display = `block`;
 
-    thePKT_PANEL.sendMessage(
+    pktPanelMessaging.sendMessage(
       "PKT_getSuggestedTags",
       {
         url: myself.savedUrl,
@@ -83,7 +84,7 @@ var PKT_PANEL_OVERLAY = function(options) {
     );
   };
   this.closePopup = function() {
-    thePKT_PANEL.sendMessage("PKT_close");
+    pktPanelMessaging.sendMessage("PKT_close");
   };
   this.checkValidTagSubmit = function() {
     let inputlength = document
@@ -369,7 +370,7 @@ var PKT_PANEL_OVERLAY = function(options) {
         }
       });
 
-      thePKT_PANEL.sendMessage(
+      pktPanelMessaging.sendMessage(
         "PKT_addTags",
         {
           url: myself.savedUrl,
@@ -415,7 +416,7 @@ var PKT_PANEL_OVERLAY = function(options) {
             "pocket-panel-saved-processing-remove"
           );
 
-          thePKT_PANEL.sendMessage(
+          pktPanelMessaging.sendMessage(
             "PKT_deleteItem",
             {
               itemId: myself.savedItemId,
@@ -441,17 +442,9 @@ var PKT_PANEL_OVERLAY = function(options) {
       });
   };
   this.initOpenListInput = function() {
-    document
-      .querySelector(`.pkt_ext_openpocket`)
-      .addEventListener(`click`, e => {
-        e.preventDefault();
-
-        thePKT_PANEL.sendMessage("PKT_openTabWithUrl", {
-          url: e.target.getAttribute(`href`),
-          activate: true,
-          source: `view_list`,
-        });
-      });
+    thePKT_PANEL.clickHelper(document.querySelector(`.pkt_ext_openpocket`), {
+      source: `view_list`,
+    });
   };
 
   this.showTagsLocalizedError = function(l10nId) {
@@ -575,17 +568,9 @@ var PKT_PANEL_OVERLAY = function(options) {
         .querySelector(`.pkt_ext_item_recs`)
         .append(myself.parseHTML(renderedRecs));
 
-      document
-        .querySelector(`.pkt_ext_learn_more`)
-        .addEventListener(`click`, e => {
-          e.preventDefault();
-
-          thePKT_PANEL.sendMessage(`PKT_openTabWithUrl`, {
-            url: e.target.getAttribute(`href`),
-            activate: true,
-            source: `recs_learn_more`,
-          });
-        });
+      thePKT_PANEL.clickHelper(document.querySelector(`.pkt_ext_learn_more`), {
+        source: `recs_learn_more`,
+      });
 
       document
         .querySelectorAll(`.pkt_ext_item_recs_link`)
@@ -593,7 +578,7 @@ var PKT_PANEL_OVERLAY = function(options) {
           el.addEventListener(`click`, e => {
             e.preventDefault();
 
-            thePKT_PANEL.sendMessage(`PKT_openTabWithPocketUrl`, {
+            pktPanelMessaging.sendMessage(`PKT_openTabWithPocketUrl`, {
               url: el.getAttribute(`href`),
               model,
               position,
@@ -736,7 +721,7 @@ PKT_PANEL_OVERLAY.prototype = {
     this.initOpenListInput();
 
     // wait confirmation of save before flipping to final saved state
-    thePKT_PANEL.addMessageListener("PKT_saveLink", function(resp) {
+    pktPanelMessaging.addMessageListener("PKT_saveLink", function(resp) {
       const { data } = resp;
       if (data.status == "error") {
         // Fallback to a generic catch all error.
@@ -752,12 +737,12 @@ PKT_PANEL_OVERLAY.prototype = {
       myself.showStateSaved(data);
     });
 
-    thePKT_PANEL.addMessageListener("PKT_renderItemRecs", function(resp) {
+    pktPanelMessaging.addMessageListener("PKT_renderItemRecs", function(resp) {
       const { data } = resp;
       myself.renderItemRecs(data);
     });
 
     // tell back end we're ready
-    thePKT_PANEL.sendMessage("PKT_show_saved");
+    pktPanelMessaging.sendMessage("PKT_show_saved");
   },
 };

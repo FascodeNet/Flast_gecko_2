@@ -38,11 +38,13 @@
 
 #include "BrowserParent.h"
 #include "ContentProcessManager.h"
+#include "GeckoProfiler.h"
 #include "Geolocation.h"
 #include "GfxInfoBase.h"
 #include "MMPrinter.h"
 #include "PreallocatedProcessManager.h"
 #include "ProcessPriorityManager.h"
+#include "ProfilerParent.h"
 #include "SandboxHal.h"
 #include "SourceSurfaceRawData.h"
 #include "mozilla/ipc/URIUtils.h"
@@ -133,6 +135,7 @@
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
+#include "mozilla/intl/L10nRegistry.h"
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/ipc/BackgroundChild.h"
 #include "mozilla/ipc/BackgroundParent.h"
@@ -255,6 +258,7 @@
 
 #if defined(XP_MACOSX)
 #  include "nsMacUtilsImpl.h"
+#  include "mozilla/AvailableMemoryWatcher.h"
 #endif
 
 #if defined(ANDROID) || defined(LINUX)
@@ -311,11 +315,6 @@
 #ifdef ACCESSIBILITY
 #  include "nsAccessibilityService.h"
 #endif
-
-#ifdef MOZ_GECKO_PROFILER
-#  include "nsIProfiler.h"
-#endif
-#include "ProfilerParent.h"
 
 #ifdef MOZ_CODE_COVERAGE
 #  include "mozilla/CodeCoverageHandler.h"
@@ -661,13 +660,10 @@ static const char* sObserverTopics[] = {
 
 // PreallocateProcess is called by the PreallocatedProcessManager.
 // ContentParent then takes this process back within GetNewOrUsedBrowserProcess.
-/*static*/ RefPtr<ContentParent::LaunchPromise>
-ContentParent::PreallocateProcess() {
+/*static*/ already_AddRefed<ContentParent>
+ContentParent::MakePreallocProcess() {
   RefPtr<ContentParent> process = new ContentParent(PREALLOC_REMOTE_TYPE);
-
-  MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-          ("Preallocating process of type prealloc"));
-  return process->LaunchSubprocessAsync(PROCESS_PRIORITY_PREALLOC);
+  return process.forget();
 }
 
 /*static*/
@@ -909,7 +905,7 @@ static already_AddRefed<nsIPrincipal> CreateRemoteTypeIsolationPrincipal(
 /*static*/
 already_AddRefed<ContentParent> ContentParent::GetUsedBrowserProcess(
     const nsACString& aRemoteType, nsTArray<ContentParent*>& aContentParents,
-    uint32_t aMaxContentParents, bool aPreferUsed) {
+    uint32_t aMaxContentParents, bool aPreferUsed, ProcessPriority aPriority) {
 #ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
   AutoRestore ar(sInProcessSelector);
   sInProcessSelector = true;
@@ -984,6 +980,7 @@ already_AddRefed<ContentParent> ContentParent::GetUsedBrowserProcess(
   }
 
   // Try to take a preallocated process except for certain remote types.
+  // Note: this process may not have finished launching yet
   RefPtr<ContentParent> preallocated;
   if (aRemoteType != FILE_REMOTE_TYPE &&
       aRemoteType != EXTENSION_REMOTE_TYPE &&  // Bug 1638119
@@ -994,30 +991,40 @@ already_AddRefed<ContentParent> ContentParent::GetUsedBrowserProcess(
     preallocated->AssertAlive();
 
     if (profiler_thread_is_being_profiled()) {
-      nsPrintfCString marker("Assigned preallocated process %u",
-                             (unsigned int)preallocated->ChildID());
+      nsPrintfCString marker(
+          "Assigned preallocated process %u%s",
+          (unsigned int)preallocated->ChildID(),
+          preallocated->IsLaunching() ? " (still launching)" : "");
       PROFILER_MARKER_TEXT("Process", DOM, {}, marker);
     }
     MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-            ("Adopted preallocated process %p for type %s", preallocated.get(),
-             PromiseFlatCString(aRemoteType).get()));
+            ("Adopted preallocated process %p for type %s%s",
+             preallocated.get(), PromiseFlatCString(aRemoteType).get(),
+             preallocated->IsLaunching() ? " (still launching)" : ""));
 
-    // Specialize this process for the appropriate remote type, and activate it.
-    preallocated->mActivateTS = TimeStamp::Now();
-    preallocated->AddToPool(aContentParents);
-
+    // This ensures that the preallocator won't shut down the process once
+    // it finishes starting
     preallocated->mRemoteType.Assign(aRemoteType);
     preallocated->mRemoteTypeIsolationPrincipal =
         CreateRemoteTypeIsolationPrincipal(aRemoteType);
-    Unused << preallocated->SendRemoteType(preallocated->mRemoteType);
+    preallocated->mActivateTS = TimeStamp::Now();
+    preallocated->AddToPool(aContentParents);
 
-    nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
-    if (obs) {
-      nsAutoString cpId;
-      cpId.AppendInt(static_cast<uint64_t>(preallocated->ChildID()));
-      obs->NotifyObservers(static_cast<nsIObserver*>(preallocated),
-                           "process-type-set", cpId.get());
-      preallocated->AssertAlive();
+    // rare, but will happen
+    if (!preallocated->IsLaunching()) {
+      // Specialize this process for the appropriate remote type, and activate
+      // it.
+      Unused << preallocated->SendRemoteType(preallocated->mRemoteType);
+
+      nsCOMPtr<nsIObserverService> obs =
+          mozilla::services::GetObserverService();
+      if (obs) {
+        nsAutoString cpId;
+        cpId.AppendInt(static_cast<uint64_t>(preallocated->ChildID()));
+        obs->NotifyObservers(static_cast<nsIObserver*>(preallocated),
+                             "process-type-set", cpId.get());
+        preallocated->AssertAlive();
+      }
     }
     return preallocated.forget();
   }
@@ -1063,47 +1070,38 @@ ContentParent::GetNewOrUsedLaunchingBrowserProcess(
   }
 
   // Let's try and reuse an existing process.
-  contentParent = GetUsedBrowserProcess(aRemoteType, contentParents,
-                                        maxContentParents, aPreferUsed);
+  contentParent = GetUsedBrowserProcess(
+      aRemoteType, contentParents, maxContentParents, aPreferUsed, aPriority);
 
-  if (contentParent) {
-    // We have located a process. It may not have finished initializing,
-    // this will be for the caller to handle.
+  if (!contentParent) {
+    // No reusable process. Let's create and launch one.
+    // The life cycle will be set to `LifecycleState::LAUNCHING`.
     MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-            ("GetNewOrUsedProcess: Used process %p (launching %d)",
-             contentParent.get(), contentParent->IsLaunching()));
-    contentParent->AssertAlive();
-    contentParent->StopRecycling();
-    if (aGroup) {
-      aGroup->EnsureHostProcess(contentParent);
+            ("Launching new process immediately for type %s",
+             PromiseFlatCString(aRemoteType).get()));
+
+    contentParent = new ContentParent(aRemoteType);
+    if (!contentParent->BeginSubprocessLaunch(aPriority)) {
+      // Launch aborted because of shutdown. Bailout.
+      contentParent->LaunchSubprocessReject();
+      return nullptr;
     }
-    return contentParent.forget();
+    // Until the new process is ready let's not allow to start up any
+    // preallocated processes. The blocker will be removed once we receive
+    // the first idle message.
+    contentParent->mIsAPreallocBlocker = true;
+    PreallocatedProcessManager::AddBlocker(aRemoteType, contentParent);
+
+    // Store this process for future reuse.
+    contentParent->AddToPool(contentParents);
+
+    MOZ_LOG(
+        ContentParent::GetLog(), LogLevel::Debug,
+        ("GetNewOrUsedProcess: new immediate process %p", contentParent.get()));
   }
+  // else we have an existing or preallocated process (which may be
+  // still launching)
 
-  // No reusable process. Let's create and launch one.
-  // The life cycle will be set to `LifecycleState::LAUNCHING`.
-  MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-          ("Launching new process immediately for type %s",
-           PromiseFlatCString(aRemoteType).get()));
-
-  contentParent = new ContentParent(aRemoteType);
-  if (!contentParent->BeginSubprocessLaunch(aPriority)) {
-    // Launch aborted because of shutdown. Bailout.
-    contentParent->LaunchSubprocessReject();
-    return nullptr;
-  }
-  // Store this process for future reuse.
-  contentParent->AddToPool(contentParents);
-
-  // Until the new process is ready let's not allow to start up any
-  // preallocated processes. The blocker will be removed once we receive
-  // the first idle message.
-  contentParent->mIsAPreallocBlocker = true;
-  PreallocatedProcessManager::AddBlocker(aRemoteType, contentParent);
-
-  MOZ_ASSERT(contentParent->IsLaunching());
-  MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
-          ("GetNewOrUsedProcess: new process %p", contentParent.get()));
   contentParent->AssertAlive();
   contentParent->StopRecycling();
   if (aGroup) {
@@ -1145,6 +1143,8 @@ RefPtr<ContentParent::LaunchPromise> ContentParent::WaitForLaunchAsync(
     ProcessPriority aPriority) {
   MOZ_DIAGNOSTIC_ASSERT(!IsDead());
   if (!IsLaunching()) {
+    MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
+            ("WaitForLaunchAsync: launched"));
     return LaunchPromise::CreateAndResolve(this, __func__);
   }
 
@@ -1159,6 +1159,8 @@ RefPtr<ContentParent::LaunchPromise> ContentParent::WaitForLaunchAsync(
       GetCurrentSerialEventTarget(), __func__,
       [self = RefPtr{this}, aPriority] {
         if (self->LaunchSubprocessResolve(/* aIsSync = */ false, aPriority)) {
+          MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
+                  ("WaitForLaunchAsync: async, now launched"));
           self->mActivateTS = TimeStamp::Now();
           return LaunchPromise::CreateAndResolve(self, __func__);
         }
@@ -1167,6 +1169,8 @@ RefPtr<ContentParent::LaunchPromise> ContentParent::WaitForLaunchAsync(
         return LaunchPromise::CreateAndReject(LaunchError(), __func__);
       },
       [self = RefPtr{this}] {
+        MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
+                ("WaitForLaunchAsync: async, rejected"));
         self->LaunchSubprocessReject();
         return LaunchPromise::CreateAndReject(LaunchError(), __func__);
       });
@@ -1482,13 +1486,6 @@ already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
     openerTabId = BrowserParent::GetTabIdFrom(docShell);
   }
 
-  bool isPreloadBrowser = false;
-  nsAutoString isPreloadBrowserStr;
-  if (aFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::preloadedState,
-                             isPreloadBrowserStr)) {
-    isPreloadBrowser = isPreloadBrowserStr.EqualsLiteral("preloaded");
-  }
-
   RefPtr<ContentParent> constructorSender;
   MOZ_RELEASE_ASSERT(XRE_IsParentProcess(),
                      "Cannot allocate BrowserParent in content process");
@@ -1500,8 +1497,7 @@ already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
           aContext.JSPluginId(), PROCESS_PRIORITY_FOREGROUND);
     } else {
       constructorSender = GetNewOrUsedBrowserProcess(
-          remoteType, aBrowsingContext->Group(), PROCESS_PRIORITY_FOREGROUND,
-          isPreloadBrowser);
+          remoteType, aBrowsingContext->Group(), PROCESS_PRIORITY_FOREGROUND);
     }
     if (!constructorSender) {
       return nullptr;
@@ -1722,7 +1718,8 @@ void ContentParent::Init() {
 void ContentParent::MaybeBeginShutDown(uint32_t aExpectedBrowserCount,
                                        bool aSendShutDown) {
   MOZ_LOG(ContentParent::GetLog(), LogLevel::Verbose,
-          ("MaybeBeginShutdown %p", this));
+          ("MaybeBeginShutdown %p, %u vs %u", this,
+           ManagedPBrowserParent().Count(), aExpectedBrowserCount));
   MOZ_ASSERT(NS_IsMainThread());
 
   if (ManagedPBrowserParent().Count() != aExpectedBrowserCount ||
@@ -1772,6 +1769,8 @@ void ContentParent::MaybeAsyncSendShutDownMessage() {
 }
 
 void ContentParent::ShutDownProcess(ShutDownMethod aMethod) {
+  MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
+          ("ShutDownProcess: %p", this));
   // NB: must MarkAsDead() here so that this isn't accidentally
   // returned from Get*() while in the midst of shutdown.
   MarkAsDead();
@@ -2055,6 +2054,12 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
         // if mCreatedPairedMinidumps is true, we've already generated
         // parent/child dumps for desktop crashes.
         if (!mCreatedPairedMinidumps) {
+#if defined(XP_MACOSX)
+          RefPtr<nsAvailableMemoryWatcherBase> memWatcher;
+          memWatcher = nsAvailableMemoryWatcherBase::GetSingleton();
+          memWatcher->AddChildAnnotations(mCrashReporter);
+#endif
+
           if (mCrashReporter->GenerateCrashReport(OtherPid())) {
             // Propagate `isLikelyOOM`.
             Unused << props->SetPropertyAsBool(u"isLikelyOOM"_ns,
@@ -2281,6 +2286,8 @@ bool ContentParent::ShouldKeepProcessAlive() {
 }
 
 void ContentParent::NotifyTabDestroying() {
+  MOZ_LOG(ContentParent::GetLog(), LogLevel::Debug,
+          ("NotifyTabDestroying %p:", this));
   // There can be more than one PBrowser for a given app process
   // because of popup windows.  PBrowsers can also destroy
   // concurrently.  When all the PBrowsers are destroying, kick off
@@ -2563,6 +2570,8 @@ bool ContentParent::BeginSubprocessLaunch(ProcessPriority aPriority) {
 
 void ContentParent::LaunchSubprocessReject() {
   NS_ERROR("failed to launch child in the parent");
+  MOZ_LOG(ContentParent::GetLog(), LogLevel::Verbose,
+          ("failed to launch child in the parent"));
   // Now that communication with the child is complete, we can cleanup
   // the preference serializer.
   mPrefSerializer = nullptr;
@@ -2582,7 +2591,7 @@ bool ContentParent::LaunchSubprocessResolve(bool aIsSync,
     MOZ_ASSERT(sCreatedFirstContentProcess);
     MOZ_ASSERT(!mPrefSerializer);
     MOZ_ASSERT(mLifecycleState != LifecycleState::LAUNCHING);
-    return true;
+    return mLaunchResolvedOk;
   }
   mLaunchResolved = true;
 
@@ -2666,6 +2675,8 @@ bool ContentParent::LaunchSubprocessResolve(bool aIsSync,
             ((mLaunchYieldTS - mLaunchTS) + (TimeStamp::Now() - launchResumeTS))
                 .ToMilliseconds()));
   }
+
+  mLaunchResolvedOk = true;
   return true;
 }
 
@@ -2738,6 +2749,7 @@ ContentParent::ContentParent(const nsACString& aRemoteType, int32_t aJSPluginID)
       mCreatedPairedMinidumps(false),
       mShutdownPending(false),
       mLaunchResolved(false),
+      mLaunchResolvedOk(false),
       mIsRemoteInputEventQueueEnabled(false),
       mIsInputPriorityEventEnabled(false),
       mIsInPool(false),
@@ -2858,6 +2870,9 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
   LocaleService::GetInstance()->GetAppLocalesAsBCP47(xpcomInit.appLocales());
   LocaleService::GetInstance()->GetRequestedLocales(
       xpcomInit.requestedLocales());
+
+  L10nRegistry::GetParentProcessFileSourceDescriptors(
+      xpcomInit.l10nFileSources());
 
   nsCOMPtr<nsIClipboard> clipboard(
       do_GetService("@mozilla.org/widget/clipboard;1"));
@@ -3113,24 +3128,18 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
         [&](BlobImpl* aBlobImpl, nsIPrincipal* aPrincipal,
             const Maybe<nsID>& aAgentClusterId, const nsACString& aURI,
             bool aRevoked) {
-          nsAutoCString origin;
-          nsresult rv = aPrincipal->GetOrigin(origin);
-          if (NS_WARN_IF(NS_FAILED(rv))) {
-            return false;
-          }
-
           // We send all moz-extension Blob URL's to all content processes
           // because content scripts mean that a moz-extension can live in any
           // process. Same thing for system principal Blob URLs. Content Blob
           // URL's are sent for content principals on-demand by
           // AboutToLoadHttpFtpDocumentForChild and RemoteWorkerManager.
-          if (!StringBeginsWith(origin, "moz-extension://"_ns) &&
-              !aPrincipal->IsSystemPrincipal()) {
+          if (!BlobURLProtocolHandler::IsBlobURLBroadcastPrincipal(
+                  aPrincipal)) {
             return true;
           }
 
           IPCBlob ipcBlob;
-          rv = IPCBlobUtils::Serialize(aBlobImpl, this, ipcBlob);
+          nsresult rv = IPCBlobUtils::Serialize(aBlobImpl, this, ipcBlob);
           if (NS_WARN_IF(NS_FAILED(rv))) {
             return false;
           }
@@ -3418,6 +3427,9 @@ mozilla::ipc::IPCResult ContentParent::RecvFirstIdle() {
   // which we use as a good time to signal the PreallocatedProcessManager
   // that it can start allocating processes from now on.
   if (mIsAPreallocBlocker) {
+    MOZ_LOG(
+        ContentParent::GetLog(), LogLevel::Verbose,
+        ("RecvFirstIdle %p: Removing Blocker for %s", this, mRemoteType.get()));
     PreallocatedProcessManager::RemoveBlocker(mRemoteType, this);
     mIsAPreallocBlocker = false;
   }
@@ -3838,20 +3850,8 @@ mozilla::ipc::IPCResult ContentParent::RecvCloneDocumentTreeInto(
     return IPC_OK();
   }
 
-  RemotenessChangeOptions options;
-  options.mRemoteType = cp->GetRemoteType();
-  target->ChangeRemoteness(options, /* aPendingSwitchId = */ 0)
-      ->Then(
-          GetMainThreadSerialEventTarget(), __func__,
-          [source = RefPtr{source},
-           data = std::move(aPrintData)](BrowserParent* aBp) {
-            Unused << aBp->SendCloneDocumentTreeIntoSelf(source, data);
-          },
-          [](nsresult aRv) {
-            NS_WARNING(
-                nsPrintfCString("Remote clone failed: %x\n", unsigned(aRv))
-                    .get());
-          });
+  target->CloneDocumentTreeInto(source, cp->GetRemoteType(),
+                                std::move(aPrintData));
   return IPC_OK();
 }
 
@@ -4083,9 +4083,9 @@ void ContentParent::KillHard(const char* aReason) {
   if (mSubprocess) {
     MOZ_LOG(
         ContentParent::GetLog(), LogLevel::Verbose,
-        ("KillHard Subprocess: ContentParent %p mSubprocess %p handle "
+        ("KillHard Subprocess(%s): ContentParent %p mSubprocess %p handle "
          "%" PRIuPTR,
-         this, mSubprocess,
+         aReason, this, mSubprocess,
          mSubprocess ? (uintptr_t)mSubprocess->GetChildProcessHandle() : -1));
     mSubprocess->SetAlreadyDead();
   }
@@ -4392,11 +4392,11 @@ mozilla::ipc::IPCResult ContentParent::RecvStartVisitedQueries(
   if (!history) {
     return IPC_OK();
   }
-  for (const auto& params : aUris) {
-    if (NS_WARN_IF(!params)) {
+  for (const auto& uri : aUris) {
+    if (NS_WARN_IF(!uri)) {
       continue;
     }
-    history->RegisterVisitedCallback(params, nullptr);
+    history->ScheduleVisitedQuery(uri, this);
   }
   return IPC_OK();
 }
@@ -5523,11 +5523,7 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateWindowInDifferentProcess(
 
 mozilla::ipc::IPCResult ContentParent::RecvShutdownProfile(
     const nsCString& aProfile) {
-#ifdef MOZ_GECKO_PROFILER
-  nsCOMPtr<nsIProfiler> profiler(
-      do_GetService("@mozilla.org/tools/profiler;1"));
-  profiler->ReceiveShutdownProfile(aProfile);
-#endif
+  profiler_received_exit_profile(aProfile);
   return IPC_OK();
 }
 
@@ -5725,14 +5721,10 @@ ContentParent::RecvNotifyPushSubscriptionModifiedObservers(
 void ContentParent::BroadcastBlobURLRegistration(
     const nsACString& aURI, BlobImpl* aBlobImpl, nsIPrincipal* aPrincipal,
     const Maybe<nsID>& aAgentClusterId, ContentParent* aIgnoreThisCP) {
-  nsAutoCString origin;
-  nsresult rv = aPrincipal->GetOrigin(origin);
-  NS_ENSURE_SUCCESS_VOID(rv);
-
   uint64_t originHash = ComputeLoadedOriginHash(aPrincipal);
 
-  bool toBeSent = StringBeginsWith(origin, "moz-extension://"_ns) ||
-                  aPrincipal->IsSystemPrincipal();
+  bool toBeSent =
+      BlobURLProtocolHandler::IsBlobURLBroadcastPrincipal(aPrincipal);
 
   nsCString uri(aURI);
   IPC::Principal principal(aPrincipal);
@@ -5764,14 +5756,10 @@ void ContentParent::BroadcastBlobURLRegistration(
 void ContentParent::BroadcastBlobURLUnregistration(
     const nsACString& aURI, nsIPrincipal* aPrincipal,
     ContentParent* aIgnoreThisCP) {
-  nsAutoCString origin;
-  nsresult rv = aPrincipal->GetOrigin(origin);
-  NS_ENSURE_SUCCESS_VOID(rv);
-
   uint64_t originHash = ComputeLoadedOriginHash(aPrincipal);
 
-  bool toBeSent = StringBeginsWith(origin, "moz-extension://"_ns) ||
-                  aPrincipal->IsSystemPrincipal();
+  bool toBeSent =
+      BlobURLProtocolHandler::IsBlobURLBroadcastPrincipal(aPrincipal);
 
   nsCString uri(aURI);
 
@@ -6027,6 +6015,21 @@ nsresult ContentParent::TransmitPermissionsForPrincipal(
 }
 
 void ContentParent::TransmitBlobURLsForPrincipal(nsIPrincipal* aPrincipal) {
+  // If we're already broadcasting BlobURLs with this principal, we don't need
+  // to send them here.
+  if (BlobURLProtocolHandler::IsBlobURLBroadcastPrincipal(aPrincipal)) {
+    return;
+  }
+
+  // We shouldn't have any Blob URLs with expanded principals, so transmit URLs
+  // for each principal in the AllowList instead.
+  if (nsCOMPtr<nsIExpandedPrincipal> ep = do_QueryInterface(aPrincipal)) {
+    for (const auto& prin : ep->AllowList()) {
+      TransmitBlobURLsForPrincipal(prin);
+    }
+    return;
+  }
+
   uint64_t originHash = ComputeLoadedOriginHash(aPrincipal);
 
   if (!mLoadedOriginHashes.Contains(originHash)) {
@@ -6037,7 +6040,10 @@ void ContentParent::TransmitBlobURLsForPrincipal(nsIPrincipal* aPrincipal) {
         [&](BlobImpl* aBlobImpl, nsIPrincipal* aBlobPrincipal,
             const Maybe<nsID>& aAgentClusterId, const nsACString& aURI,
             bool aRevoked) {
-          if (!aPrincipal->Subsumes(aBlobPrincipal)) {
+          // This check uses `ComputeLoadedOriginHash` to compare, rather than
+          // doing the more accurate `Equals` check, as it needs to match the
+          // behaviour of the logic to broadcast new registrations.
+          if (originHash != ComputeLoadedOriginHash(aBlobPrincipal)) {
             return true;
           }
 
@@ -6051,7 +6057,7 @@ void ContentParent::TransmitBlobURLsForPrincipal(nsIPrincipal* aPrincipal) {
               BlobURLRegistrationData(nsCString(aURI), ipcBlob, aBlobPrincipal,
                                       aAgentClusterId, aRevoked));
 
-          rv = TransmitPermissionsForPrincipal(aPrincipal);
+          rv = TransmitPermissionsForPrincipal(aBlobPrincipal);
           Unused << NS_WARN_IF(NS_FAILED(rv));
           return true;
         });
@@ -6062,16 +6068,14 @@ void ContentParent::TransmitBlobURLsForPrincipal(nsIPrincipal* aPrincipal) {
   }
 }
 
-void ContentParent::TransmitBlobDataIfBlobURL(nsIURI* aURI,
-                                              nsIPrincipal* aPrincipal) {
+void ContentParent::TransmitBlobDataIfBlobURL(nsIURI* aURI) {
   MOZ_ASSERT(aURI);
-  MOZ_ASSERT(aPrincipal);
 
-  if (!IsBlobURI(aURI)) {
-    return;
+  nsCOMPtr<nsIPrincipal> principal;
+  if (BlobURLProtocolHandler::GetBlobURLPrincipal(aURI,
+                                                  getter_AddRefs(principal))) {
+    TransmitBlobURLsForPrincipal(principal);
   }
-
-  TransmitBlobURLsForPrincipal(aPrincipal);
 }
 
 void ContentParent::EnsurePermissionsByKey(const nsCString& aKey,
@@ -6550,6 +6554,20 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyPositionStateChanged(
   if (RefPtr<IMediaInfoUpdater> updater =
           aContext.get_canonical()->GetMediaController()) {
     updater->UpdatePositionState(aContext.ContextId(), aState);
+  }
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvAddOrRemovePageAwakeRequest(
+    const MaybeDiscarded<BrowsingContext>& aContext,
+    const bool& aShouldAddCount) {
+  if (aContext.IsNullOrDiscarded()) {
+    return IPC_OK();
+  }
+  if (aShouldAddCount) {
+    aContext.get_canonical()->AddPageAwakeRequest();
+  } else {
+    aContext.get_canonical()->RemovePageAwakeRequest();
   }
   return IPC_OK();
 }
@@ -7109,7 +7127,7 @@ void ContentParent::AddBrowsingContextGroup(BrowsingContextGroup* aGroup) {
 void ContentParent::RemoveBrowsingContextGroup(BrowsingContextGroup* aGroup) {
   MOZ_DIAGNOSTIC_ASSERT(aGroup);
   // Remove the group from our list. This is called from the
-  // BrowisngContextGroup when unsubscribing, so we don't need to do it here.
+  // BrowsingContextGroup when unsubscribing, so we don't need to do it here.
   if (mGroups.EnsureRemoved(aGroup) && CanSend()) {
     // If we're removing the entry for the first time, tell the content process
     // to clean up the group.
@@ -7556,7 +7574,10 @@ void ContentParent::DidLaunchSubprocess() {
   }
 
   if (count > sMaxContentProcesses) {
+    sMaxContentProcesses = count;
+
     Telemetry::Accumulate(Telemetry::CONTENT_PROCESS_MAX, count);
+    Telemetry::Accumulate(Telemetry::CONTENT_PROCESS_PRECISE_MAX, count);
   }
 
   if (sLastContentProcessLaunch) {

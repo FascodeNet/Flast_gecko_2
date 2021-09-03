@@ -55,6 +55,7 @@
 #include <stdio.h>
 #include <wayland-egl.h>
 
+#include "mozilla/gfx/gfxVars.h"
 #include "nsGtkUtils.h"
 #include "nsWaylandDisplay.h"
 
@@ -180,7 +181,7 @@ void moz_container_wayland_init(MozContainerWayland* container) {
   container->opaque_region_subtract_corners = false;
   container->opaque_region_used = false;
   container->surface_needs_clear = true;
-  container->container_remapped = true;
+  container->container_remapped = false;
   container->subsurface_dx = 0;
   container->subsurface_dy = 0;
   container->before_first_size_alloc = true;
@@ -441,6 +442,11 @@ static void moz_container_wayland_set_opaque_region(MozContainer* container) {
 
 static void moz_container_wayland_set_scale_factor_locked(
     MozContainer* container) {
+  if (gfx::gfxVars::UseWebRenderCompositor()) {
+    // the compositor backend handles scaling itself
+    return;
+  }
+
   MozContainerWayland* wl_container = &container->wl_container;
   nsWindow* window = moz_container_get_nsWindow(container);
 
@@ -540,15 +546,13 @@ static bool moz_container_wayland_surface_create_locked(
 }
 
 struct wl_surface* moz_container_wayland_surface_lock(MozContainer* container) {
-  // Temporary disabled to avoid log noise
-  //  LOGWAYLAND(("%s [%p] surface %p ready_to_draw %d\n", __FUNCTION__,
-  //              (void*)container, (void*)container->wl_container.surface,
-  //              container->wl_container.ready_to_draw));
+  // LOGWAYLAND(("%s [%p] surface %p ready_to_draw %d\n", __FUNCTION__,
+  //           (void*)container, (void*)container->wl_container.surface,
+  //           container->wl_container.ready_to_draw));
   if (!container->wl_container.surface ||
       !container->wl_container.ready_to_draw) {
     return nullptr;
   }
-
   container->wl_container.container_lock->Lock();
 
   moz_container_wayland_set_scale_factor_locked(container);
@@ -558,12 +562,33 @@ struct wl_surface* moz_container_wayland_surface_lock(MozContainer* container) {
 void moz_container_wayland_surface_unlock(MozContainer* container,
                                           struct wl_surface** surface) {
   // Temporary disabled to avoid log noise
-  //  LOGWAYLAND(("%s [%p] surface %p\n", __FUNCTION__, (void*)container,
-  //              (void*)container->wl_container.surface));
+  // LOGWAYLAND(("%s [%p] surface %p\n", __FUNCTION__, (void*)container,
+  //            (void*)container->wl_container.surface));
   if (*surface) {
     container->wl_container.container_lock->Unlock();
     *surface = nullptr;
   }
+}
+
+struct wl_surface* moz_container_wayland_get_surface_locked(
+    MozContainer* container) {
+  LOGWAYLAND(("%s [%p] surface %p ready_to_draw %d\n", __FUNCTION__,
+              (void*)container, (void*)container->wl_container.surface,
+              container->wl_container.ready_to_draw));
+  if (!container->wl_container.surface ||
+      !container->wl_container.ready_to_draw) {
+    return nullptr;
+  }
+  moz_container_wayland_set_scale_factor_locked(container);
+  return container->wl_container.surface;
+}
+
+void moz_container_wayland_lock(MozContainer* container) {
+  container->wl_container.container_lock->Lock();
+}
+
+void moz_container_wayland_unlock(MozContainer* container) {
+  container->wl_container.container_lock->Unlock();
 }
 
 struct wl_egl_window* moz_container_wayland_get_egl_window(
@@ -605,6 +630,11 @@ gboolean moz_container_wayland_get_and_reset_remapped(MozContainer* container) {
   return ret;
 }
 
+gboolean moz_container_wayland_is_inactive(MozContainer* container) {
+  MozContainerWayland* wl_container = &container->wl_container;
+  return !wl_container->ready_to_draw && !wl_container->frame_callback_handler;
+}
+
 void moz_container_wayland_update_opaque_region(MozContainer* container,
                                                 bool aSubtractCorners) {
   MozContainerWayland* wl_container = &container->wl_container;
@@ -624,9 +654,6 @@ gboolean moz_container_wayland_can_draw(MozContainer* container) {
 }
 
 double moz_container_wayland_get_scale(MozContainer* container) {
-  MozContainerWayland* wl_container = &container->wl_container;
-  MutexAutoLock lock(*wl_container->container_lock);
-
   nsWindow* window = moz_container_get_nsWindow(container);
   return window ? window->FractionalScaleFactor() : 1;
 }

@@ -14,6 +14,7 @@
 #include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/dom/EventTarget.h"
+#include "mozilla/dom/PBrowserParent.h"
 #include "mozilla/dom/PBackgroundSessionStorageCache.h"
 #include "mozilla/dom/PWindowGlobalParent.h"
 #include "mozilla/dom/WindowGlobalParent.h"
@@ -46,6 +47,7 @@
 #include "SessionStoreFunctions.h"
 #include "nsIXPConnect.h"
 #include "nsImportModule.h"
+#include "UnitTransforms.h"
 
 #ifdef NS_PRINTING
 #  include "mozilla/embedding/printingui/PrintingParent.h"
@@ -1422,6 +1424,11 @@ nsresult CanonicalBrowsingContext::PendingRemotenessChange::FinishTopContent() {
                         "We shouldn't be trying to change the remoteness of "
                         "non-remote iframes");
 
+  // Abort if our ContentParent died while process switching.
+  if (mContentParent && NS_WARN_IF(mContentParent->IsDead())) {
+    return NS_ERROR_FAILURE;
+  }
+
   // While process switching, we need to check if any of our ancestors are
   // discarded or no longer current, in which case the process switch needs to
   // be aborted.
@@ -1542,6 +1549,13 @@ nsresult CanonicalBrowsingContext::PendingRemotenessChange::FinishSubframe() {
 
   RefPtr<BrowserParent> embedderBrowser = embedderWindow->GetBrowserParent();
   if (NS_WARN_IF(!embedderBrowser)) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // If we're creating a new remote browser, and the host process is already
+  // dead, abort the process switch.
+  if (mContentParent != embedderBrowser->Manager() &&
+      NS_WARN_IF(mContentParent->IsDead())) {
     return NS_ERROR_FAILURE;
   }
 
@@ -2196,8 +2210,8 @@ void CanonicalBrowsingContext::RestoreState::Resolve() {
 
 nsresult CanonicalBrowsingContext::WriteSessionStorageToSessionStore(
     const nsTArray<SSCacheCopy>& aSesssionStorage, uint32_t aEpoch) {
-  nsCOMPtr<nsISessionStoreFunctions> funcs =
-      do_ImportModule("resource://gre/modules/SessionStoreFunctions.jsm");
+  nsCOMPtr<nsISessionStoreFunctions> funcs = do_ImportModule(
+      "resource://gre/modules/SessionStoreFunctions.jsm", fallible);
   if (!funcs) {
     return NS_ERROR_FAILURE;
   }
@@ -2229,6 +2243,11 @@ nsresult CanonicalBrowsingContext::WriteSessionStorageToSessionStore(
 
 void CanonicalBrowsingContext::UpdateSessionStoreSessionStorage(
     const std::function<void()>& aDone) {
+  if constexpr (!SessionStoreUtils::NATIVE_LISTENER) {
+    aDone();
+    return;
+  }
+
   using DataPromise = BackgroundSessionStorageManager::DataPromise;
   BackgroundSessionStorageManager::GetData(
       this, StaticPrefs::browser_sessionstore_dom_storage_limit(),
@@ -2257,6 +2276,10 @@ void CanonicalBrowsingContext::UpdateSessionStoreForStorage(
 }
 
 void CanonicalBrowsingContext::MaybeScheduleSessionStoreUpdate() {
+  if constexpr (!SessionStoreUtils::NATIVE_LISTENER) {
+    return;
+  }
+
   if (!IsTop()) {
     Top()->MaybeScheduleSessionStoreUpdate();
     return;
@@ -2509,6 +2532,139 @@ bool CanonicalBrowsingContext::AllowedInBFCache(
 void CanonicalBrowsingContext::SetTouchEventsOverride(
     dom::TouchEventsOverride aOverride, ErrorResult& aRv) {
   SetTouchEventsOverrideInternal(aOverride, aRv);
+}
+
+void CanonicalBrowsingContext::AddPageAwakeRequest() {
+  MOZ_ASSERT(IsTop());
+  auto count = GetPageAwakeRequestCount();
+  MOZ_ASSERT(count < UINT32_MAX);
+  Unused << SetPageAwakeRequestCount(++count);
+}
+
+void CanonicalBrowsingContext::RemovePageAwakeRequest() {
+  MOZ_ASSERT(IsTop());
+  auto count = GetPageAwakeRequestCount();
+  MOZ_ASSERT(count > 0);
+  Unused << SetPageAwakeRequestCount(--count);
+}
+
+void CanonicalBrowsingContext::CloneDocumentTreeInto(
+    CanonicalBrowsingContext* aSource, const nsACString& aRemoteType,
+    embedding::PrintData&& aPrintData) {
+  RemotenessChangeOptions options;
+  options.mRemoteType = aRemoteType;
+
+  mClonePromise =
+      ChangeRemoteness(options, /* aPendingSwitchId = */ 0)
+          ->Then(
+              GetMainThreadSerialEventTarget(), __func__,
+              [source = MaybeDiscardedBrowsingContext{aSource},
+               data = std::move(aPrintData)](
+                  BrowserParent* aBp) -> RefPtr<GenericNonExclusivePromise> {
+                return aBp->SendCloneDocumentTreeIntoSelf(source, data)
+                    ->Then(
+                        GetMainThreadSerialEventTarget(), __func__,
+                        [](BrowserParent::CloneDocumentTreeIntoSelfPromise::
+                               ResolveOrRejectValue&& aValue) {
+                          if (aValue.IsResolve() && aValue.ResolveValue()) {
+                            return GenericNonExclusivePromise::CreateAndResolve(
+                                true, __func__);
+                          }
+                          return GenericNonExclusivePromise::CreateAndReject(
+                              NS_ERROR_FAILURE, __func__);
+                        });
+              },
+              [](nsresult aRv) -> RefPtr<GenericNonExclusivePromise> {
+                NS_WARNING(
+                    nsPrintfCString("Remote clone failed: %x\n", unsigned(aRv))
+                        .get());
+                return GenericNonExclusivePromise::CreateAndReject(
+                    NS_ERROR_FAILURE, __func__);
+              });
+
+  mClonePromise->Then(
+      GetMainThreadSerialEventTarget(), __func__,
+      [self = RefPtr{this}]() { self->mClonePromise = nullptr; });
+}
+
+bool CanonicalBrowsingContext::StartApzAutoscroll(float aAnchorX,
+                                                  float aAnchorY,
+                                                  nsViewID aScrollId,
+                                                  uint32_t aPresShellId) {
+  nsCOMPtr<nsIWidget> widget;
+  mozilla::layers::LayersId layersId{0};
+
+  if (IsInProcess()) {
+    nsCOMPtr<nsPIDOMWindowOuter> outer = GetDOMWindow();
+    if (!outer) {
+      return false;
+    }
+
+    widget = widget::WidgetUtils::DOMWindowToWidget(outer);
+    if (widget) {
+      layersId = widget->GetRootLayerTreeId();
+    }
+  } else {
+    RefPtr<BrowserParent> parent = GetBrowserParent();
+    if (!parent) {
+      return false;
+    }
+
+    widget = parent->GetWidget();
+    layersId = parent->GetLayersId();
+  }
+
+  if (!widget || !widget->AsyncPanZoomEnabled()) {
+    return false;
+  }
+
+  // The anchor coordinates that are passed in are relative to the origin
+  // of the screen, but we are sending them to APZ which only knows about
+  // coordinates relative to the widget, so convert them accordingly.
+  CSSPoint anchorCss{aAnchorX, aAnchorY};
+  LayoutDeviceIntPoint anchor =
+      RoundedToInt(anchorCss * widget->GetDefaultScale());
+  anchor -= widget->WidgetToScreenOffset();
+
+  mozilla::layers::ScrollableLayerGuid guid(layersId, aPresShellId, aScrollId);
+
+  return widget->StartAsyncAutoscroll(
+      ViewAs<ScreenPixel>(
+          anchor, PixelCastJustification::LayoutDeviceIsScreenForBounds),
+      guid);
+}
+
+void CanonicalBrowsingContext::StopApzAutoscroll(nsViewID aScrollId,
+                                                 uint32_t aPresShellId) {
+  nsCOMPtr<nsIWidget> widget;
+  mozilla::layers::LayersId layersId{0};
+
+  if (IsInProcess()) {
+    nsCOMPtr<nsPIDOMWindowOuter> outer = GetDOMWindow();
+    if (!outer) {
+      return;
+    }
+
+    widget = widget::WidgetUtils::DOMWindowToWidget(outer);
+    if (widget) {
+      layersId = widget->GetRootLayerTreeId();
+    }
+  } else {
+    RefPtr<BrowserParent> parent = GetBrowserParent();
+    if (!parent) {
+      return;
+    }
+
+    widget = parent->GetWidget();
+    layersId = parent->GetLayersId();
+  }
+
+  if (!widget || !widget->AsyncPanZoomEnabled()) {
+    return;
+  }
+
+  mozilla::layers::ScrollableLayerGuid guid(layersId, aPresShellId, aScrollId);
+  widget->StopAsyncAutoscroll(guid);
 }
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(CanonicalBrowsingContext)

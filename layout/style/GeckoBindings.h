@@ -28,9 +28,7 @@ struct nsFont;
 class ServoComputedData;
 
 namespace mozilla {
-#ifdef MOZ_GECKO_PROFILER
 class AutoProfilerLabel;
-#endif
 class ComputedStyle;
 class SeenPtrs;
 class ServoElementSnapshot;
@@ -509,7 +507,8 @@ bool Gecko_IsDocumentBody(const mozilla::dom::Element* element);
 // because forward-declaring a nested enum/struct is impossible
 nscolor Gecko_GetLookAndFeelSystemColor(int32_t color_id,
                                         const mozilla::dom::Document*,
-                                        mozilla::StyleSystemColorScheme);
+                                        mozilla::StyleSystemColorScheme,
+                                        const mozilla::StyleColorScheme*);
 
 int32_t Gecko_GetLookAndFeelInt(int32_t int_id);
 
@@ -525,11 +524,9 @@ void Gecko_AddPropertyToSet(nsCSSPropertyIDSet*, nsCSSPropertyID);
 #include "nsStyleStructList.h"
 #undef STYLE_STRUCT
 
-#ifdef MOZ_GECKO_PROFILER
 void Gecko_Construct_AutoProfilerLabel(mozilla::AutoProfilerLabel*,
                                        JS::ProfilingCategoryPair);
 void Gecko_Destroy_AutoProfilerLabel(mozilla::AutoProfilerLabel*);
-#endif
 
 bool Gecko_DocumentRule_UseForPresentation(
     const mozilla::dom::Document*, const nsACString* aPattern,

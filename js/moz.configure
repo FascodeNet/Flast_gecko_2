@@ -133,11 +133,6 @@ def static_js(value):
 set_define("MOZ_STATIC_JS", static_js)
 
 
-option(env="NO_RUST_PANIC_HOOK", when=js_standalone, help="Disable rust panic hook")
-
-set_define("NO_RUST_PANIC_HOOK", True, when="NO_RUST_PANIC_HOOK")
-
-
 # JIT support
 # =======================================================
 @depends(target)
@@ -872,6 +867,52 @@ def wasm_relaxed_simd(value, wasm_simd):
 set_config("ENABLE_WASM_RELAXED_SIMD", wasm_relaxed_simd)
 set_define("ENABLE_WASM_RELAXED_SIMD", wasm_relaxed_simd)
 
+# Support for WebAssembly intgemm private intrinsics
+# =====================================================
+
+
+@depends(milestone.is_nightly)
+def default_wasm_moz_intgemm(is_nightly):
+    if is_nightly:
+        return True
+
+
+option(
+    "--enable-wasm-moz-intgemm",
+    default=default_wasm_moz_intgemm,
+    help="{Enable|Disable} WebAssembly intgemm private intrinsics",
+)
+
+
+@depends("--enable-wasm-moz-intgemm")
+def wasm_moz_intgemm(value):
+    if not value:
+        return
+
+    return True
+
+
+set_config("ENABLE_WASM_MOZ_INTGEMM", wasm_moz_intgemm)
+set_define("ENABLE_WASM_MOZ_INTGEMM", wasm_moz_intgemm)
+
+# Support for WebAssembly Memory64.
+# ===========================
+
+option(
+    "--enable-wasm-memory64",
+    default=False,
+    help="{Enable|Disable} WebAssembly Memory64",
+)
+
+
+@depends("--enable-wasm-memory64")
+def wasm_memory64(value):
+    if value:
+        return True
+
+
+set_config("ENABLE_WASM_MEMORY64", wasm_memory64)
+set_define("ENABLE_WASM_MEMORY64", wasm_memory64)
 
 # Options for generating the shell as a script
 # ============================================
@@ -957,7 +998,7 @@ set_define(
 
 # ECMAScript Internationalization API Support (uses ICU)
 # ======================================================
-option("--with-system-icu", help="Use system ICU")
+system_lib_option("--with-system-icu", help="Use system ICU")
 
 system_icu = pkg_check_modules("MOZ_ICU", "icu-i18n >= 69.1", when="--with-system-icu")
 

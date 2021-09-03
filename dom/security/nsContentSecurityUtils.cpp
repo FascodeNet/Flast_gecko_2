@@ -28,6 +28,7 @@
 #include "FramingChecker.h"
 #include "js/Array.h"  // JS::GetArrayLength
 #include "js/ContextOptions.h"
+#include "js/PropertyAndElement.h"  // JS_GetElement
 #include "js/RegExp.h"
 #include "js/RegExpFlags.h"  // JS::RegExpFlags
 #include "mozilla/ExtensionPolicyService.h"
@@ -1086,6 +1087,15 @@ bool nsContentSecurityUtils::ValidateScriptFilename(const char* aFilename,
   if (filenameU.Equals(u"about:sync-log"_ns)) {
     // about:sync-log runs in the parent process and displays a directory
     // listing. The listing has inline javascript that executes on load.
+    return true;
+  }
+
+  bool bergamont_disabled =
+      Preferences::GetBool("extensions.translations.disabled", true);
+  if (!bergamont_disabled &&
+      StringBeginsWith(filenameU, u"moz-extension://"_ns)) {
+    // Allow all moz-extensions through if bergamont is enabled; because there
+    // seem to be multiple bergamont extensions with different names.
     return true;
   }
 

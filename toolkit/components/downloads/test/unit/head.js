@@ -371,7 +371,8 @@ function promiseStartLegacyDownload(aSourceUrl, aOptions) {
           null,
           persist,
           isPrivate,
-          Ci.nsITransfer.DOWNLOAD_ACCEPTABLE
+          Ci.nsITransfer.DOWNLOAD_ACCEPTABLE,
+          null
         );
         persist.progressListener = transfer;
 
@@ -835,6 +836,17 @@ add_task(function test_common_initialize() {
   registerCleanupFunction(function() {
     Services.prefs.clearUserPref("browser.cache.disk.enable");
     Services.prefs.clearUserPref("browser.cache.memory.enable");
+  });
+
+  // Allow relaxing default referrer.
+  Services.prefs.setBoolPref(
+    "network.http.referer.disallowCrossSiteRelaxingDefault",
+    false
+  );
+  registerCleanupFunction(function() {
+    Services.prefs.clearUserPref(
+      "network.http.referer.disallowCrossSiteRelaxingDefault"
+    );
   });
 
   registerInterruptibleHandler(

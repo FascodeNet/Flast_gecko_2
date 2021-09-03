@@ -14,7 +14,12 @@
 
 class nsICookieJarSettings;
 class nsWindow;
-class nsWaylandDragContext;
+
+#ifdef MOZ_WAYLAND
+class DataOffer;
+#else
+typedef nsISupports DataOffer;
+#endif
 
 namespace mozilla {
 namespace gfx {
@@ -70,12 +75,12 @@ class nsDragService final : public nsBaseDragService, public nsIObserver {
                           guint aInfo, guint32 aTime);
 
   gboolean ScheduleMotionEvent(nsWindow* aWindow, GdkDragContext* aDragContext,
-                               nsWaylandDragContext* aPendingWaylandDragContext,
+                               RefPtr<DataOffer> aPendingWaylandDataOffer,
                                mozilla::LayoutDeviceIntPoint aWindowPoint,
                                guint aTime);
   void ScheduleLeaveEvent();
   gboolean ScheduleDropEvent(nsWindow* aWindow, GdkDragContext* aDragContext,
-                             nsWaylandDragContext* aPendingWaylandDragContext,
+                             RefPtr<DataOffer> aPendingWaylandDataOffer,
                              mozilla::LayoutDeviceIntPoint aWindowPoint,
                              guint aTime);
 
@@ -133,7 +138,7 @@ class nsDragService final : public nsBaseDragService, public nsIObserver {
   nsTHashMap<nsCStringHashKey, nsTArray<uint8_t>> mCachedData;
 
 #ifdef MOZ_WAYLAND
-  RefPtr<nsWaylandDragContext> mPendingWaylandDragContext;
+  RefPtr<DataOffer> mPendingWaylandDataOffer;
 #endif
   guint mPendingTime;
 
@@ -147,13 +152,13 @@ class nsDragService final : public nsBaseDragService, public nsIObserver {
   RefPtr<GtkWidget> mTargetWidget;
   RefPtr<GdkDragContext> mTargetDragContext;
 #ifdef MOZ_WAYLAND
-  RefPtr<nsWaylandDragContext> mTargetWaylandDragContext;
+  RefPtr<DataOffer> mTargetWaylandDataOffer;
 #endif
   // mTargetDragContextForRemote is set while waiting for a reply from
   // a child process.
   RefPtr<GdkDragContext> mTargetDragContextForRemote;
 #ifdef MOZ_WAYLAND
-  RefPtr<nsWaylandDragContext> mTargetWaylandDragContextForRemote;
+  RefPtr<DataOffer> mTargetWaylandDataOfferForRemote;
 #endif
   guint mTargetTime;
 
@@ -191,7 +196,7 @@ class nsDragService final : public nsBaseDragService, public nsIObserver {
 
   gboolean Schedule(DragTask aTask, nsWindow* aWindow,
                     GdkDragContext* aDragContext,
-                    nsWaylandDragContext* aPendingWaylandDragContext,
+                    RefPtr<DataOffer> aPendingWaylandDataOffer,
                     mozilla::LayoutDeviceIntPoint aWindowPoint, guint aTime);
 
   // Callback for g_idle_add_full() to run mScheduledTask.
@@ -201,7 +206,7 @@ class nsDragService final : public nsBaseDragService, public nsIObserver {
   MOZ_CAN_RUN_SCRIPT void DispatchMotionEvents();
   void ReplyToDragMotion(GdkDragContext* aDragContext);
 #ifdef MOZ_WAYLAND
-  void ReplyToDragMotion(nsWaylandDragContext* aDragContext);
+  void ReplyToDragMotion(RefPtr<DataOffer> aDragContext);
 #endif
   gboolean DispatchDropEvent();
   static uint32_t GetCurrentModifiers();

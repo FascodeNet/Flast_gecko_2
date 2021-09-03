@@ -87,16 +87,27 @@ using mozilla::IsNaN;
 using mozilla::IsNegativeZero;
 using mozilla::IsPositiveZero;
 using mozilla::IsPowerOfTwo;
+using mozilla::Nothing;
 using mozilla::PodZero;
 using mozilla::PositiveInfinity;
+using mozilla::Some;
 using mozilla::Utf8Unit;
 using mozilla::Compression::LZ4;
 
 /*****************************************************************************/
 
+// A wasm module can either use no memory, a unshared memory (ArrayBuffer) or
+// shared memory (SharedArrayBuffer).
+
+enum class MemoryUsage { None = false, Unshared = 1, Shared = 2 };
+
 // The asm.js valid heap lengths are precisely the WASM valid heap lengths for
 // ARM greater or equal to MinHeapLength
 static const size_t MinHeapLength = PageSize;
+// An asm.js heap can in principle be up to INT32_MAX bytes but requirements
+// on the format restrict it further to the largest pseudo-ARM-immediate.
+// See IsValidAsmJSHeapLength().
+static const uint64_t MaxHeapLength = 0x7f000000;
 
 static uint64_t RoundUpToNextValidAsmJSHeapLength(uint64_t length) {
   if (length <= MinHeapLength) {
@@ -2065,7 +2076,8 @@ class MOZ_STACK_CLASS ModuleValidator : public ModuleValidatorShared {
                                                            : Shareable::False;
       limits.initial = memory_.minPages();
       limits.maximum = Nothing();
-      moduleEnv_.memory = Some(MemoryDesc(MemoryKind::Memory32, limits));
+      limits.indexType = IndexType::I32;
+      moduleEnv_.memory = Some(MemoryDesc(limits));
     }
     MOZ_ASSERT(moduleEnv_.funcs.empty());
     if (!moduleEnv_.funcs.resize(funcImportMap_.count() + funcDefs_.length())) {
@@ -6766,11 +6778,11 @@ static bool CheckBuffer(JSContext* cx, const AsmJSMetadata& metadata,
 
   if (!IsValidAsmJSHeapLength(memoryLength)) {
     UniqueChars msg;
-    if (memoryLength > MaxAsmJSHeapLength) {
+    if (memoryLength > MaxHeapLength) {
       msg = JS_smprintf("ArrayBuffer byteLength 0x%" PRIx64
                         " is not a valid heap length - it is too long."
                         " The longest valid length is 0x%" PRIx64,
-                        uint64_t(memoryLength), MaxAsmJSHeapLength);
+                        uint64_t(memoryLength), MaxHeapLength);
     } else {
       msg = JS_smprintf("ArrayBuffer byteLength 0x%" PRIx64
                         " is not a valid heap length. The next "
@@ -7319,7 +7331,7 @@ bool js::IsValidAsmJSHeapLength(size_t length) {
   }
 
   // The heap length is limited by what wasm can handle.
-  if (length > MaxMemory32Bytes()) {
+  if (length > MaxMemoryBytes()) {
     return false;
   }
 

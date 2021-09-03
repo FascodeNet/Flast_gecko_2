@@ -141,7 +141,7 @@ AudioStream::AudioStream(DataSource& aSource)
       mState(INITIALIZED),
       mDataSource(aSource),
       mPrefillQuirk(false),
-      mAudioThreadId(0),
+      mAudioThreadId(ProfilerThreadId{}),
       mSandboxed(CubebUtils::SandboxEnabled()) {}
 
 AudioStream::~AudioStream() {
@@ -583,13 +583,11 @@ void AudioStream::GetTimeStretched(AudioBufferWriter& aWriter) {
 }
 
 bool AudioStream::CheckThreadIdChanged() {
-#ifdef MOZ_GECKO_PROFILER
-  auto id = profiler_current_thread_id();
+  ProfilerThreadId id = profiler_current_thread_id();
   if (id != mAudioThreadId) {
     mAudioThreadId = id;
     return true;
   }
-#endif
   return false;
 }
 

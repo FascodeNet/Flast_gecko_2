@@ -106,6 +106,10 @@ class InternalJobQueue : public JS::JobQueue {
   // This is only used by shell testing functions.
   JSObject* maybeFront() const;
 
+#ifdef DEBUG
+  JSObject* copyJobs(JSContext* cx);
+#endif
+
  private:
   using Queue = js::TraceableFifo<JSObject*, 0, SystemAllocPolicy>;
 
@@ -696,7 +700,8 @@ struct JS_PUBLIC_API JSContext : public JS::RootingContext,
 
  public:
   bool hadNondeterministicException() const {
-    return hadOverRecursed_ || runtime()->hadOutOfMemory;
+    return hadOverRecursed_ || runtime()->hadOutOfMemory ||
+           js::oom::simulator.isThreadSimulatingAny();
   }
 #endif
 

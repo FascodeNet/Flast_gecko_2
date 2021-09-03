@@ -104,7 +104,7 @@ mozilla-unified).
 Would you like to run a few configuration steps to ensure Git is
 optimally configured?"""
 
-DEBIAN_DISTROS = ("debian", "ubuntu", "linuxmint", "elementary", "neon", "pop")
+DEBIAN_DISTROS = ("debian", "ubuntu", "linuxmint", "elementary", "neon", "pop", "kali")
 
 ADD_GIT_CINNABAR_PATH = """
 To add git-cinnabar to the PATH, edit your shell initialization script, which
@@ -227,6 +227,13 @@ class Bootstrapper(object):
         self.instance = cls(**args)
 
     def create_state_dir(self):
+        # Global build system and mach state is stored in a central directory. By
+        # default, this is ~/.mozbuild. However, it can be defined via an
+        # environment variable. We detect first run (by lack of this directory
+        # existing) and notify the user that it will be created. The logic for
+        # creation is much simpler for the "advanced" environment variable use
+        # case. For default behavior, we educate users and give them an opportunity
+        # to react.
         state_dir = get_state_dir()
 
         if not os.path.exists(state_dir):
@@ -249,7 +256,9 @@ class Bootstrapper(object):
 
         return state_dir
 
-    def maybe_install_private_packages_or_exit(self, state_dir, checkout_root):
+    def maybe_install_private_packages_or_exit(
+        self, state_dir, checkout_root, application
+    ):
         # Install the clang packages needed for building the style system, as
         # well as the version of NodeJS that we currently support.
         # Also install the clang static-analysis package by default
@@ -263,9 +272,10 @@ class Bootstrapper(object):
             self.instance.ensure_clang_static_analysis_package(state_dir, checkout_root)
             self.instance.ensure_nasm_packages(state_dir, checkout_root)
             self.instance.ensure_sccache_packages(state_dir, checkout_root)
-            self.instance.ensure_lucetc_packages(state_dir, checkout_root)
-            self.instance.ensure_wasi_sysroot_packages(state_dir, checkout_root)
-            self.instance.ensure_dump_syms_packages(state_dir, checkout_root)
+        # Like 'ensure_browser_packages' or 'ensure_mobile_android_packages'
+        getattr(self.instance, "ensure_%s_packages" % application)(
+            state_dir, checkout_root
+        )
 
     def check_code_submission(self, checkout_root):
         if self.instance.no_interactive or which("moz-phab"):
@@ -327,10 +337,6 @@ class Bootstrapper(object):
 
         self.instance.warn_if_pythonpath_is_set()
 
-        # This doesn't affect any system state and we'd like to bail out as soon
-        # as possible if this check fails.
-        self.instance.ensure_python_modern()
-
         state_dir = self.create_state_dir()
         self.instance.state_dir = state_dir
 
@@ -344,7 +350,9 @@ class Bootstrapper(object):
 
         if self.instance.no_system_changes:
             self.instance.ensure_mach_environment(checkout_root)
-            self.maybe_install_private_packages_or_exit(state_dir, checkout_root)
+            self.maybe_install_private_packages_or_exit(
+                state_dir, checkout_root, application
+            )
             self._output_mozconfig(application, mozconfig_builder)
             sys.exit(0)
 
@@ -386,7 +394,9 @@ class Bootstrapper(object):
                     which("git"), which("git-cinnabar"), state_dir, checkout_root
                 )
 
-        self.maybe_install_private_packages_or_exit(state_dir, checkout_root)
+        self.maybe_install_private_packages_or_exit(
+            state_dir, checkout_root, application
+        )
         self.check_code_submission(checkout_root)
         # Wait until after moz-phab setup to check telemetry so that employees
         # will be automatically opted-in.

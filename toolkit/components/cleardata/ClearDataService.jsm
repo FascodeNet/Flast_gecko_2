@@ -1303,6 +1303,31 @@ const AboutHomeStartupCacheCleaner = {
   },
 };
 
+const PreflightCacheCleaner = {
+  // TODO: Bug 1727141: We should call the cache to clear by principal, rather
+  // than over-clearing for user requests or bailing out for programmatic calls.
+  async deleteByPrincipal(aPrincipal, aIsUserRequest) {
+    if (!aIsUserRequest) {
+      return;
+    }
+    await this.deleteAll();
+  },
+
+  // TODO: Bug 1727141 (see deleteByPrincipal).
+  async deleteByBaseDomain(aBaseDomain, aIsUserRequest) {
+    if (!aIsUserRequest) {
+      return;
+    }
+    await this.deleteAll();
+  },
+
+  async deleteAll() {
+    Cc[`@mozilla.org/network/protocol;1?name=http`]
+      .getService(Ci.nsIHttpProtocolHandler)
+      .clearCORSPreflightCache();
+  },
+};
+
 // Here the map of Flags-Cleaners.
 const FLAGS_MAP = [
   {
@@ -1401,6 +1426,11 @@ const FLAGS_MAP = [
   {
     flag: Ci.nsIClearDataService.CLEAR_CONTENT_BLOCKING_RECORDS,
     cleaners: [ContentBlockingCleaner],
+  },
+
+  {
+    flag: Ci.nsIClearDataService.CLEAR_PREFLIGHT_CACHE,
+    cleaners: [PreflightCacheCleaner],
   },
 ];
 

@@ -99,12 +99,6 @@ gfxPlatformGtk::gfxPlatformGtk() {
   mMaxGenericSubstitutions = UNINITIALIZED_VALUE;
   mIsX11Display = gfxPlatform::IsHeadless() ? false : GdkIsX11Display();
   if (XRE_IsParentProcess()) {
-#ifdef MOZ_X11
-    if (mIsX11Display && mozilla::Preferences::GetBool("gfx.xrender.enabled")) {
-      gfxVars::SetUseXRender(true);
-    }
-#endif
-
     InitX11EGLConfig();
     if (IsWaylandDisplay() || gfxConfig::IsEnabled(Feature::X11_EGL)) {
       gfxVars::SetUseEGL(true);
@@ -228,6 +222,16 @@ void gfxPlatformGtk::InitWebRenderConfig() {
     return;
   }
 
+#ifdef MOZ_X11
+  // We only support XRender if the user has disabled both WebRender and
+  // Software WebRender.
+  if (mIsX11Display && mozilla::Preferences::GetBool("gfx.xrender.enabled") &&
+      !(gfxConfig::IsEnabled(Feature::WEBRENDER) ||
+        gfxConfig::IsEnabled(Feature::WEBRENDER_SOFTWARE))) {
+    gfxVars::SetUseXRender(true);
+  }
+#endif
+
   FeatureState& feature = gfxConfig::GetFeature(Feature::WEBRENDER_COMPOSITOR);
   if (feature.IsEnabled()) {
     if (!(gfxConfig::IsEnabled(Feature::WEBRENDER) ||
@@ -240,7 +244,15 @@ void gfxPlatformGtk::InitWebRenderConfig() {
                            "FEATURE_FAILURE_NO_WAYLAND"_ns);
     }
 #ifdef MOZ_WAYLAND
-    else if (!widget::WaylandDisplayGet()->GetViewporter()) {
+    else if (gfxConfig::IsEnabled(Feature::WEBRENDER) &&
+             !gfxConfig::IsEnabled(Feature::DMABUF)) {
+      // We use zwp_linux_dmabuf_v1 and GBM directly to manage FBOs. In theory
+      // this is also possible vie EGLstreams, but we don't bother to implement
+      // it as recent NVidia drivers support GBM and DMABuf as well.
+      feature.ForceDisable(FeatureStatus::Unavailable,
+                           "Hardware Webrender requires DMAbuf support",
+                           "FEATURE_FAILURE_NO_DMABUF"_ns);
+    } else if (!widget::WaylandDisplayGet()->GetViewporter()) {
       feature.ForceDisable(FeatureStatus::Unavailable,
                            "Requires wp_viewporter protocol support",
                            "FEATURE_FAILURE_REQUIRES_WPVIEWPORTER"_ns);

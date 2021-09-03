@@ -22,7 +22,8 @@
 #include "js/ScalarType.h"          // js::Scalar::Type
 #include "vm/JSFunction.h"
 #include "vm/Shape.h"
-#include "wasm/WasmTypes.h"
+#include "wasm/WasmConstants.h"
+#include "wasm/WasmValType.h"
 
 enum class JSOp : uint8_t;
 
@@ -1266,6 +1267,8 @@ class MOZ_RAII IRGenerator {
   void emitIdGuard(ValOperandId valId, const Value& idVal, jsid id);
 
   OperandId emitNumericGuard(ValOperandId valId, Scalar::Type type);
+
+  StringOperandId emitToStringGuard(ValOperandId id, const Value& v);
 
   friend class CacheIRSpewer;
 

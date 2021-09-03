@@ -41,8 +41,8 @@
 #include "vm/FunctionFlags.h"
 #include "vm/JSObject.h"
 #include "vm/StringType.h"
+#include "wasm/WasmCodegenTypes.h"
 #include "wasm/WasmFrame.h"
-#include "wasm/WasmTypes.h"
 
 // [SMDOC] MacroAssembler multi-platform overview
 //
@@ -3580,42 +3580,38 @@ class MacroAssembler : public MacroAssemblerSpecific {
   void wasmUnalignedLoad(const wasm::MemoryAccessDesc& access,
                          Register memoryBase, Register ptr, Register ptrScratch,
                          Register output, Register tmp)
-      DEFINED_ON(arm, mips32, mips64);
+      DEFINED_ON(mips32, mips64);
 
-  // ARM: `ptr` will always be updated and `tmp1` is always needed.  `tmp2` is
-  // needed for Float32; `tmp2` and `tmp3` are needed for Float64.  Temps must
-  // be Invalid when they are not needed.
   // MIPS: `ptr` will always be updated.
   void wasmUnalignedLoadFP(const wasm::MemoryAccessDesc& access,
                            Register memoryBase, Register ptr,
                            Register ptrScratch, FloatRegister output,
                            Register tmp1, Register tmp2, Register tmp3)
-      DEFINED_ON(arm, mips32, mips64);
+      DEFINED_ON(mips32, mips64);
 
   // `ptr` will always be updated.
   void wasmUnalignedLoadI64(const wasm::MemoryAccessDesc& access,
                             Register memoryBase, Register ptr,
                             Register ptrScratch, Register64 output,
-                            Register tmp) DEFINED_ON(arm, mips32, mips64);
+                            Register tmp) DEFINED_ON(mips32, mips64);
 
-  // ARM: `ptr` and `value` will always be updated.  'tmp' must be Invalid.
   // MIPS: `ptr` will always be updated.
   void wasmUnalignedStore(const wasm::MemoryAccessDesc& access, Register value,
                           Register memoryBase, Register ptr,
                           Register ptrScratch, Register tmp)
-      DEFINED_ON(arm, mips32, mips64);
+      DEFINED_ON(mips32, mips64);
 
   // `ptr` will always be updated.
   void wasmUnalignedStoreFP(const wasm::MemoryAccessDesc& access,
                             FloatRegister floatValue, Register memoryBase,
                             Register ptr, Register ptrScratch, Register tmp)
-      DEFINED_ON(arm, mips32, mips64);
+      DEFINED_ON(mips32, mips64);
 
   // `ptr` will always be updated.
   void wasmUnalignedStoreI64(const wasm::MemoryAccessDesc& access,
                              Register64 value, Register memoryBase,
                              Register ptr, Register ptrScratch, Register tmp)
-      DEFINED_ON(arm, mips32, mips64);
+      DEFINED_ON(mips32, mips64);
 
   // wasm specific methods, used in both the wasm baseline compiler and ion.
 
@@ -4274,13 +4270,6 @@ class MacroAssembler : public MacroAssemblerSpecific {
   inline void storeObjShape(Shape* shape, Register obj,
                             EmitPreBarrier emitPreBarrier);
 
-  template <typename T>
-  void storeObjPrivate(T src, const Address& address);
-
-  void loadObjPrivate(Register obj, uint32_t nfixed, Register dest) {
-    loadPtr(Address(obj, NativeObject::getPrivateDataOffset(nfixed)), dest);
-  }
-
   void loadObjProto(Register obj, Register dest) {
     loadPtr(Address(obj, JSObject::offsetOfShape()), dest);
     loadPtr(Address(dest, Shape::offsetOfBaseShape()), dest);
@@ -4415,7 +4404,7 @@ class MacroAssembler : public MacroAssemblerSpecific {
    * digits need to be heap allocated.
    */
   void copyBigIntWithInlineDigits(Register src, Register dest, Register temp,
-                                  Label* fail, bool attemptNursery);
+                                  gc::InitialHeap initialHeap, Label* fail);
 
   /**
    * Compare a BigInt and an Int32 value. Falls through to the false case.
@@ -4751,13 +4740,13 @@ class MacroAssembler : public MacroAssemblerSpecific {
                            TypedArrayObject* templateObj,
                            TypedArrayLength lengthKind);
 
-  void newGCString(Register result, Register temp, Label* fail,
-                   bool attemptNursery);
-  void newGCFatInlineString(Register result, Register temp, Label* fail,
-                            bool attemptNursery);
+  void newGCString(Register result, Register temp, gc::InitialHeap initialHeap,
+                   Label* fail);
+  void newGCFatInlineString(Register result, Register temp,
+                            gc::InitialHeap initialHeap, Label* fail);
 
-  void newGCBigInt(Register result, Register temp, Label* fail,
-                   bool attemptNursery);
+  void newGCBigInt(Register result, Register temp, gc::InitialHeap initialHeap,
+                   Label* fail);
 
   // Compares two strings for equality based on the JSOP.
   // This checks for identical pointers, atoms and length and fails for

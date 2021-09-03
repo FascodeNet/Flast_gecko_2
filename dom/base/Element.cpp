@@ -344,8 +344,11 @@ EventStates Element::IntrinsicState() const {
 }
 
 void Element::NotifyStateChange(EventStates aStates) {
-  Document* doc = GetComposedDoc();
-  if (doc) {
+  if (aStates.IsEmpty()) {
+    return;
+  }
+
+  if (Document* doc = GetComposedDoc()) {
     nsAutoScriptBlocker scriptBlocker;
     doc->ContentStateChanged(this, aStates);
   }
@@ -1139,9 +1142,7 @@ bool Element::CanAttachShadowDOM() const {
    */
   // It will always have CustomElementData when the element is a valid custom
   // element or has is value.
-  CustomElementData* ceData = GetCustomElementData();
-  if (StaticPrefs::dom_webcomponents_formAssociatedCustomElement_enabled() &&
-      ceData) {
+  if (CustomElementData* ceData = GetCustomElementData()) {
     CustomElementDefinition* definition = ceData->GetCustomElementDefinition();
     // If the definition is null, the element possible hasn't yet upgraded.
     // Fallback to use LookupCustomElementDefinition to find its definition.
@@ -1186,11 +1187,11 @@ already_AddRefed<ShadowRoot> Element::AttachShadow(const ShadowRootInit& aInit,
     OwnerDoc()->ReportShadowDOMUsage();
   }
 
-  return AttachShadowWithoutNameChecks(aInit.mMode);
+  return AttachShadowWithoutNameChecks(aInit.mMode, aInit.mSlotAssignment);
 }
 
 already_AddRefed<ShadowRoot> Element::AttachShadowWithoutNameChecks(
-    ShadowRootMode aMode) {
+    ShadowRootMode aMode, SlotAssignmentMode aSlotAssignment) {
   nsAutoScriptBlocker scriptBlocker;
 
   RefPtr<mozilla::dom::NodeInfo> nodeInfo =
@@ -1219,7 +1220,7 @@ already_AddRefed<ShadowRoot> Element::AttachShadowWithoutNameChecks(
    */
   auto* nim = nodeInfo->NodeInfoManager();
   RefPtr<ShadowRoot> shadowRoot =
-      new (nim) ShadowRoot(this, aMode, nodeInfo.forget());
+      new (nim) ShadowRoot(this, aMode, aSlotAssignment, nodeInfo.forget());
 
   if (NodeOrAncestorHasDirAuto()) {
     shadowRoot->SetAncestorHasDirAuto();
@@ -2628,7 +2629,7 @@ nsresult Element::AfterSetAttr(int32_t aNamespaceID, nsAtom* aName,
       MOZ_ASSERT(HasPartAttribute() == isPart);
     } else if (aName == nsGkAtoms::slot && GetParent()) {
       if (ShadowRoot* shadow = GetParent()->GetShadowRoot()) {
-        shadow->MaybeReassignElement(*this);
+        shadow->MaybeReassignContent(*this);
       }
     }
   }
@@ -3036,10 +3037,16 @@ nsresult Element::PostHandleEventForLinks(EventChainPostVisitor& aVisitor) {
 
   switch (aVisitor.mEvent->mMessage) {
     case eMouseDown: {
-      if (aVisitor.mEvent->AsMouseEvent()->mButton == MouseButton::ePrimary &&
-          OwnerDoc()->LinkHandlingEnabled()) {
-        aVisitor.mEvent->mFlags.mMultipleActionsPrevented = true;
+      if (!OwnerDoc()->LinkHandlingEnabled()) {
+        break;
+      }
 
+      WidgetMouseEvent* const mouseEvent = aVisitor.mEvent->AsMouseEvent();
+      mouseEvent->mFlags.mMultipleActionsPrevented |=
+          mouseEvent->mButton == MouseButton::ePrimary ||
+          mouseEvent->mButton == MouseButton::eMiddle;
+
+      if (mouseEvent->mButton == MouseButton::ePrimary) {
         if (IsInComposedDoc()) {
           if (RefPtr<nsFocusManager> fm = nsFocusManager::GetFocusManager()) {
             RefPtr<Element> kungFuDeathGrip(this);

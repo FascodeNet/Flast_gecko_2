@@ -175,7 +175,8 @@ using ScriptVTuneIdMap = HashMap<BaseScript*, uint32_t,
                                  DefaultHasher<BaseScript*>, SystemAllocPolicy>;
 #endif
 #ifdef JS_CACHEIR_SPEW
-using ScriptFinalWarmUpCountEntry = mozilla::Tuple<uint32_t, char*>;
+using ScriptFinalWarmUpCountEntry =
+    mozilla::Tuple<uint32_t, SharedImmutableString>;
 using ScriptFinalWarmUpCountMap =
     HashMap<BaseScript*, ScriptFinalWarmUpCountEntry,
             DefaultHasher<BaseScript*>, SystemAllocPolicy>;
@@ -1358,11 +1359,12 @@ class alignas(uintptr_t) PrivateScriptData final : public TrailingArray {
   static bool Clone(JSContext* cx, js::HandleScript src, js::HandleScript dst,
                     js::MutableHandle<JS::GCVector<js::Scope*>> scopes);
 
-  static bool InitFromStencil(JSContext* cx, js::HandleScript script,
-                              const js::frontend::CompilationInput& input,
-                              const js::frontend::CompilationStencil& stencil,
-                              js::frontend::CompilationGCOutput& gcOutput,
-                              const js::frontend::ScriptIndex scriptIndex);
+  static bool InitFromStencil(
+      JSContext* cx, js::HandleScript script,
+      const js::frontend::CompilationAtomCache& atomCache,
+      const js::frontend::CompilationStencil& stencil,
+      js::frontend::CompilationGCOutput& gcOutput,
+      const js::frontend::ScriptIndex scriptIndex);
 
   void trace(JSTracer* trc);
 
@@ -1740,7 +1742,7 @@ class JSScript : public js::BaseScript {
 
   friend bool js::PrivateScriptData::InitFromStencil(
       JSContext* cx, js::HandleScript script,
-      const js::frontend::CompilationInput& input,
+      const js::frontend::CompilationAtomCache& atomCache,
       const js::frontend::CompilationStencil& stencil,
       js::frontend::CompilationGCOutput& gcOutput,
       const js::frontend::ScriptIndex scriptIndex);
@@ -1768,7 +1770,7 @@ class JSScript : public js::BaseScript {
 
  public:
   static bool fullyInitFromStencil(
-      JSContext* cx, const js::frontend::CompilationInput& input,
+      JSContext* cx, const js::frontend::CompilationAtomCache& atomCache,
       const js::frontend::CompilationStencil& stencil,
       js::frontend::CompilationGCOutput& gcOutput, js::HandleScript script,
       const js::frontend::ScriptIndex scriptIndex);
@@ -1776,7 +1778,7 @@ class JSScript : public js::BaseScript {
   // Allocate a JSScript and initialize it with bytecode. This consumes
   // allocations within the stencil.
   static JSScript* fromStencil(JSContext* cx,
-                               js::frontend::CompilationInput& input,
+                               js::frontend::CompilationAtomCache& atomCache,
                                const js::frontend::CompilationStencil& stencil,
                                js::frontend::CompilationGCOutput& gcOutput,
                                js::frontend::ScriptIndex scriptIndex);

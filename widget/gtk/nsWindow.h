@@ -38,6 +38,7 @@
 #  include <gdk/gdkwayland.h>
 #  include "base/thread.h"
 #  include "WaylandVsyncSource.h"
+#  include "nsClipboardWayland.h"
 #endif
 
 #ifdef MOZ_LOGGING
@@ -57,6 +58,9 @@ extern mozilla::LazyLogModule gWidgetPopupLog;
 #  define LOGDRAG(args) MOZ_LOG(gWidgetDragLog, mozilla::LogLevel::Debug, args)
 #  define LOG_POPUP(args) \
     MOZ_LOG(gWidgetPopupLog, mozilla::LogLevel::Debug, args)
+#  define LOG_ENABLED()                                         \
+    (MOZ_LOG_TEST(gWidgetPopupLog, mozilla::LogLevel::Debug) || \
+     MOZ_LOG_TEST(gWidgetLog, mozilla::LogLevel::Debug))
 
 #else
 
@@ -64,19 +68,18 @@ extern mozilla::LazyLogModule gWidgetPopupLog;
 #  define LOGW(args)
 #  define LOGDRAG(args)
 #  define LOG_POPUP(args)
+#  define LOG_ENABLED() false
 
 #endif /* MOZ_LOGGING */
 
 #ifdef MOZ_WAYLAND
-class nsWaylandDragContext;
-
 gboolean WindowDragMotionHandler(GtkWidget* aWidget,
                                  GdkDragContext* aDragContext,
-                                 nsWaylandDragContext* aWaylandDragContext,
-                                 gint aX, gint aY, guint aTime);
+                                 RefPtr<DataOffer> aDataOffer, gint aX, gint aY,
+                                 guint aTime);
 gboolean WindowDragDropHandler(GtkWidget* aWidget, GdkDragContext* aDragContext,
-                               nsWaylandDragContext* aWaylandDragContext,
-                               gint aX, gint aY, guint aTime);
+                               RefPtr<DataOffer> aDataOffer, gint aX, gint aY,
+                               guint aTime);
 void WindowDragLeaveHandler(GtkWidget* aWidget);
 #endif
 
@@ -324,8 +327,8 @@ class nsWindow final : public nsBaseWidget {
                                               nsIObserver* aObserver) override;
 
   virtual nsresult SynthesizeNativeTouchPadPinch(
-      TouchpadPinchPhase aEventPhase, float aScale, LayoutDeviceIntPoint aPoint,
-      int32_t aModifierFlags) override;
+      TouchpadGesturePhase aEventPhase, float aScale,
+      LayoutDeviceIntPoint aPoint, int32_t aModifierFlags) override;
 
   virtual void GetCompositorWidgetInitData(
       mozilla::widget::CompositorWidgetInitData* aInitData) override;
@@ -446,6 +449,7 @@ class nsWindow final : public nsBaseWidget {
   bool mWindowScaleFactorChanged;
   int mWindowScaleFactor;
   bool mCompositedScreen;
+  bool mIsAccelerated;
 
  private:
   void UpdateAlpha(mozilla::gfx::SourceSurface* aSourceSurface,
@@ -594,10 +598,7 @@ class nsWindow final : public nsBaseWidget {
   void DispatchMissedButtonReleases(GdkEventCrossing* aGdkEvent);
 
   // nsBaseWidget
-  virtual LayerManager* GetLayerManager(
-      PLayerTransactionChild* aShadowManager = nullptr,
-      LayersBackend aBackendHint = mozilla::layers::LayersBackend::LAYERS_NONE,
-      LayerManagerPersistence aPersistence = LAYER_MANAGER_CURRENT) override;
+  virtual WindowRenderer* GetWindowRenderer() override;
 
   void SetCompositorWidgetDelegate(CompositorWidgetDelegate* delegate) override;
 
@@ -633,12 +634,13 @@ class nsWindow final : public nsBaseWidget {
   void WaylandPopupHierarchyHideTemporary();
   void WaylandPopupHierarchyShowTemporaryHidden();
   void WaylandPopupHierarchyCalculatePositions();
+  bool IsTooltipWithNegativeRelativePositionRemoved();
   bool IsInPopupHierarchy();
   void AddWindowToPopupHierarchy();
   void UpdateWaylandPopupHierarchy();
   void WaylandPopupHierarchyHideByLayout(
       nsTArray<nsIWidget*>* aLayoutWidgetHierarchy);
-  void WaylandPopupHierarchyMarkByLayout(
+  void WaylandPopupHierarchyValidateByLayout(
       nsTArray<nsIWidget*>* aLayoutWidgetHierarchy);
   void CloseAllPopupsBeforeRemotePopup();
   void WaylandPopupHideClosedPopups();

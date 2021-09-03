@@ -41,6 +41,7 @@
 #include "js/GCAPI.h"
 #include "js/Id.h"
 #include "js/JSON.h"
+#include "js/PropertyAndElement.h"  // JS_DefineElement, JS_GetProperty
 #include "js/PropertyDescriptor.h"
 #include "js/Realm.h"
 #include "js/RegExp.h"
@@ -1676,22 +1677,6 @@ bool nsContentUtils::IsAlphanumericOrSymbol(uint32_t aChar) {
 
   return cat == nsUGenCategory::kLetter || cat == nsUGenCategory::kNumber ||
          cat == nsUGenCategory::kSymbol;
-}
-
-// static
-bool nsContentUtils::IsAlphanumericOrSymbolAt(const nsTextFragment* aFrag,
-                                              uint32_t aOffset) {
-  char16_t h = aFrag->CharAt(aOffset);
-  if (!IS_SURROGATE(h)) {
-    return IsAlphanumericOrSymbol(h);
-  }
-  if (NS_IS_HIGH_SURROGATE(h) && aOffset + 1 < aFrag->GetLength()) {
-    char16_t l = aFrag->CharAt(aOffset + 1);
-    if (NS_IS_LOW_SURROGATE(l)) {
-      return IsAlphanumericOrSymbol(SURROGATE_TO_UCS4(h, l));
-    }
-  }
-  return false;
 }
 
 /* static */
@@ -6673,38 +6658,24 @@ nsIWidget* nsContentUtils::WidgetForContent(const nsIContent* aContent) {
   return nullptr;
 }
 
-already_AddRefed<LayerManager> nsContentUtils::LayerManagerForContent(
+WindowRenderer* nsContentUtils::WindowRendererForContent(
     const nsIContent* aContent) {
   nsIWidget* widget = nsContentUtils::WidgetForContent(aContent);
   if (widget) {
-    RefPtr<LayerManager> manager = widget->GetLayerManager();
-    return manager.forget();
+    return widget->GetWindowRenderer();
   }
 
   return nullptr;
 }
 
-static already_AddRefed<LayerManager> LayerManagerForDocumentInternal(
-    const Document* aDoc, bool aRequirePersistent) {
+WindowRenderer* nsContentUtils::WindowRendererForDocument(
+    const Document* aDoc) {
   nsIWidget* widget = nsContentUtils::WidgetForDocument(aDoc);
   if (widget) {
-    RefPtr<LayerManager> manager = widget->GetLayerManager(
-        aRequirePersistent ? nsIWidget::LAYER_MANAGER_PERSISTENT
-                           : nsIWidget::LAYER_MANAGER_CURRENT);
-    return manager.forget();
+    return widget->GetWindowRenderer();
   }
 
   return nullptr;
-}
-
-already_AddRefed<LayerManager> nsContentUtils::LayerManagerForDocument(
-    const Document* aDoc) {
-  return LayerManagerForDocumentInternal(aDoc, false);
-}
-
-already_AddRefed<LayerManager>
-nsContentUtils::PersistentLayerManagerForDocument(Document* aDoc) {
-  return LayerManagerForDocumentInternal(aDoc, true);
 }
 
 bool nsContentUtils::AllowXULXBLForPrincipal(nsIPrincipal* aPrincipal) {
@@ -8527,7 +8498,7 @@ namespace {
 // We put StringBuilder in the anonymous namespace to prevent anything outside
 // this file from accidentally being linked against it.
 class BulkAppender {
-  typedef typename nsAString::size_type size_type;
+  using size_type = typename nsAString::size_type;
 
  public:
   explicit BulkAppender(BulkWriteHandle<char16_t>&& aHandle)

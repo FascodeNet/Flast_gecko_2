@@ -1627,6 +1627,12 @@ nsresult HttpBaseChannel::SetReferrerInfoInternal(
     return NS_ERROR_NOT_INITIALIZED;
   }
 
+  if (aClone) {
+    // Record the telemetry once we set the referrer info to the channel
+    // successfully.
+    referrerInfo->RecordTelemetry(this);
+  }
+
   if (aCompute) {
     rv = referrerInfo->ComputeReferrer(this);
     if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -3761,8 +3767,15 @@ already_AddRefed<nsILoadInfo> HttpBaseChannel::CloneLoadInfoForRedirect(
       mLoadInfo->GetExternalContentPolicyType();
   if (contentPolicyType == ExtContentPolicy::TYPE_DOCUMENT ||
       contentPolicyType == ExtContentPolicy::TYPE_SUBDOCUMENT) {
+    // Reset PrincipalToInherit to a null principal. We'll credit the the
+    // redirecting resource's result principal as the new principal's precursor.
+    // This means that a data: URI will end up loading in a process based on the
+    // redirected-from URI.
+    nsCOMPtr<nsIPrincipal> redirectPrincipal;
+    nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
+        this, getter_AddRefs(redirectPrincipal));
     nsCOMPtr<nsIPrincipal> nullPrincipalToInherit =
-        NullPrincipal::CreateWithoutOriginAttributes();
+        NullPrincipal::CreateWithInheritedAttributes(redirectPrincipal);
     newLoadInfo->SetPrincipalToInherit(nullPrincipalToInherit);
   }
 
@@ -3824,6 +3837,19 @@ already_AddRefed<nsILoadInfo> HttpBaseChannel::CloneLoadInfoForRedirect(
   bool isInternalRedirect =
       (aRedirectFlags & (nsIChannelEventSink::REDIRECT_INTERNAL |
                          nsIChannelEventSink::REDIRECT_STS_UPGRADE));
+
+  // Reset our sandboxed null principal ID when cloning loadInfo for an
+  // externally visible redirect.
+  if (!isInternalRedirect) {
+    // If we've redirected from http to something that isn't, clear
+    // the "external" flag, as loads that now go to other apps should be
+    // allowed to go ahead and not trip infinite-loop protection
+    // (see bug 1717314 for context).
+    if (!aNewURI->SchemeIs("http") && !aNewURI->SchemeIs("https")) {
+      newLoadInfo->SetLoadTriggeredFromExternal(false);
+    }
+    newLoadInfo->ResetSandboxedNullPrincipalID();
+  }
 
   nsCString remoteAddress;
   Unused << GetRemoteAddress(remoteAddress);

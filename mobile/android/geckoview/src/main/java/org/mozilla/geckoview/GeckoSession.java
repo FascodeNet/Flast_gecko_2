@@ -404,7 +404,7 @@ public class GeckoSession {
                     delegate.onFullScreen(GeckoSession.this, true);
                 } else if ("GeckoView:FullScreenExit".equals(event)) {
                     delegate.onFullScreen(GeckoSession.this, false);
-                }  else if ("GeckoView:WebAppManifest".equals(event)) {
+                } else if ("GeckoView:WebAppManifest".equals(event)) {
                     final GeckoBundle manifest = message.getBundle("manifest");
                     if (manifest == null) {
                         return;
@@ -1094,6 +1094,21 @@ public class GeckoSession {
             if (delegate != null) {
                 delegate.onExternalResponse(session, response);
             }
+        }
+
+        @WrapForJNI(calledFrom = "gecko")
+        private void onShowDynamicToolbar() {
+            final Window self = this;
+            ThreadUtils.runOnUiThread(() -> {
+                final GeckoSession session = self.mOwner.get();
+                if (session == null) {
+                    return;
+                }
+                final ContentDelegate delegate = session.getContentDelegate();
+                if (delegate != null) {
+                    delegate.onShowDynamicToolbar(session);
+                }
+            });
         }
     }
 
@@ -3296,7 +3311,7 @@ public class GeckoSession {
         default void onWebAppManifest(@NonNull final GeckoSession session, @NonNull final JSONObject manifest) {}
 
         /**
-         * A script has exceeded it's execution timeout value
+         * A script has exceeded its execution timeout value
          * @param geckoSession GeckoSession that initiated the callback.
          * @param scriptFileName Filename of the slow script
          * @return A {@link GeckoResult} with a SlowScriptResponse value which indicates whether to
@@ -3308,6 +3323,14 @@ public class GeckoSession {
                                                                        @NonNull final String scriptFileName) {
             return null;
         }
+
+        /**
+         * The app should display its dynamic toolbar, fully expanded to the height that was
+         * previously specified via {@link GeckoView#setDynamicToolbarMaxHeight}.
+         * @param geckoSession GeckoSession that initiated the callback.
+         */
+        @UiThread
+        default void onShowDynamicToolbar(@NonNull final GeckoSession geckoSession) {}
     }
 
     public interface SelectionActionDelegate {
@@ -5470,6 +5493,12 @@ public class GeckoSession {
         int PERMISSION_TRACKING = 7;
 
         /**
+         * Permission for third party frames to access first party cookies and storage. May be
+         * granted heuristically in some cases.
+         */
+        int PERMISSION_STORAGE_ACCESS = 8;
+
+        /**
          * Represents a content permission -- including the type of permission,
          * the present value of the permission, the URL the permission pertains to,
          * and other information.
@@ -5500,6 +5529,12 @@ public class GeckoSession {
             final public @NonNull String uri;
 
             /**
+             * The third party origin associated with the request; currently only used
+             * for storage access permission.
+             */
+            final public @Nullable String thirdPartyOrigin;
+
+            /**
              * A boolean indicating whether this content permission is associated with
              * private browsing.
              */
@@ -5525,6 +5560,7 @@ public class GeckoSession {
 
             protected ContentPermission() {
                 this.uri = "";
+                this.thirdPartyOrigin = null;
                 this.privateMode = false;
                 this.permission = PERMISSION_GEOLOCATION;
                 this.value = VALUE_ALLOW;
@@ -5539,6 +5575,13 @@ public class GeckoSession {
 
                 final String permission = bundle.getString("perm");
                 this.permission = convertType(permission);
+                if (permission.startsWith("3rdPartyStorage^")) {
+                    // Storage access permissions are stored with the key "3rdPartyStorage^https://foo.com"
+                    // where the third party origin is "https://foo.com".
+                    this.thirdPartyOrigin = permission.substring(16);
+                } else {
+                    this.thirdPartyOrigin = bundle.getString("thirdPartyOrigin");
+                }
 
                 this.value = bundle.getInt("value");
                 this.contextId = StorageController.retrieveUnsafeSessionContextId(bundle.getString("contextId"));
@@ -5595,6 +5638,8 @@ public class GeckoSession {
                     return PERMISSION_MEDIA_KEY_SYSTEM_ACCESS;
                 } else if ("trackingprotection".equals(type) || "trackingprotection-pb".equals(type)) {
                     return PERMISSION_TRACKING;
+                } else if ("storage-access".equals(type) || type.startsWith("3rdPartyStorage^")) {
+                    return PERMISSION_STORAGE_ACCESS;
                 } else {
                     return -1;
                 }
@@ -5619,6 +5664,8 @@ public class GeckoSession {
                         return "media-key-system-access";
                     case PERMISSION_TRACKING:
                         return privateMode ? "trackingprotection-pb" : "trackingprotection";
+                    case PERMISSION_STORAGE_ACCESS:
+                        return "storage-access";
                     default:
                         return "";
                 }
@@ -5641,8 +5688,9 @@ public class GeckoSession {
             }
 
             /* package */ @NonNull GeckoBundle toGeckoBundle() {
-                final GeckoBundle res = new GeckoBundle(5);
+                final GeckoBundle res = new GeckoBundle(7);
                 res.putString("uri", uri);
+                res.putString("thirdPartyOrigin", thirdPartyOrigin);
                 res.putString("principal", mPrincipal);
                 res.putBoolean("privateMode", privateMode);
                 res.putString("perm", convertType(permission, privateMode));
@@ -5902,7 +5950,9 @@ public class GeckoSession {
             PermissionDelegate.PERMISSION_XR,
             PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE,
             PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE,
-            PermissionDelegate.PERMISSION_MEDIA_KEY_SYSTEM_ACCESS})
+            PermissionDelegate.PERMISSION_MEDIA_KEY_SYSTEM_ACCESS,
+            PermissionDelegate.PERMISSION_TRACKING,
+            PermissionDelegate.PERMISSION_STORAGE_ACCESS})
     /* package */ @interface Permission {}
 
     /**

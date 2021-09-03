@@ -146,6 +146,7 @@
 #include "js/ScalarType.h"  // js::Scalar::Type
 #include "util/Memory.h"
 #include "wasm/TypedObject.h"
+#include "wasm/WasmCodegenTypes.h"
 #include "wasm/WasmGC.h"
 #include "wasm/WasmGenerator.h"
 #include "wasm/WasmInstance.h"
@@ -160,6 +161,8 @@ using mozilla::DebugOnly;
 using mozilla::FloorLog2;
 using mozilla::IsPowerOfTwo;
 using mozilla::Maybe;
+using mozilla::Nothing;
+using mozilla::Some;
 
 namespace js {
 namespace wasm {
@@ -2701,7 +2704,7 @@ class MachineStackTracker {
 
 // StackMapGenerator, which carries all state needed to create stackmaps.
 
-enum class HasDebugFrame { No, Yes };
+enum class HasDebugFrameWithLiveRefs { No, Maybe };
 
 struct StackMapGenerator {
  private:
@@ -2793,17 +2796,17 @@ struct StackMapGenerator {
   // |assemblerOffset|, incorporating pointers from the current operand
   // stack |stk|, incorporating possible extra pointers in |extra| at the
   // lower addressed end, and possibly with the associated frame having a
-  // DebugFrame as indicated by |debugFrame|.
-  [[nodiscard]] bool createStackMap(const char* who,
-                                    const ExitStubMapVector& extras,
-                                    uint32_t assemblerOffset,
-                                    HasDebugFrame debugFrame,
-                                    const StkVector& stk) {
+  // DebugFrame that must be traced, as indicated by |debugFrameWithLiveRefs|.
+  [[nodiscard]] bool createStackMap(
+      const char* who, const ExitStubMapVector& extras,
+      uint32_t assemblerOffset,
+      HasDebugFrameWithLiveRefs debugFrameWithLiveRefs, const StkVector& stk) {
     size_t countedPointers = machineStackTracker.numPtrs() + memRefsOnStk;
 #ifndef DEBUG
     // An important optimization.  If there are obviously no pointers, as
     // we expect in the majority of cases, exit quickly.
-    if (countedPointers == 0 && debugFrame == HasDebugFrame::No) {
+    if (countedPointers == 0 &&
+        debugFrameWithLiveRefs == HasDebugFrameWithLiveRefs::No) {
       // We can skip creating the map if there are no |true| elements in
       // |extras|.
       bool extrasHasRef = false;
@@ -3013,9 +3016,9 @@ struct StackMapGenerator {
     }
 #endif
 
-    // Note the presence of a DebugFrame, if any.
-    if (debugFrame == HasDebugFrame::Yes) {
-      stackMap->setHasDebugFrame();
+    // Note the presence of a DebugFrame with live pointers, if any.
+    if (debugFrameWithLiveRefs != HasDebugFrameWithLiveRefs::No) {
+      stackMap->setHasDebugFrameWithLiveRefs();
     }
 
     // Add the completed map to the running collection thereof.
@@ -3096,13 +3099,13 @@ class BaseCompiler final : public BaseCompilerInterface {
   // landing pads.
 
   struct CatchInfo {
-    uint32_t eventIndex;      // Index for the associated exception.
+    uint32_t tagIndex;        // Index for the associated exception.
     NonAssertingLabel label;  // The entry label for the handler.
 
     static const uint32_t CATCH_ALL_INDEX = UINT32_MAX;
-    static_assert(CATCH_ALL_INDEX > MaxEvents);
+    static_assert(CATCH_ALL_INDEX > MaxTags);
 
-    explicit CatchInfo(uint32_t eventIndex_) : eventIndex(eventIndex_) {}
+    explicit CatchInfo(uint32_t tagIndex_) : tagIndex(tagIndex_) {}
   };
 
   using CatchInfoVector = Vector<CatchInfo, 0, SystemAllocPolicy>;
@@ -4210,24 +4213,36 @@ class BaseCompiler final : public BaseCompilerInterface {
   // Create a vanilla stackmap.
   [[nodiscard]] bool createStackMap(const char* who) {
     const ExitStubMapVector noExtras;
-    return createStackMap(who, noExtras, masm.currentOffset());
+    return stackMapGenerator_.createStackMap(
+        who, noExtras, masm.currentOffset(), HasDebugFrameWithLiveRefs::No,
+        stk_);
   }
 
   // Create a stackmap as vanilla, but for a custom assembler offset.
   [[nodiscard]] bool createStackMap(const char* who,
                                     CodeOffset assemblerOffset) {
     const ExitStubMapVector noExtras;
-    return createStackMap(who, noExtras, assemblerOffset.offset());
+    return stackMapGenerator_.createStackMap(
+        who, noExtras, assemblerOffset.offset(), HasDebugFrameWithLiveRefs::No,
+        stk_);
+  }
+
+  // Create a stack map as vanilla, and note the presence of a ref-typed
+  // DebugFrame on the stack.
+  [[nodiscard]] bool createStackMap(
+      const char* who, HasDebugFrameWithLiveRefs debugFrameWithLiveRefs) {
+    const ExitStubMapVector noExtras;
+    return stackMapGenerator_.createStackMap(
+        who, noExtras, masm.currentOffset(), debugFrameWithLiveRefs, stk_);
   }
 
   // The most general stackmap construction.
-  [[nodiscard]] bool createStackMap(const char* who,
-                                    const ExitStubMapVector& extras,
-                                    uint32_t assemblerOffset) {
-    auto debugFrame =
-        compilerEnv_.debugEnabled() ? HasDebugFrame::Yes : HasDebugFrame::No;
+  [[nodiscard]] bool createStackMap(
+      const char* who, const ExitStubMapVector& extras,
+      uint32_t assemblerOffset,
+      HasDebugFrameWithLiveRefs debugFrameWithLiveRefs) {
     return stackMapGenerator_.createStackMap(who, extras, assemblerOffset,
-                                             debugFrame, stk_);
+                                             debugFrameWithLiveRefs, stk_);
   }
 
   // This is an optimization used to avoid calling sync() for
@@ -5624,7 +5639,8 @@ class BaseCompiler final : public BaseCompilerInterface {
     if (!stackMapGenerator_.generateStackmapEntriesForTrapExit(args, &extras)) {
       return false;
     }
-    if (!createStackMap("stack check", extras, masm.currentOffset())) {
+    if (!createStackMap("stack check", extras, masm.currentOffset(),
+                        HasDebugFrameWithLiveRefs::No)) {
       return false;
     }
 
@@ -5866,11 +5882,13 @@ class BaseCompiler final : public BaseCompilerInterface {
       // it can be clobbered, and/or modified by the debug trap.
       saveRegisterReturnValues(resultType);
       insertBreakablePoint(CallSiteDesc::Breakpoint);
-      if (!createStackMap("debug: return-point breakpoint")) {
+      if (!createStackMap("debug: return-point breakpoint",
+                          HasDebugFrameWithLiveRefs::Maybe)) {
         return false;
       }
       insertBreakablePoint(CallSiteDesc::LeaveFrame);
-      if (!createStackMap("debug: leave-frame breakpoint")) {
+      if (!createStackMap("debug: leave-frame breakpoint",
+                          HasDebugFrameWithLiveRefs::Maybe)) {
         return false;
       }
       restoreRegisterReturnValues(resultType);
@@ -7006,8 +7024,7 @@ class BaseCompiler final : public BaseCompilerInterface {
       // there's no constraint on what the output register may be.
       masm.wasmLoad(*access, srcAddr, dest.any());
     }
-#elif defined(JS_CODEGEN_ARM) || defined(JS_CODEGEN_MIPS32) || \
-    defined(JS_CODEGEN_MIPS64)
+#elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     if (IsUnaligned(*access)) {
       switch (dest.tag) {
         case AnyReg::I64:
@@ -7035,6 +7052,12 @@ class BaseCompiler final : public BaseCompilerInterface {
         masm.wasmLoad(*access, HeapReg, ptr, ptr, dest.any());
       }
     }
+#elif defined(JS_CODEGEN_ARM)
+    if (dest.tag == AnyReg::I64) {
+      masm.wasmLoadI64(*access, HeapReg, ptr, ptr, dest.i64());
+    } else {
+      masm.wasmLoad(*access, HeapReg, ptr, ptr, dest.any());
+    }
 #elif defined(JS_CODEGEN_ARM64)
     if (dest.tag == AnyReg::I64) {
       masm.wasmLoadI64(*access, HeapReg, ptr, dest.i64());
@@ -7049,11 +7072,7 @@ class BaseCompiler final : public BaseCompilerInterface {
   }
 
   RegI32 needStoreTemp(const MemoryAccessDesc& access, ValType srcType) {
-#if defined(JS_CODEGEN_ARM)
-    if (IsUnaligned(access) && srcType != ValType::I32) {
-      return needI32();
-    }
-#elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
+#if defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     return needI32();
 #endif
     return RegI32::Invalid();
@@ -7098,36 +7117,13 @@ class BaseCompiler final : public BaseCompilerInterface {
       masm.wasmStore(*access, value, dstAddr);
     }
 #elif defined(JS_CODEGEN_ARM)
-    if (IsUnaligned(*access)) {
-      switch (src.tag) {
-        case AnyReg::I64:
-          masm.wasmUnalignedStoreI64(*access, src.i64(), HeapReg, ptr, ptr,
-                                     temp);
-          break;
-        case AnyReg::F32:
-          masm.wasmUnalignedStoreFP(*access, src.f32(), HeapReg, ptr, ptr,
-                                    temp);
-          break;
-        case AnyReg::F64:
-          masm.wasmUnalignedStoreFP(*access, src.f64(), HeapReg, ptr, ptr,
-                                    temp);
-          break;
-        case AnyReg::I32:
-          MOZ_ASSERT(temp.isInvalid());
-          masm.wasmUnalignedStore(*access, src.i32(), HeapReg, ptr, ptr, temp);
-          break;
-        default:
-          MOZ_CRASH("Unexpected type");
-      }
+    MOZ_ASSERT(temp.isInvalid());
+    if (access->type() == Scalar::Int64) {
+      masm.wasmStoreI64(*access, src.i64(), HeapReg, ptr, ptr);
+    } else if (src.tag == AnyReg::I64) {
+      masm.wasmStore(*access, AnyRegister(src.i64().low), HeapReg, ptr, ptr);
     } else {
-      MOZ_ASSERT(temp.isInvalid());
-      if (access->type() == Scalar::Int64) {
-        masm.wasmStoreI64(*access, src.i64(), HeapReg, ptr, ptr);
-      } else if (src.tag == AnyReg::I64) {
-        masm.wasmStore(*access, AnyRegister(src.i64().low), HeapReg, ptr, ptr);
-      } else {
-        masm.wasmStore(*access, src.any(), HeapReg, ptr, ptr);
-      }
+      masm.wasmStore(*access, src.any(), HeapReg, ptr, ptr);
     }
 #elif defined(JS_CODEGEN_MIPS32) || defined(JS_CODEGEN_MIPS64)
     if (IsUnaligned(*access)) {
@@ -8633,6 +8629,8 @@ class BaseCompiler final : public BaseCompilerInterface {
   [[nodiscard]] bool emitTableGrow();
   [[nodiscard]] bool emitTableSet();
   [[nodiscard]] bool emitTableSize();
+
+#ifdef ENABLE_WASM_GC
   [[nodiscard]] bool emitStructNewWithRtt();
   [[nodiscard]] bool emitStructNewDefaultWithRtt();
   [[nodiscard]] bool emitStructGet(FieldExtension extension);
@@ -8648,6 +8646,7 @@ class BaseCompiler final : public BaseCompilerInterface {
   [[nodiscard]] bool emitRefCast();
   [[nodiscard]] bool emitBrOnCast();
 
+  void emitGcCanon(uint32_t typeIndex);
   void emitGcNullCheck(RegRef rp);
   RegPtr emitGcArrayGetData(RegRef rp);
   RegI32 emitGcArrayGetLength(RegPtr rdata, bool adjustDataPointer);
@@ -8660,6 +8659,7 @@ class BaseCompiler final : public BaseCompilerInterface {
                                      const StructField& field, AnyReg value);
   [[nodiscard]] bool emitGcArraySet(RegRef object, RegPtr data, RegI32 index,
                                     const ArrayType& array, AnyReg value);
+#endif  // ENABLE_WASM_GC
 
 #ifdef ENABLE_WASM_SIMD
   void emitVectorAndNot();
@@ -8675,6 +8675,8 @@ class BaseCompiler final : public BaseCompilerInterface {
   [[nodiscard]] bool emitVectorShiftRightI64x2();
 #  endif
 #endif
+
+  [[nodiscard]] bool emitIntrinsic(IntrinsicOp op);
 };
 
 // TODO: We want these to be inlined for sure; do we need an `inline` somewhere?
@@ -10554,11 +10556,11 @@ void BaseCompiler::emitCatchSetup(LabelKind kind, Control& tryCatch,
 
 bool BaseCompiler::emitCatch() {
   LabelKind kind;
-  uint32_t eventIndex;
+  uint32_t tagIndex;
   ResultType paramType, resultType;
   NothingVector unused_tryValues{};
 
-  if (!iter_.readCatch(&kind, &eventIndex, &paramType, &resultType,
+  if (!iter_.readCatch(&kind, &tagIndex, &paramType, &resultType,
                        &unused_tryValues)) {
     return false;
   }
@@ -10572,7 +10574,7 @@ bool BaseCompiler::emitCatch() {
   }
 
   // Construct info used for the exception landing pad.
-  CatchInfo catchInfo(eventIndex);
+  CatchInfo catchInfo(tagIndex);
   if (!tryCatch.catchInfos.emplaceBack(catchInfo)) {
     return false;
   }
@@ -10580,7 +10582,7 @@ bool BaseCompiler::emitCatch() {
   masm.bind(&tryCatch.catchInfos.back().label);
 
   // Extract the arguments in the exception package and push them.
-  const ResultType params = moduleEnv_.events[eventIndex].resultType();
+  const ResultType params = moduleEnv_.tags[tagIndex].resultType();
 
   uint32_t refCount = 0;
   for (uint32_t i = 0; i < params.length(); i++) {
@@ -10599,10 +10601,8 @@ bool BaseCompiler::emitCatch() {
   RegRef values = needRef();
   RegRef refs = needRef();
 
-  masm.unboxObject(Address(exn, WasmRuntimeExceptionObject::offsetOfValues()),
-                   values);
-  masm.unboxObject(Address(exn, WasmRuntimeExceptionObject::offsetOfRefs()),
-                   refs);
+  masm.unboxObject(Address(exn, WasmExceptionObject::offsetOfValues()), values);
+  masm.unboxObject(Address(exn, WasmExceptionObject::offsetOfRefs()), refs);
 
 #  ifdef DEBUG
   Label ok;
@@ -10890,10 +10890,9 @@ bool BaseCompiler::endTryCatch(ResultType type) {
 
   bool hasCatchAll = false;
   for (CatchInfo& info : tryCatch.catchInfos) {
-    if (info.eventIndex != CatchInfo::CATCH_ALL_INDEX) {
+    if (info.tagIndex != CatchInfo::CATCH_ALL_INDEX) {
       MOZ_ASSERT(!hasCatchAll);
-      masm.branch32(Assembler::Equal, index, Imm32(info.eventIndex),
-                    &info.label);
+      masm.branch32(Assembler::Equal, index, Imm32(info.tagIndex), &info.label);
     } else {
       masm.jump(&info.label);
       hasCatchAll = true;
@@ -10938,7 +10937,7 @@ bool BaseCompiler::emitThrow() {
     return true;
   }
 
-  const ResultType& params = moduleEnv_.events[exnIndex].resultType();
+  const ResultType& params = moduleEnv_.tags[exnIndex].resultType();
 
   // Measure space we need for all the args to put in the exception.
   uint32_t exnBytes = 0;
@@ -10961,7 +10960,7 @@ bool BaseCompiler::emitThrow() {
   const uint32_t dataOffset =
       NativeObject::getFixedSlotOffset(ArrayBufferObject::DATA_SLOT);
 
-  Address exnValuesAddress(exn, WasmRuntimeExceptionObject::offsetOfValues());
+  Address exnValuesAddress(exn, WasmExceptionObject::offsetOfValues());
   masm.unboxObject(exnValuesAddress, scratch);
   masm.loadPtr(Address(scratch, dataOffset), scratch);
 
@@ -11805,6 +11804,7 @@ bool BaseCompiler::emitGetGlobal() {
       pushF64(rv);
       break;
     }
+    case ValType::Rtt:
     case ValType::Ref: {
       RegRef rv = needRef();
       ScratchI32 tmp(*this);
@@ -11870,6 +11870,7 @@ bool BaseCompiler::emitSetGlobal() {
       freeF64(rv);
       break;
     }
+    case ValType::Rtt:
     case ValType::Ref: {
       RegPtr valueAddr(PreBarrierReg);
       needPtr(valueAddr);
@@ -13419,6 +13420,16 @@ bool BaseCompiler::emitTableInit() {
                                       });
 }
 
+#ifdef ENABLE_WASM_GC
+
+void BaseCompiler::emitGcCanon(uint32_t typeIndex) {
+  const TypeIdDesc& typeId = moduleEnv_.typeIds[typeIndex];
+  RegRef rp = needRef();
+  fr.loadTlsPtr(WasmTlsReg);
+  masm.loadWasmGlobalPtr(typeId.globalDataOffset(), rp);
+  pushRef(rp);
+}
+
 void BaseCompiler::emitGcNullCheck(RegRef rp) {
   Label ok;
   masm.branchTestPtr(Assembler::NonZero, rp, rp, &ok);
@@ -13508,7 +13519,7 @@ void BaseCompiler::emitGcGet(FieldType type, FieldExtension extension,
       pushF64(r);
       break;
     }
-#ifdef ENABLE_WASM_SIMD
+#  ifdef ENABLE_WASM_SIMD
     case FieldType::V128: {
       MOZ_ASSERT(extension == FieldExtension::None);
       RegV128 r = needV128();
@@ -13516,7 +13527,7 @@ void BaseCompiler::emitGcGet(FieldType type, FieldExtension extension,
       pushV128(r);
       break;
     }
-#endif
+#  endif
     case FieldType::Ref: {
       MOZ_ASSERT(extension == FieldExtension::None);
       RegRef r = needRef();
@@ -13557,12 +13568,12 @@ void BaseCompiler::emitGcSetScalar(const T& dst, FieldType type, AnyReg value) {
       masm.storeDouble(value.f64(), dst);
       break;
     }
-#ifdef ENABLE_WASM_SIMD
+#  ifdef ENABLE_WASM_SIMD
     case FieldType::V128: {
       masm.storeUnalignedSimd128(value.v128(), dst);
       break;
     }
-#endif
+#  endif
     default: {
       MOZ_CRASH("Unexpected field type");
     }
@@ -14098,21 +14109,32 @@ bool BaseCompiler::emitRttCanon() {
     return true;
   }
 
-  const TypeIdDesc& typeId = moduleEnv_.typeIds[rttType.typeIndex()];
-  RegRef rp = needRef();
-  fr.loadTlsPtr(WasmTlsReg);
-  masm.loadWasmGlobalPtr(typeId.globalDataOffset(), rp);
-  pushRef(rp);
+  emitGcCanon(rttType.typeIndex());
   return true;
 }
 
 bool BaseCompiler::emitRttSub() {
-  // rttSub builtin has same signature as rtt.sub instruction, stack is
-  // guaranteed to be in the right condition due to validation.
-  return emitInstanceCallOp(SASigRttSub, [this]() -> bool {
-    Nothing nothing;
-    return iter_.readRttSub(&nothing);
-  });
+  uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
+
+  Nothing nothing;
+  uint32_t rttSubTypeIndex;
+  if (!iter_.readRttSub(&nothing, &rttSubTypeIndex)) {
+    return false;
+  }
+
+  if (deadCode_) {
+    return true;
+  }
+
+  // rtt.sub $t; [(rtt $t' _)] -> [(rtt $t _)]
+  // Push (rtt.canon $t) so that we can cache the result and yield the
+  // same rtt value for the same $t operand.
+  emitGcCanon(rttSubTypeIndex);
+
+  if (!emitInstanceCall(lineOrBytecode, SASigRttSub)) {
+    return false;
+  }
+  return true;
 }
 
 bool BaseCompiler::emitRefTest() {
@@ -14222,6 +14244,8 @@ bool BaseCompiler::emitBrOnCast() {
 
   return true;
 }
+
+#endif  // ENABLE_WASM_GC
 
 #ifdef ENABLE_WASM_SIMD
 
@@ -15469,6 +15493,26 @@ bool BaseCompiler::emitVectorShiftRightI64x2() {
 }
 #  endif
 #endif  // ENABLE_WASM_SIMD
+
+bool BaseCompiler::emitIntrinsic(IntrinsicOp op) {
+  uint32_t lineOrBytecode = readCallSiteLineOrBytecode();
+  const Intrinsic& intrinsic = Intrinsic::getFromOp(op);
+
+  NothingVector params;
+  if (!iter_.readIntrinsic(intrinsic, &params)) {
+    return false;
+  }
+
+  if (deadCode_) {
+    return true;
+  }
+
+  // The final parameter of an intrinsic is implicitly the heap base
+  pushHeapBase();
+
+  // Call the intrinsic
+  return emitInstanceCall(lineOrBytecode, intrinsic.signature);
+}
 
 bool BaseCompiler::emitBody() {
   MOZ_ASSERT(stackMapGenerator_.framePushedAtEntryToBody.isSome());
@@ -17128,6 +17172,15 @@ bool BaseCompiler::emitBody() {
       // asm.js and other private operations
       case uint16_t(Op::MozPrefix):
         return iter_.unrecognizedOpcode(&op);
+
+      // private intrinsic operations
+      case uint16_t(Op::IntrinsicPrefix): {
+        if (!moduleEnv_.intrinsicsEnabled() ||
+            op.b1 >= uint32_t(IntrinsicOp::Limit)) {
+          return iter_.unrecognizedOpcode(&op);
+        }
+        CHECK_NEXT(emitIntrinsic(IntrinsicOp(op.b1)));
+      }
 
       default:
         return iter_.unrecognizedOpcode(&op);

@@ -255,8 +255,8 @@ class MultiTouchInput : public InputData {
   ExternalPoint mScreenOffset;
   bool mHandledByAPZ;
   // These button fields match to the corresponding fields in
-  // WidgetMouseEventBase.
-  int16_t mButton = 0;
+  // WidgetMouseEventBase, except mButton defaults to -1 to follow PointerEvent.
+  int16_t mButton = eNotPressed;
   int16_t mButtons = 0;
 };
 
@@ -397,6 +397,9 @@ class PanGestureInput : public InputData {
                   const ScreenPoint& aPanStartPoint,
                   const ScreenPoint& aPanDisplacement, Modifiers aModifiers);
 
+  void SetLineOrPageDeltas(int32_t aLineOrPageDeltaX,
+                           int32_t aLineOrPageDeltaY);
+
   bool IsMomentum() const;
 
   WidgetWheelEvent ToWidgetEvent(nsIWidget* aWidget) const;
@@ -456,6 +459,13 @@ class PanGestureInput : public InputData {
   // events.)
   bool mSimulateMomentum : 1;
 
+  // true if the creator of this object does not set the mLineOrPageDeltaX/Y
+  // fields and when/if WidgetWheelEvent's are generated from this object wants
+  // the corresponding mLineOrPageDeltaX/Y fields in the WidgetWheelEvent to be
+  // automatically calculated (upon event dispatch by the EventStateManager
+  // code).
+  bool mIsNoLineOrPageDelta : 1;
+
   void SetHandledByAPZ(bool aHandled) { mHandledByAPZ = aHandled; }
   void SetFollowedByMomentum(bool aFollowed) {
     mFollowedByMomentum = aFollowed;
@@ -469,6 +479,9 @@ class PanGestureInput : public InputData {
     mOverscrollBehaviorAllowsSwipe = aAllows;
   }
   void SetSimulateMomentum(bool aSimulate) { mSimulateMomentum = aSimulate; }
+  void SetIsNoLineOrPageDelta(bool aIsNoLineOrPageDelta) {
+    mIsNoLineOrPageDelta = aIsNoLineOrPageDelta;
+  }
 };
 
 /**

@@ -1326,8 +1326,11 @@ PermitUnloadResult nsDocumentViewer::DispatchBeforeUnload() {
     // how we get here.
     AutoPopupStatePusher popupStatePusher(PopupBlocker::openAbused, true);
 
+    RefPtr<BrowsingContext> bc = mContainer->GetBrowsingContext();
+    NS_ASSERTION(bc, "should have a browsing context in document viewer");
+
     // Never permit dialogs from the beforeunload handler
-    nsGlobalWindowOuter::TemporarilyDisableDialogs disableDialogs(window);
+    nsGlobalWindowOuter::TemporarilyDisableDialogs disableDialogs(bc);
 
     Document::PageUnloadingEventTimeStamp timestamp(mDocument);
 
@@ -1378,7 +1381,8 @@ nsDocumentViewer::PageHide(bool aIsUnload) {
     // Poke the GC. The window might be collectable garbage now.
     nsJSContext::PokeGC(JS::GCReason::PAGE_HIDE,
                         mDocument->GetWrapperPreserveColor(),
-                        StaticPrefs::javascript_options_gc_delay() * 2);
+                        TimeDuration::FromMilliseconds(
+                            StaticPrefs::javascript_options_gc_delay() * 2));
   }
 
   mDocument->OnPageHide(!aIsUnload, nullptr);
@@ -2232,7 +2236,8 @@ nsDocumentViewer::ClearHistoryEntry() {
   if (mDocument) {
     nsJSContext::PokeGC(JS::GCReason::PAGE_HIDE,
                         mDocument->GetWrapperPreserveColor(),
-                        StaticPrefs::javascript_options_gc_delay() * 2);
+                        TimeDuration::FromMilliseconds(
+                            StaticPrefs::javascript_options_gc_delay() * 2));
   }
 
   mSHEntry = nullptr;

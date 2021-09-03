@@ -490,8 +490,7 @@ static constexpr const js::ObjectOps* JS_NULL_OBJECT_OPS = nullptr;
 
 // Classes, objects, and properties.
 
-// Objects have private slot.
-static const uint32_t JSCLASS_HAS_PRIVATE = 1 << 0;
+// (1 << 0 is unused)
 
 // Class's initialization code will call `SetNewObjectMetadata` itself.
 static const uint32_t JSCLASS_DELAY_METADATA_BUILDER = 1 << 1;
@@ -500,8 +499,8 @@ static const uint32_t JSCLASS_DELAY_METADATA_BUILDER = 1 << 1;
 // disposal mechanism.
 static const uint32_t JSCLASS_IS_WRAPPED_NATIVE = 1 << 2;
 
-// Private is `nsISupports*`.
-static const uint32_t JSCLASS_PRIVATE_IS_NSISUPPORTS = 1 << 3;
+// First reserved slot is `PrivateValue(nsISupports*)` or `UndefinedValue`.
+static constexpr uint32_t JSCLASS_SLOT0_IS_NSISUPPORTS = 1 << 3;
 
 // Objects are DOM.
 static const uint32_t JSCLASS_IS_DOMJSCLASS = 1 << 4;
@@ -685,8 +684,6 @@ struct alignas(js::gc::JSClassAlignBytes) JSClass {
   bool isNativeObject() const { return !(flags & NON_NATIVE); }
   bool isProxyObject() const { return flags & JSCLASS_IS_PROXY; }
 
-  bool hasPrivate() const { return !!(flags & JSCLASS_HAS_PRIVATE); }
-
   bool emulatesUndefined() const { return flags & JSCLASS_EMULATES_UNDEFINED; }
 
   bool isJSFunction() const { return this == js::FunctionClassPtr; }
@@ -705,6 +702,8 @@ struct alignas(js::gc::JSClassAlignBytes) JSClass {
   }
 
   bool isWrappedNative() const { return flags & JSCLASS_IS_WRAPPED_NATIVE; }
+
+  bool slot0IsISupports() const { return flags & JSCLASS_SLOT0_IS_NSISUPPORTS; }
 
   static size_t offsetOfFlags() { return offsetof(JSClass, flags); }
 

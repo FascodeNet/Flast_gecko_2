@@ -127,9 +127,10 @@ enum class GCAbortReason {
   _(WasmResolveResponseClosure)            \
   _(WasmModule)                            \
   _(WasmTableTable)                        \
+  _(WasmTagTag)                            \
+  _(WasmTagType)                           \
   _(WasmExceptionTag)                      \
-  _(WasmExceptionType)                     \
-  _(WasmRuntimeExceptionTag)               \
+  _(WasmRttValueChildren)                  \
   _(FileObjectFile)                        \
   _(Debugger)                              \
   _(DebuggerFrameGeneratorInfo)            \

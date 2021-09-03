@@ -16,6 +16,7 @@
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/Services.h"
 #include "nsString.h"
+#include "js/PropertyAndElement.h"  // JS_Enumerate, JS_GetElement, JS_GetProperty, JS_GetPropertyById, JS_HasOwnProperty, JS_SetUCProperty
 
 #import "mozAccessible.h"
 
@@ -39,7 +40,7 @@ id xpcAccessibleMacNSObjectWrapper::GetNativeObject() const { return mNativeObje
 NS_IMPL_ISUPPORTS_INHERITED(xpcAccessibleMacInterface, xpcAccessibleMacNSObjectWrapper,
                             nsIAccessibleMacInterface)
 
-xpcAccessibleMacInterface::xpcAccessibleMacInterface(AccessibleOrProxy aObj)
+xpcAccessibleMacInterface::xpcAccessibleMacInterface(Accessible* aObj)
     : xpcAccessibleMacNSObjectWrapper(GetNativeFromGeckoAccessible(aObj)) {}
 
 NS_IMETHODIMP

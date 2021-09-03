@@ -8,7 +8,6 @@ PKT_PANEL.prototype = {
     if (this.inited) {
       return;
     }
-    this.panelId = pktPanelMessaging.panelIdFromURL(window.location.href);
     this.overlay = new PKT_PANEL_OVERLAY();
     this.setupMutationObserver();
     // Mutation observer isn't always enough for fast loading, static pages.
@@ -22,14 +21,6 @@ PKT_PANEL.prototype = {
     this.inited = true;
   },
 
-  addMessageListener(messageId, callback) {
-    pktPanelMessaging.addMessageListener(messageId, this.panelId, callback);
-  },
-
-  sendMessage(messageId, payload, callback) {
-    pktPanelMessaging.sendMessage(messageId, this.panelId, payload, callback);
-  },
-
   resizeParent() {
     let clientHeight = document.body.clientHeight;
     if (this.overlay.tagsDropdownOpen) {
@@ -40,11 +31,26 @@ PKT_PANEL.prototype = {
     // We rely on intersection observer to do the
     // resize for 0 height loads.
     if (clientHeight) {
-      thePKT_PANEL.sendMessage("PKT_resizePanel", {
+      pktPanelMessaging.sendMessage("PKT_resizePanel", {
         width: document.body.clientWidth,
         height: clientHeight,
       });
     }
+  },
+
+  // Click helper to reduce bugs caused by oversight
+  // from different implementations of similar code.
+  clickHelper(element, { source = "", position }) {
+    element?.addEventListener(`click`, event => {
+      event.preventDefault();
+
+      pktPanelMessaging.sendMessage("PKT_openTabWithUrl", {
+        url: event.currentTarget.getAttribute(`href`),
+        activate: true,
+        source,
+        position,
+      });
+    });
   },
 
   setupIntersectionObserver() {

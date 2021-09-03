@@ -638,7 +638,7 @@ static StaticRefPtr<nsExternalHelperAppService> sExtHelperAppSvcSingleton;
 already_AddRefed<nsExternalHelperAppService>
 nsExternalHelperAppService::GetSingleton() {
   if (!sExtHelperAppSvcSingleton) {
-#ifdef XP_MACOSX
+#if defined(XP_MACOSX) || defined(XP_WIN)
     if (XRE_IsParentProcess()) {
       sExtHelperAppSvcSingleton = new nsOSHelperAppService();
     } else {
@@ -646,7 +646,7 @@ nsExternalHelperAppService::GetSingleton() {
     }
 #else
     sExtHelperAppSvcSingleton = new nsOSHelperAppService();
-#endif /* XP_MACOSX */
+#endif  // defined(XP_MACOSX) || defined(XP_WIN)
     ClearOnShutdown(&sExtHelperAppSvcSingleton);
   }
 
@@ -1814,10 +1814,8 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
 
   bool alwaysAsk = true;
 
-  // Skip showing UnknownContentType dialog, unless it is explicitly
-  // set in preferences.
+  // Skip showing UnknownContentType dialog by default if the pref is set.
   bool skipShowingDialog =
-      Preferences::GetBool("browser.download.useDownloadDir") &&
       StaticPrefs::browser_download_improvements_to_download_panel();
 
   if (skipShowingDialog) {
@@ -1955,10 +1953,15 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
     }
 
 #endif
-    if (action == nsIMIMEInfo::useHelperApp ||
-        action == nsIMIMEInfo::useSystemDefault ||
-        shouldAutomaticallyHandleInternally) {
-      rv = LaunchWithApplication(shouldAutomaticallyHandleInternally);
+    bool alwaysAskWhereToSave =
+        !Preferences::GetBool("browser.download.useDownloadDir") &&
+        StaticPrefs::browser_download_improvements_to_download_panel();
+
+    if ((action == nsIMIMEInfo::useHelperApp ||
+         action == nsIMIMEInfo::useSystemDefault ||
+         shouldAutomaticallyHandleInternally) &&
+        !alwaysAskWhereToSave) {
+      rv = LaunchWithApplication(shouldAutomaticallyHandleInternally, nullptr);
     } else {
       rv = PromptForSaveDestination();
     }
@@ -2314,6 +2317,10 @@ nsresult nsExternalAppHandler::CreateTransfer() {
   if (mDownloadClassification != nsITransfer::DOWNLOAD_ACCEPTABLE) {
     mCanceled = true;
     mRequest->Cancel(NS_ERROR_ABORT);
+    if (mSaver) {
+      mSaver->Finish(NS_ERROR_ABORT);
+      mSaver = nullptr;
+    }
     return CreateFailedTransfer();
   }
   nsresult rv;
@@ -2332,16 +2339,23 @@ nsresult nsExternalAppHandler::CreateTransfer() {
   NS_ENSURE_SUCCESS(rv, rv);
 
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(mRequest);
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(mRequest);
+  nsCOMPtr<nsIReferrerInfo> referrerInfo = nullptr;
+  if (httpChannel) {
+    referrerInfo = httpChannel->GetReferrerInfo();
+  }
+
   if (mBrowsingContext) {
     rv = transfer->InitWithBrowsingContext(
         mSourceUrl, target, u""_ns, mMimeInfo, mTimeDownloadStarted, mTempFile,
         this, channel && NS_UsePrivateBrowsing(channel),
-        mDownloadClassification, mBrowsingContext, mHandleInternally);
+        mDownloadClassification, referrerInfo, mBrowsingContext,
+        mHandleInternally);
   } else {
     rv = transfer->Init(mSourceUrl, target, u""_ns, mMimeInfo,
                         mTimeDownloadStarted, mTempFile, this,
                         channel && NS_UsePrivateBrowsing(channel),
-                        mDownloadClassification);
+                        mDownloadClassification, referrerInfo);
   }
 
   NS_ENSURE_SUCCESS(rv, rv);
@@ -2417,16 +2431,23 @@ nsresult nsExternalAppHandler::CreateFailedTransfer() {
   }
 
   nsCOMPtr<nsIChannel> channel = do_QueryInterface(mRequest);
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(mRequest);
+  nsCOMPtr<nsIReferrerInfo> referrerInfo = nullptr;
+  if (httpChannel) {
+    referrerInfo = httpChannel->GetReferrerInfo();
+  }
+
   if (mBrowsingContext) {
     rv = transfer->InitWithBrowsingContext(
         mSourceUrl, pseudoTarget, u""_ns, mMimeInfo, mTimeDownloadStarted,
-        nullptr, this, channel && NS_UsePrivateBrowsing(channel),
-        mDownloadClassification, mBrowsingContext, mHandleInternally);
+        mTempFile, this, channel && NS_UsePrivateBrowsing(channel),
+        mDownloadClassification, referrerInfo, mBrowsingContext,
+        mHandleInternally);
   } else {
     rv = transfer->Init(mSourceUrl, pseudoTarget, u""_ns, mMimeInfo,
-                        mTimeDownloadStarted, nullptr, this,
+                        mTimeDownloadStarted, mTempFile, this,
                         channel && NS_UsePrivateBrowsing(channel),
-                        mDownloadClassification);
+                        mDownloadClassification, referrerInfo);
   }
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2485,7 +2506,9 @@ void nsExternalAppHandler::RequestSaveDestination(
 NS_IMETHODIMP nsExternalAppHandler::PromptForSaveDestination() {
   if (mCanceled) return NS_OK;
 
-  mMimeInfo->SetPreferredAction(nsIMIMEInfo::saveToDisk);
+  if (!StaticPrefs::browser_download_improvements_to_download_panel()) {
+    mMimeInfo->SetPreferredAction(nsIMIMEInfo::saveToDisk);
+  }
 
   if (mSuggestedFileName.IsEmpty()) {
     RequestSaveDestination(mTempLeafName, mTempFileExtension);
@@ -2509,14 +2532,28 @@ nsresult nsExternalAppHandler::ContinueSave(nsIFile* aNewFileLocation) {
 
   MOZ_ASSERT(aNewFileLocation, "Must be called with a non-null file");
 
+  int32_t action = nsIMIMEInfo::saveToDisk;
+  mMimeInfo->GetPreferredAction(&action);
+  bool shouldAutomaticallyHandleInternally =
+      action == nsIMIMEInfo::handleInternally &&
+      StaticPrefs::browser_download_improvements_to_download_panel();
+
+  if (StaticPrefs::browser_download_improvements_to_download_panel() &&
+      (action == nsIMIMEInfo::useHelperApp ||
+       action == nsIMIMEInfo::useSystemDefault ||
+       shouldAutomaticallyHandleInternally)) {
+    return LaunchWithApplication(shouldAutomaticallyHandleInternally,
+                                 aNewFileLocation);
+  }
+
   nsresult rv = NS_OK;
   nsCOMPtr<nsIFile> fileToUse = aNewFileLocation;
   mFinalFileDestination = fileToUse;
 
   // Move what we have in the final directory, but append .part
   // to it, to indicate that it's unfinished.  Do not call SetTarget on the
-  // saver if we are done (Finish has been called) but OnSaverComplete has not
-  // been called.
+  // saver if we are done (Finish has been called) but OnSaverComplete has
+  // not been called.
   if (mFinalFileDestination && mSaver && !mStopRequestIssued) {
     nsCOMPtr<nsIFile> movedFile;
     mFinalFileDestination->Clone(getter_AddRefs(movedFile));
@@ -2555,7 +2592,7 @@ nsresult nsExternalAppHandler::ContinueSave(nsIFile* aNewFileLocation) {
 // LaunchWithApplication should only be called by the helper app dialog which
 // allows the user to say launch with application or save to disk.
 NS_IMETHODIMP nsExternalAppHandler::LaunchWithApplication(
-    bool aHandleInternally) {
+    bool aHandleInternally, nsIFile* aNewFileLocation) {
   if (mCanceled) return NS_OK;
 
   mHandleInternally = aHandleInternally;
@@ -2587,19 +2624,24 @@ NS_IMETHODIMP nsExternalAppHandler::LaunchWithApplication(
   // directory as originally downloaded so the download can be renamed in place
   // later.
   nsCOMPtr<nsIFile> fileToUse;
-  (void)GetDownloadDirectory(getter_AddRefs(fileToUse));
+  if (aNewFileLocation &&
+      StaticPrefs::browser_download_improvements_to_download_panel()) {
+    fileToUse = aNewFileLocation;
+  } else {
+    (void)GetDownloadDirectory(getter_AddRefs(fileToUse));
 
-  if (mSuggestedFileName.IsEmpty()) {
-    // Keep using the leafname of the temp file, since we're just starting a
-    // helper
-    mSuggestedFileName = mTempLeafName;
-  }
+    if (mSuggestedFileName.IsEmpty()) {
+      // Keep using the leafname of the temp file, since we're just starting a
+      // helper
+      mSuggestedFileName = mTempLeafName;
+    }
 
 #ifdef XP_WIN
-  fileToUse->Append(mSuggestedFileName + mTempFileExtension);
+    fileToUse->Append(mSuggestedFileName + mTempFileExtension);
 #else
-  fileToUse->Append(mSuggestedFileName);
+    fileToUse->Append(mSuggestedFileName);
 #endif
+  }
 
   nsresult rv = fileToUse->CreateUnique(nsIFile::NORMAL_FILE_TYPE, 0600);
   if (NS_SUCCEEDED(rv)) {
@@ -2800,7 +2842,7 @@ NS_IMETHODIMP nsExternalHelperAppService::GetFromTypeAndExtension(
     // XXXzpao This should probably be localized
     nsAutoCString desc(aFileExt);
     desc.AppendLiteral(" File");
-    (*_retval)->SetDescription(NS_ConvertASCIItoUTF16(desc));
+    (*_retval)->SetDescription(NS_ConvertUTF8toUTF16(desc));
     LOG(("Falling back to 'File' file description\n"));
   }
 

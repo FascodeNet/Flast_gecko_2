@@ -7,7 +7,9 @@
 #include "ChromeUtils.h"
 
 #include "js/CharacterEncoding.h"
-#include "js/Object.h"  // JS::GetClass
+#include "js/Object.h"              // JS::GetClass
+#include "js/PropertyAndElement.h"  // JS_DefineProperty, JS_DefinePropertyById, JS_Enumerate, JS_GetProperty, JS_GetPropertyById, JS_SetProperty, JS_SetPropertyById
+#include "js/PropertyDescriptor.h"  // JS::PropertyDescriptor, JS_GetOwnPropertyDescriptorById
 #include "js/SavedFrameAPI.h"
 #include "jsfriendapi.h"
 #include "WrapperFactory.h"
@@ -190,7 +192,10 @@ void ChromeUtils::AddProfilerMarker(
     GlobalObject& aGlobal, const nsACString& aName,
     const ProfilerMarkerOptionsOrDouble& aOptions,
     const Optional<nsACString>& aText) {
-#ifdef MOZ_GECKO_PROFILER
+  if (!profiler_can_accept_markers()) {
+    return;
+  }
+
   MarkerOptions options;
 
   MarkerCategory category = ::geckoprofiler::category::JS;
@@ -205,18 +210,35 @@ void ChromeUtils::AddProfilerMarker(
     innerWindowId = opt.mInnerWindowId;
 
     if (opt.mCaptureStack) {
+      // If we will be capturing a stack, change the category of the
+      // ChromeUtils.addProfilerMarker label automatically added by the webidl
+      // binding from DOM to PROFILER so that this function doesn't appear in
+      // the marker stack.
+      JSContext* cx = aGlobal.Context();
+      ProfilingStack* stack = js::GetContextProfilingStackIfEnabled(cx);
+      if (MOZ_LIKELY(stack)) {
+        uint32_t sp = stack->stackPointer;
+        if (MOZ_LIKELY(sp > 0)) {
+          js::ProfilingStackFrame& frame = stack->frames[sp - 1];
+          if (frame.isLabelFrame() && "ChromeUtils"_ns.Equals(frame.label()) &&
+              "addProfilerMarker"_ns.Equals(frame.dynamicString())) {
+            frame.setLabelCategory(JS::ProfilingCategoryPair::PROFILER);
+          }
+        }
+      }
+
       options.Set(MarkerStack::Capture());
     }
-#  define BEGIN_CATEGORY(name, labelAsString, color) \
-    if (opt.mCategory.Equals(labelAsString)) {       \
-      category = ::geckoprofiler::category::name;    \
-    } else
-#  define SUBCATEGORY(supercategory, name, labelAsString)
-#  define END_CATEGORY
+#define BEGIN_CATEGORY(name, labelAsString, color) \
+  if (opt.mCategory.Equals(labelAsString)) {       \
+    category = ::geckoprofiler::category::name;    \
+  } else
+#define SUBCATEGORY(supercategory, name, labelAsString)
+#define END_CATEGORY
     MOZ_PROFILING_CATEGORY_LIST(BEGIN_CATEGORY, SUBCATEGORY, END_CATEGORY)
-#  undef BEGIN_CATEGORY
-#  undef SUBCATEGORY
-#  undef END_CATEGORY
+#undef BEGIN_CATEGORY
+#undef SUBCATEGORY
+#undef END_CATEGORY
     {
       category = ::geckoprofiler::category::OTHER;
     }
@@ -265,7 +287,6 @@ void ChromeUtils::AddProfilerMarker(
       profiler_add_marker(aName, category, std::move(options));
     }
   }
-#endif  // MOZ_GECKO_PROFILER
 }
 
 /* static */

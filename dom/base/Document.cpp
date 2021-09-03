@@ -438,7 +438,7 @@ mozilla::LazyLogModule gUseCountersLog("UseCounters");
 namespace mozilla {
 namespace dom {
 
-typedef nsTArray<Link*> LinkArray;
+using LinkArray = nsTArray<Link*>;
 
 AutoTArray<Document*, 8>* Document::sLoadingForegroundTopLevelContentDocument =
     nullptr;
@@ -712,7 +712,7 @@ size_t IdentifierMapEntry::SizeOfExcludingThis(
 class SubDocMapEntry : public PLDHashEntryHdr {
  public:
   // Both of these are strong references
-  Element* mKey;  // must be first, to look like PLDHashEntryStub
+  dom::Element* mKey;  // must be first, to look like PLDHashEntryStub
   dom::Document* mSubDocument;
 };
 
@@ -3177,6 +3177,8 @@ void Document::SetCompatibilityMode(nsCompatibility aMode) {
   }
   mCompatMode = aMode;
   CompatibilityModeChanged();
+  // Trigger recomputation of the nsViewportInfo the next time it's queried.
+  mViewportType = Unknown;
 }
 
 static void WarnIfSandboxIneffective(nsIDocShell* aDocShell,
@@ -3576,7 +3578,8 @@ nsresult Document::InitCSP(nsIChannel* aChannel) {
   // we query it here from the loadinfo in case the newly created
   // document needs to inherit the CSP. See:
   // https://w3c.github.io/webappsec-csp/#initialize-document-csp
-  if (CSP_ShouldResponseInheritCSP(aChannel)) {
+  bool inheritedCSP = CSP_ShouldResponseInheritCSP(aChannel);
+  if (inheritedCSP) {
     mCSP = loadInfo->GetCspToInherit();
   }
 
@@ -3618,7 +3621,8 @@ nsresult Document::InitCSP(nsIChannel* aChannel) {
   auto addonPolicy = BasePrincipal::Cast(principal)->AddonPolicy();
 
   // If there's no CSP to apply, go ahead and return early
-  if (!addonPolicy && cspHeaderValue.IsEmpty() && cspROHeaderValue.IsEmpty()) {
+  if (!inheritedCSP && !addonPolicy && cspHeaderValue.IsEmpty() &&
+      cspROHeaderValue.IsEmpty()) {
     if (MOZ_LOG_TEST(gCspPRLog, LogLevel::Debug)) {
       nsCOMPtr<nsIURI> chanURI;
       aChannel->GetURI(getter_AddRefs(chanURI));
@@ -4136,18 +4140,6 @@ bool Document::GetAllowPlugins() {
   return true;
 }
 
-void Document::EnsureL10n() {
-  if (!mDocumentL10n) {
-    Element* elem = GetDocumentElement();
-    if (NS_WARN_IF(!elem)) {
-      return;
-    }
-    bool isSync = elem->HasAttr(kNameSpaceID_None, nsGkAtoms::datal10nsync);
-    mDocumentL10n = DocumentL10n::Create(this, isSync);
-    MOZ_ASSERT(mDocumentL10n);
-  }
-}
-
 bool Document::HasPendingInitialTranslation() {
   return mDocumentL10n && mDocumentL10n->GetState() != DocumentL10nState::Ready;
 }
@@ -4170,15 +4162,20 @@ void Document::LocalizationLinkAdded(Element* aLinkElement) {
     return;
   }
 
-  EnsureL10n();
-
   nsAutoString href;
   aLinkElement->GetAttr(kNameSpaceID_None, nsGkAtoms::href, href);
 
-  mDocumentL10n->AddResourceId(href);
+  if (!mDocumentL10n) {
+    Element* elem = GetDocumentElement();
+    MOZ_DIAGNOSTIC_ASSERT(elem);
+
+    bool isSync = elem->HasAttr(nsGkAtoms::datal10nsync);
+    mDocumentL10n = DocumentL10n::Create(this, isSync);
+    MOZ_ASSERT(mDocumentL10n);
+  }
+  mDocumentL10n->AddResourceId(NS_ConvertUTF16toUTF8(href));
 
   if (mReadyState >= READYSTATE_INTERACTIVE) {
-    mDocumentL10n->Activate(true);
     mDocumentL10n->TriggerInitialTranslation();
   } else {
     if (!mDocumentL10n->mBlockingLayout) {
@@ -4199,7 +4196,8 @@ void Document::LocalizationLinkRemoved(Element* aLinkElement) {
   if (mDocumentL10n) {
     nsAutoString href;
     aLinkElement->GetAttr(kNameSpaceID_None, nsGkAtoms::href, href);
-    uint32_t remaining = mDocumentL10n->RemoveResourceId(href);
+    uint32_t remaining =
+        mDocumentL10n->RemoveResourceId(NS_ConvertUTF16toUTF8(href));
     if (remaining == 0) {
       if (mDocumentL10n->mBlockingLayout) {
         mDocumentL10n->mBlockingLayout = false;
@@ -4223,9 +4221,8 @@ void Document::LocalizationLinkRemoved(Element* aLinkElement) {
  * collected.
  */
 void Document::OnL10nResourceContainerParsed() {
-  if (mDocumentL10n) {
-    mDocumentL10n->Activate(false);
-  }
+  // XXX: This is a scaffolding for where we might inject prefetch
+  // in bug 1717241.
 }
 
 void Document::OnParsingCompleted() {
@@ -5180,12 +5177,31 @@ bool Document::ExecCommand(const nsAString& aHTMLCommandName, bool aShowUI,
   nsAutoString adjustedValue;
   InternalCommandData commandData =
       ConvertToInternalCommand(aHTMLCommandName, aValue, &adjustedValue);
-  if (commandData.mCommand == Command::DoNothing) {
-    return false;
-  }
-
-  if (commandData.mCommand == Command::GetHTML) {
-    return false;
+  switch (commandData.mCommand) {
+    case Command::DoNothing:
+    // "gethtml" command is a command to retrieve a string value, not executing
+    // anything and not enough the `bool` value of `execCommand`.  So, at here,
+    // we do nothing for "gethtml" command.
+    case Command::GetHTML:
+      return false;
+    case Command::FormatIncreaseFontSize:
+      SetUseCounter(eUseCounter_custom_DocumentExecCommandIncreaseFontSize);
+      break;
+    case Command::FormatDecreaseFontSize:
+      SetUseCounter(eUseCounter_custom_DocumentExecCommandDecreaseFontSize);
+      break;
+    case Command::FormatBlock:
+      if (aHTMLCommandName.LowerCaseEqualsLiteral("heading")) {
+        SetUseCounter(eUseCounter_custom_DocumentExecCommandHeading);
+      }
+      break;
+    case Command::SetDocumentReadOnly:
+      SetUseCounter(aHTMLCommandName.LowerCaseEqualsLiteral("contentreadonly")
+                        ? eUseCounter_custom_DocumentExecCommandContentReadOnly
+                        : eUseCounter_custom_DocumentExecCommandReadOnly);
+      break;
+    default:
+      break;
   }
 
   // Do security check first.
@@ -5344,8 +5360,39 @@ bool Document::QueryCommandEnabled(const nsAString& aHTMLCommandName,
   // Otherwise, don't throw exception for compatibility with Chrome.
 
   InternalCommandData commandData = ConvertToInternalCommand(aHTMLCommandName);
-  if (commandData.mCommand == Command::DoNothing) {
-    return false;
+  switch (commandData.mCommand) {
+    case Command::DoNothing:
+      return false;
+    case Command::FormatIncreaseFontSize:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledIncreaseFontSize);
+      break;
+    case Command::FormatDecreaseFontSize:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledDecreaseFontSize);
+      break;
+    case Command::GetHTML:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledGetHTML);
+      break;
+    case Command::FormatBlock:
+      if (aHTMLCommandName.LowerCaseEqualsLiteral("heading")) {
+        SetUseCounter(
+            eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledHeading);
+      }
+      break;
+    case Command::SetDocumentReadOnly:
+      SetUseCounter(
+          aHTMLCommandName.LowerCaseEqualsLiteral("contentreadonly")
+              ? eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledContentReadOnly
+              : eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledReadOnly);
+      break;
+    case Command::SetDocumentInsertBROnEnterKeyPress:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledInsertBrOnReturn);
+      break;
+    default:
+      break;
   }
 
   // cut & copy are always allowed
@@ -5445,8 +5492,30 @@ bool Document::QueryCommandState(const nsAString& aHTMLCommandName,
   // Otherwise, don't throw exception for compatibility with Chrome.
 
   InternalCommandData commandData = ConvertToInternalCommand(aHTMLCommandName);
-  if (commandData.mCommand == Command::DoNothing) {
-    return false;
+  switch (commandData.mCommand) {
+    case Command::DoNothing:
+      return false;
+    case Command::GetHTML:
+      SetUseCounter(eUseCounter_custom_DocumentQueryCommandStateOrValueGetHTML);
+      break;
+    case Command::FormatBlock:
+      if (aHTMLCommandName.LowerCaseEqualsLiteral("heading")) {
+        SetUseCounter(
+            eUseCounter_custom_DocumentQueryCommandStateOrValueHeading);
+      }
+      break;
+    case Command::SetDocumentReadOnly:
+      SetUseCounter(
+          aHTMLCommandName.LowerCaseEqualsLiteral("contentreadonly")
+              ? eUseCounter_custom_DocumentQueryCommandStateOrValueContentReadOnly
+              : eUseCounter_custom_DocumentQueryCommandStateOrValueReadOnly);
+      break;
+    case Command::SetDocumentInsertBROnEnterKeyPress:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandStateOrValueInsertBrOnReturn);
+      break;
+    default:
+      break;
   }
 
   if (aHTMLCommandName.LowerCaseEqualsLiteral("usecss")) {
@@ -5544,8 +5613,39 @@ bool Document::QueryCommandSupported(const nsAString& aHTMLCommandName,
   // Otherwise, don't throw exception for compatibility with Chrome.
 
   InternalCommandData commandData = ConvertToInternalCommand(aHTMLCommandName);
-  if (commandData.mCommand == Command::DoNothing) {
-    return false;
+  switch (commandData.mCommand) {
+    case Command::DoNothing:
+      return false;
+    case Command::FormatIncreaseFontSize:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledIncreaseFontSize);
+      break;
+    case Command::FormatDecreaseFontSize:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledDecreaseFontSize);
+      break;
+    case Command::GetHTML:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledGetHTML);
+      break;
+    case Command::FormatBlock:
+      if (aHTMLCommandName.LowerCaseEqualsLiteral("heading")) {
+        SetUseCounter(
+            eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledHeading);
+      }
+      break;
+    case Command::SetDocumentReadOnly:
+      SetUseCounter(
+          aHTMLCommandName.LowerCaseEqualsLiteral("contentreadonly")
+              ? eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledContentReadOnly
+              : eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledReadOnly);
+      break;
+    case Command::SetDocumentInsertBROnEnterKeyPress:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandSupportedOrEnabledInsertBrOnReturn);
+      break;
+    default:
+      break;
   }
 
   // Gecko technically supports all the clipboard commands including
@@ -5584,9 +5684,31 @@ void Document::QueryCommandValue(const nsAString& aHTMLCommandName,
   // Otherwise, don't throw exception for compatibility with Chrome.
 
   InternalCommandData commandData = ConvertToInternalCommand(aHTMLCommandName);
-  if (commandData.mCommand == Command::DoNothing) {
-    // Return empty string
-    return;
+  switch (commandData.mCommand) {
+    case Command::DoNothing:
+      // Return empty string
+      return;
+    case Command::GetHTML:
+      SetUseCounter(eUseCounter_custom_DocumentQueryCommandStateOrValueGetHTML);
+      break;
+    case Command::FormatBlock:
+      if (aHTMLCommandName.LowerCaseEqualsLiteral("heading")) {
+        SetUseCounter(
+            eUseCounter_custom_DocumentQueryCommandStateOrValueHeading);
+      }
+      break;
+    case Command::SetDocumentReadOnly:
+      SetUseCounter(
+          aHTMLCommandName.LowerCaseEqualsLiteral("contentreadonly")
+              ? eUseCounter_custom_DocumentQueryCommandStateOrValueContentReadOnly
+              : eUseCounter_custom_DocumentQueryCommandStateOrValueReadOnly);
+      break;
+    case Command::SetDocumentInsertBROnEnterKeyPress:
+      SetUseCounter(
+          eUseCounter_custom_DocumentQueryCommandStateOrValueInsertBrOnReturn);
+      break;
+    default:
+      break;
   }
 
   RefPtr<nsPresContext> presContext = GetPresContext();
@@ -8105,20 +8227,6 @@ bool IsLowercaseASCII(const nsAString& aValue) {
   return true;
 }
 
-// We only support pseudo-elements with two colons in this function.
-static PseudoStyleType GetPseudoElementType(const nsString& aString,
-                                            ErrorResult& aRv) {
-  MOZ_ASSERT(!aString.IsEmpty(),
-             "GetPseudoElementType aString should be non-null");
-  if (aString.Length() <= 2 || aString[0] != ':' || aString[1] != ':') {
-    aRv.Throw(NS_ERROR_DOM_SYNTAX_ERR);
-    return PseudoStyleType::NotPseudo;
-  }
-  RefPtr<nsAtom> pseudo = NS_Atomize(Substring(aString, 1));
-  return nsCSSPseudoElements::GetPseudoType(pseudo,
-                                            CSSEnabledState::InUASheets);
-}
-
 already_AddRefed<Element> Document::CreateElement(
     const nsAString& aTagName, const ElementCreationOptionsOrString& aOptions,
     ErrorResult& rv) {
@@ -8146,12 +8254,14 @@ already_AddRefed<Element> Document::CreateElement(
     // Check 'pseudo' and throw an exception if it's not one allowed
     // with CSS_PSEUDO_ELEMENT_IS_JS_CREATED_NAC.
     if (options.mPseudo.WasPassed()) {
-      pseudoType = GetPseudoElementType(options.mPseudo.Value(), rv);
-      if (rv.Failed() || pseudoType == PseudoStyleType::NotPseudo ||
-          !nsCSSPseudoElements::PseudoElementIsJSCreatedNAC(pseudoType)) {
-        rv.Throw(NS_ERROR_DOM_NOT_SUPPORTED_ERR);
+      Maybe<PseudoStyleType> type =
+          nsCSSPseudoElements::GetPseudoType(options.mPseudo.Value());
+      if (!type || *type == PseudoStyleType::NotPseudo ||
+          !nsCSSPseudoElements::PseudoElementIsJSCreatedNAC(*type)) {
+        rv.ThrowNotSupportedError("Invalid pseudo-element");
         return nullptr;
       }
+      pseudoType = *type;
     }
   }
 
@@ -13476,29 +13586,6 @@ void Document::InitializeXULBroadcastManager() {
   mXULBroadcastManager = new XULBroadcastManager(this);
 }
 
-// Returns the rangeOffset element from the XUL Popup Manager. This is for
-// chrome callers only.
-nsINode* Document::GetPopupRangeParent(ErrorResult& aRv) {
-  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
-  if (!pm) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return nullptr;
-  }
-
-  return pm->GetMouseLocationParent();
-}
-
-// Returns the rangeOffset element from the XUL Popup Manager.
-int32_t Document::GetPopupRangeOffset(ErrorResult& aRv) {
-  nsXULPopupManager* pm = nsXULPopupManager::GetInstance();
-  if (!pm) {
-    aRv.Throw(NS_ERROR_FAILURE);
-    return 0;
-  }
-
-  return pm->MouseLocationOffset();
-}
-
 namespace {
 
 class DevToolsMutationObserver final : public nsStubMutationObserver {
@@ -15562,17 +15649,22 @@ already_AddRefed<Element> Document::CreateHTMLElement(nsAtom* aTag) {
   return element.forget();
 }
 
+void AutoWalkBrowsingContextGroup::SuppressBrowsingContext(
+    BrowsingContext* aContext) {
+  aContext->PreOrderWalk([&](BrowsingContext* aBC) {
+    if (nsCOMPtr<nsPIDOMWindowOuter> win = aBC->GetDOMWindow()) {
+      if (RefPtr<Document> doc = win->GetExtantDoc()) {
+        SuppressDocument(doc);
+        mDocuments.AppendElement(doc);
+      }
+    }
+  });
+}
+
 void AutoWalkBrowsingContextGroup::SuppressBrowsingContextGroup(
     BrowsingContextGroup* aGroup) {
   for (const auto& bc : aGroup->Toplevels()) {
-    bc->PreOrderWalk([&](BrowsingContext* aBC) {
-      if (nsCOMPtr<nsPIDOMWindowOuter> win = aBC->GetDOMWindow()) {
-        if (RefPtr<Document> doc = win->GetExtantDoc()) {
-          SuppressDocument(doc);
-          mDocuments.AppendElement(doc);
-        }
-      }
-    });
+    SuppressBrowsingContext(bc);
   }
 }
 
@@ -15585,10 +15677,14 @@ nsAutoSyncOperation::nsAutoSyncOperation(Document* aDoc,
     ccjs->SetMicroTaskLevel(0);
   }
   if (aDoc) {
-    if (auto* bcg = aDoc->GetDocGroup()->GetBrowsingContextGroup()) {
-      SuppressBrowsingContextGroup(bcg);
-    }
     mBrowsingContext = aDoc->GetBrowsingContext();
+    if (InputTaskManager::CanSuspendInputEvent()) {
+      if (auto* bcg = aDoc->GetDocGroup()->GetBrowsingContextGroup()) {
+        SuppressBrowsingContextGroup(bcg);
+      }
+    } else if (mBrowsingContext) {
+      SuppressBrowsingContext(mBrowsingContext->Top());
+    }
     if (mBrowsingContext &&
         mSyncBehavior == SyncOperationBehavior::eSuspendInput &&
         InputTaskManager::CanSuspendInputEvent()) {
@@ -15621,6 +15717,18 @@ nsAutoSyncOperation::~nsAutoSyncOperation() {
       mSyncBehavior == SyncOperationBehavior::eSuspendInput &&
       InputTaskManager::CanSuspendInputEvent()) {
     mBrowsingContext->Group()->DecInputEventSuspensionLevel();
+  }
+}
+
+void Document::SetIsInSyncOperation(bool aSync) {
+  if (CycleCollectedJSContext* ccjs = CycleCollectedJSContext::Get()) {
+    ccjs->UpdateMicroTaskSuppressionGeneration();
+  }
+
+  if (aSync) {
+    ++mInSyncOperationCount;
+  } else {
+    --mInSyncOperationCount;
   }
 }
 
@@ -15696,7 +15804,7 @@ void Document::ReportHasScrollLinkedEffect() {
   mHasScrollLinkedEffect = true;
   nsContentUtils::ReportToConsole(
       nsIScriptError::warningFlag, "Async Pan/Zoom"_ns, this,
-      nsContentUtils::eLAYOUT_PROPERTIES, "ScrollLinkedEffectFound2");
+      nsContentUtils::eLAYOUT_PROPERTIES, "ScrollLinkedEffectFound3");
 }
 
 void Document::SetSHEntryHasUserInteraction(bool aHasInteraction) {
@@ -16575,7 +16683,7 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
                   p->Reject(false, __func__);
                 });
 
-        typedef ContentPermissionRequestBase::PromptResult PromptResult;
+        using PromptResult = ContentPermissionRequestBase::PromptResult;
         PromptResult pr = sapr->CheckPromptPrefs();
 
         if (pr == PromptResult::Pending) {
@@ -16711,7 +16819,7 @@ bool Document::AutomaticStorageAccessPermissionCanBeGranted(
     return false;
   }
 
-  typedef nsTArray<RefPtr<nsIPermission>> Permissions;
+  using Permissions = nsTArray<RefPtr<nsIPermission>>;
   Permissions perms;
   nsresult rv = permManager->GetAllWithTypePrefix(prefix, perms);
   if (NS_WARN_IF(NS_FAILED(rv))) {
@@ -16720,7 +16828,7 @@ bool Document::AutomaticStorageAccessPermissionCanBeGranted(
 
   nsAutoCString prefix2(prefix);
   prefix2.Append('^');
-  typedef nsTArray<nsCString> Origins;
+  using Origins = nsTArray<nsCString>;
   Origins origins;
 
   for (const auto& perm : perms) {
@@ -16755,8 +16863,8 @@ bool Document::AutomaticStorageAccessPermissionCanBeGranted(
     }
   }
 
-  nsCOMPtr<nsIBrowserUsage> bu =
-      do_ImportModule("resource:///modules/BrowserUsageTelemetry.jsm");
+  nsCOMPtr<nsIBrowserUsage> bu = do_ImportModule(
+      "resource:///modules/BrowserUsageTelemetry.jsm", fallible);
   if (NS_WARN_IF(!bu)) {
     return false;
   }

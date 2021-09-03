@@ -50,14 +50,12 @@ mozilla::Maybe<ScopeIndex> GCThingList::getScopeIndex(size_t index) const {
 }
 
 bool js::frontend::EmitScriptThingsVector(
-    JSContext* cx, const CompilationInput& input,
+    JSContext* cx, const CompilationAtomCache& atomCache,
     const CompilationStencil& stencil, CompilationGCOutput& gcOutput,
     mozilla::Span<const TaggedScriptThingIndex> things,
     mozilla::Span<JS::GCCellPtr> output) {
   MOZ_ASSERT(things.size() <= INDEX_LIMIT);
   MOZ_ASSERT(things.size() == output.size());
-
-  const auto& atomCache = input.atomCache;
 
   for (uint32_t i = 0; i < things.size(); i++) {
     const auto& thing = things[i];
@@ -101,10 +99,10 @@ bool js::frontend::EmitScriptThingsVector(
         break;
       }
       case TaggedScriptThingIndex::Kind::Scope:
-        output[i] = JS::GCCellPtr(gcOutput.scopes[thing.toScope()]);
+        output[i] = JS::GCCellPtr(gcOutput.getScope(thing.toScope()));
         break;
       case TaggedScriptThingIndex::Kind::Function:
-        output[i] = JS::GCCellPtr(gcOutput.functions[thing.toFunction()]);
+        output[i] = JS::GCCellPtr(gcOutput.getFunction(thing.toFunction()));
         break;
       case TaggedScriptThingIndex::Kind::EmptyGlobalScope: {
         Scope* scope = &cx->global()->emptyGlobalScope();

@@ -11,7 +11,6 @@
 
 #include "Platform.h"
 #include "RemoteAccessible.h"
-#include "AccessibleOrProxy.h"
 #include "DocAccessibleParent.h"
 #include "mozTableAccessible.h"
 #include "MOXWebAreaAccessible.h"
@@ -83,7 +82,8 @@ void ProxyDestroyed(RemoteAccessible* aProxy) {
 
 void ProxyEvent(RemoteAccessible* aProxy, uint32_t aEventType) {
   // Ignore event that we don't escape below, they aren't yet supported.
-  if (aEventType != nsIAccessibleEvent::EVENT_FOCUS &&
+  if (aEventType != nsIAccessibleEvent::EVENT_ALERT &&
+      aEventType != nsIAccessibleEvent::EVENT_FOCUS &&
       aEventType != nsIAccessibleEvent::EVENT_VALUE_CHANGE &&
       aEventType != nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE &&
       aEventType != nsIAccessibleEvent::EVENT_TEXT_CARET_MOVED &&
