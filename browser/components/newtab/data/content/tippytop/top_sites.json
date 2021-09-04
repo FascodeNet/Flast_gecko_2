@@ -175,6 +175,11 @@
     "favicon_url": "favicons/youtube-com.png"
   },
   {
+    "domains": ["typingx0.net"],
+    "image_url": "images/youtube-com@2x.png",
+    "favicon_url": "favicons/youtube-com.png"
+  },
+  {
     "domains": ["zhihu.com"],
     "image_url": "images/zhihu-com@2x.png",
     "favicon_url": "favicons/zhihu-com.ico"

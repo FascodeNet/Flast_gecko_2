@@ -16,11 +16,11 @@
 ## For further details, consult:
 ## https://mozilla-l10n.github.io/styleguides/mozilla_general/#brands-copyright-and-trademark
 
--brand-shorter-name = Ume Browser
--brand-short-name = Ume Browser
--brand-full-name = Ume Browser
+-brand-shorter-name = Flast G
+-brand-short-name = Flast G
+-brand-full-name = Flast G
 # This brand name can be used in messages where the product name needs to
 # remain unchanged across different versions (Nightly, Beta, etc.).
--brand-product-name = Ume Browser
--vendor-short-name = Ume Browser
+-brand-product-name = Flast G
+-vendor-short-name = Flast G
 trademarkInfo = { " " }
