@@ -141,6 +141,41 @@ fn is_same<N: PartialEq>(x: &N, y: &N) -> bool {
     x == y
 }
 
+/// A value for the `perspective()` transform function, which is either a
+/// non-negative `<length>` or `none`.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    MallocSizeOf,
+    PartialEq,
+    Serialize,
+    SpecifiedValueInfo,
+    ToComputedValue,
+    ToCss,
+    ToResolvedValue,
+    ToShmem,
+)]
+#[repr(C, u8)]
+pub enum GenericPerspectiveFunction<L> {
+    /// `none`
+    None,
+    /// A `<length>`.
+    Length(L),
+}
+
+impl<L> GenericPerspectiveFunction<L> {
+    /// Returns `f32::INFINITY` or the result of a function on the length value.
+    pub fn infinity_or(&self, f: impl FnOnce(&L) -> f32) -> f32 {
+        match *self {
+            Self::None => std::f32::INFINITY,
+            Self::Length(ref l) => f(l),
+        }
+    }
+}
+
+pub use self::GenericPerspectiveFunction as PerspectiveFunction;
+
 #[derive(
     Clone,
     Debug,
@@ -240,7 +275,7 @@ where
     ///
     /// The value must be greater than or equal to zero.
     #[css(function)]
-    Perspective(Length),
+    Perspective(GenericPerspectiveFunction<Length>),
     /// A intermediate type for interpolation of mismatched transform lists.
     #[allow(missing_docs)]
     #[css(comma, function = "interpolatematrix")]
@@ -469,9 +504,12 @@ where
                 let theta = euclid::Angle::radians(theta.radians64());
                 Transform3D::rotation(0., 0., 1., theta)
             },
-            Perspective(ref d) => {
-                let m = create_perspective_matrix(d.to_pixel_length(None)?);
-                m.cast()
+            Perspective(ref p) => {
+                let px = match p {
+                    PerspectiveFunction::None => std::f32::INFINITY,
+                    PerspectiveFunction::Length(ref p) => p.to_pixel_length(None)?,
+                };
+                create_perspective_matrix(px).cast()
             },
             Scale3D(sx, sy, sz) => Transform3D::scale(sx.into(), sy.into(), sz.into()),
             Scale(sx, sy) => Transform3D::scale(sx.into(), sy.into(), 1.),
@@ -582,17 +620,10 @@ impl<T: ToMatrix> Transform<T> {
 /// Return the transform matrix from a perspective length.
 #[inline]
 pub fn create_perspective_matrix(d: CSSFloat) -> Transform3D<CSSFloat> {
-    // TODO(gw): The transforms spec says that perspective length must
-    // be positive. However, there is some confusion between the spec
-    // and browser implementations as to handling the case of 0 for the
-    // perspective value. Until the spec bug is resolved, at least ensure
-    // that a provided perspective value of <= 0.0 doesn't cause panics
-    // and behaves as it does in other browsers.
-    // See https://lists.w3.org/Archives/Public/www-style/2016Jan/0020.html for more details.
-    if d <= 0.0 {
-        Transform3D::identity()
+    if d.is_finite() {
+        Transform3D::perspective(d.max(1.))
     } else {
-        Transform3D::perspective(d)
+        Transform3D::identity()
     }
 }
 

@@ -12,7 +12,6 @@
 #ifndef jit_MIR_h
 #define jit_MIR_h
 
-#include "mozilla/Alignment.h"
 #include "mozilla/Array.h"
 #include "mozilla/MacroForEach.h"
 
@@ -21,11 +20,9 @@
 
 #include "NamespaceImports.h"
 
-#include "gc/Allocator.h"
 #include "jit/AtomicOp.h"
 #include "jit/FixedList.h"
 #include "jit/InlineList.h"
-#include "jit/InlineScriptTree.h"
 #include "jit/JitAllocPolicy.h"
 #include "jit/MacroAssembler.h"
 #include "jit/MIROpsGenerated.h"
@@ -33,18 +30,13 @@
 #include "jit/TypePolicy.h"
 #include "js/experimental/JitInfo.h"  // JSJit{Getter,Setter}Op, JSJitInfo
 #include "js/HeapAPI.h"
-#include "js/Id.h"
 #include "js/ScalarType.h"  // js::Scalar::Type
 #include "js/Value.h"
 #include "js/Vector.h"
-#include "util/DifferentialTesting.h"
-#include "vm/ArrayObject.h"
-#include "vm/BuiltinObjectKind.h"
 #include "vm/EnvironmentObject.h"
 #include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/JSContext.h"
 #include "vm/RegExpObject.h"
-#include "vm/SharedMem.h"
 #include "vm/TypedArrayObject.h"
 #include "wasm/WasmJS.h"  // for WasmInstanceObject
 
@@ -82,29 +74,9 @@ class MDefinitionVisitorDefaultNoop {
 #undef VISIT_INS
 };
 
+class BytecodeSite;
 class CompactBufferWriter;
 class Range;
-
-static inline MIRType MIRTypeFromValue(const js::Value& vp) {
-  if (vp.isDouble()) {
-    return MIRType::Double;
-  }
-  if (vp.isMagic()) {
-    switch (vp.whyMagic()) {
-      case JS_OPTIMIZED_OUT:
-        return MIRType::MagicOptimizedOut;
-      case JS_ELEMENTS_HOLE:
-        return MIRType::MagicHole;
-      case JS_IS_CONSTRUCTING:
-        return MIRType::MagicIsConstructing;
-      case JS_UNINITIALIZED_LEXICAL:
-        return MIRType::MagicUninitializedLexical;
-      default:
-        MOZ_ASSERT_UNREACHABLE("Unexpected magic constant");
-    }
-  }
-  return MIRTypeFromValueType(vp.extractNonDoubleType());
-}
 
 #define MIR_FLAG_LIST(_)                                                       \
   _(InWorklist)                                                                \
@@ -373,10 +345,13 @@ class AliasSet {
     // the ExpandoAndGeneration.
     DOMProxyExpando = 1 << 14,
 
-    Last = DOMProxyExpando,
+    // Hash table of a Map or Set object.
+    MapOrSetHashTable = 1 << 15,
+
+    Last = MapOrSetHashTable,
     Any = Last | (Last - 1),
 
-    NumCategories = 15,
+    NumCategories = 16,
 
     // Indicates load or store.
     Store_ = 1 << 31
@@ -1712,10 +1687,6 @@ class MGoto : public MAryControlInstruction<0, 1>, public NoTypePolicy::Data {
   AliasSet getAliasSet() const override { return AliasSet::None(); }
 };
 
-static inline BranchDirection NegateBranchDirection(BranchDirection dir) {
-  return (dir == FALSE_BRANCH) ? TRUE_BRANCH : FALSE_BRANCH;
-}
-
 // Tests if the input instruction evaluates to true or false, and jumps to the
 // start of a corresponding basic block.
 class MTest : public MAryControlInstruction<1, 2>, public TestPolicy::Data {
@@ -1869,7 +1840,11 @@ class MNewObject : public MUnaryInstruction, public NoTypePolicy::Data {
         initialHeap_(initialHeap),
         mode_(mode),
         vmCall_(vmCall) {
-    MOZ_ASSERT_IF(mode != ObjectLiteral, templateObject());
+    if (mode == ObjectLiteral) {
+      MOZ_ASSERT(!templateObject());
+    } else {
+      MOZ_ASSERT(templateObject());
+    }
     setResultType(MIRType::Object);
 
     // The constant is kept separated in a MConstant, this way we can safely
@@ -8614,6 +8589,7 @@ class MGuardToClass : public MUnaryInstruction,
   MGuardToClass(MDefinition* object, const JSClass* clasp)
       : MUnaryInstruction(classOpcode, object), class_(clasp) {
     MOZ_ASSERT(object->type() == MIRType::Object);
+    MOZ_ASSERT(!clasp->isJSFunction(), "Use MGuardToFunction instead");
     setResultType(MIRType::Object);
     setMovable();
 
@@ -8640,6 +8616,34 @@ class MGuardToClass : public MUnaryInstruction,
       return false;
     }
     if (getClass() != ins->toGuardToClass()->getClass()) {
+      return false;
+    }
+    return congruentIfOperandsEqual(ins);
+  }
+};
+
+class MGuardToFunction : public MUnaryInstruction,
+                         public SingleObjectPolicy::Data {
+  explicit MGuardToFunction(MDefinition* object)
+      : MUnaryInstruction(classOpcode, object) {
+    MOZ_ASSERT(object->type() == MIRType::Object);
+    setResultType(MIRType::Object);
+    setMovable();
+
+    // We will bail out if the class type is incorrect, so we need to ensure we
+    // don't eliminate this instruction
+    setGuard();
+  }
+
+ public:
+  INSTRUCTION_HEADER(GuardToFunction)
+  TRIVIAL_NEW_WRAPPERS
+  NAMED_OPERANDS((0, object))
+
+  MDefinition* foldsTo(TempAllocator& alloc) override;
+  AliasSet getAliasSet() const override { return AliasSet::None(); }
+  bool congruentTo(const MDefinition* ins) const override {
+    if (!ins->isGuardToFunction()) {
       return false;
     }
     return congruentIfOperandsEqual(ins);
@@ -9933,20 +9937,23 @@ class MRotate : public MBinaryInstruction, public NoTypePolicy::Data {
 // Wasm SIMD.
 //
 // See comment in WasmIonCompile.cpp for a justification for these nodes.
+
 // (v128, v128, v128) -> v128 effect-free operation.
-class MWasmBitselectSimd128 : public MTernaryInstruction,
-                              public NoTypePolicy::Data {
-  MWasmBitselectSimd128(MDefinition* lhs, MDefinition* rhs,
-                        MDefinition* control)
-      : MTernaryInstruction(classOpcode, lhs, rhs, control) {
+class MWasmTernarySimd128 : public MTernaryInstruction,
+                            public NoTypePolicy::Data {
+  wasm::SimdOp simdOp_;
+
+  MWasmTernarySimd128(MDefinition* v0, MDefinition* v1, MDefinition* v2,
+                      wasm::SimdOp simdOp)
+      : MTernaryInstruction(classOpcode, v0, v1, v2), simdOp_(simdOp) {
     setMovable();
     setResultType(MIRType::Simd128);
   }
 
  public:
-  INSTRUCTION_HEADER(WasmBitselectSimd128)
+  INSTRUCTION_HEADER(WasmTernarySimd128)
   TRIVIAL_NEW_WRAPPERS
-  NAMED_OPERANDS((0, lhs), (1, rhs), (2, control))
+  NAMED_OPERANDS((0, v0), (1, v1), (2, v2))
 
   AliasSet getAliasSet() const override { return AliasSet::None(); }
   bool congruentTo(const MDefinition* ins) const override {
@@ -9955,13 +9962,15 @@ class MWasmBitselectSimd128 : public MTernaryInstruction,
 #ifdef ENABLE_WASM_SIMD
   MDefinition* foldsTo(TempAllocator& alloc) override;
 
-  // If the control mask allows the operation to be specialized as a shuffle
-  // and it is profitable to specialize it on this platform, return true and
-  // the appropriate shuffle mask.
-  bool specializeConstantMaskAsShuffle(int8_t shuffle[16]);
+  // If the control mask of a bitselect allows the operation to be specialized
+  // as a shuffle and it is profitable to specialize it on this platform, return
+  // true and the appropriate shuffle mask.
+  bool specializeBitselectConstantMaskAsShuffle(int8_t shuffle[16]);
 #endif
 
-  ALLOW_CLONE(MWasmBitselectSimd128)
+  wasm::SimdOp simdOp() const { return simdOp_; }
+
+  ALLOW_CLONE(MWasmTernarySimd128)
 };
 
 // (v128, v128) -> v128 effect-free operations.
@@ -10366,48 +10375,7 @@ MConstant* MDefinition::maybeConstantValue() {
   return nullptr;
 }
 
-// Helper functions used to decide how to build MIR.
-
-inline MIRType MIRTypeForArrayBufferViewRead(Scalar::Type arrayType,
-                                             bool observedDouble) {
-  switch (arrayType) {
-    case Scalar::Int8:
-    case Scalar::Uint8:
-    case Scalar::Uint8Clamped:
-    case Scalar::Int16:
-    case Scalar::Uint16:
-    case Scalar::Int32:
-      return MIRType::Int32;
-    case Scalar::Uint32:
-      return observedDouble ? MIRType::Double : MIRType::Int32;
-    case Scalar::Float32:
-      return MIRType::Float32;
-    case Scalar::Float64:
-      return MIRType::Double;
-    case Scalar::BigInt64:
-    case Scalar::BigUint64:
-      return MIRType::BigInt;
-    default:
-      break;
-  }
-  MOZ_CRASH("Unknown typed array type");
-}
-
 }  // namespace jit
 }  // namespace js
-
-// Specialize the AlignmentFinder class to make Result<V, E> works with abstract
-// classes such as MDefinition*, and MInstruction*
-namespace mozilla {
-
-template <>
-class AlignmentFinder<js::jit::MDefinition>
-    : public AlignmentFinder<js::jit::MStart> {};
-
-template <>
-class AlignmentFinder<js::jit::MInstruction>
-    : public AlignmentFinder<js::jit::MStart> {};
-
-}  // namespace mozilla
 
 #endif /* jit_MIR_h */

@@ -26,7 +26,7 @@ uint64_t NativeState() const;
  * Set aName to the name of the proxied accessible.
  * Return the ENameValueFlag passed from Accessible::Name
  */
-uint32_t Name(nsString& aName) const;
+ENameValueFlag Name(nsString& aName) const override;
 
 /*
  * Set aValue to the value of the proxied accessible.
@@ -41,7 +41,7 @@ void Help(nsString& aHelp) const;
 /**
  * Set aDesc to the description of the proxied accessible.
  */
-void Description(nsString& aDesc) const;
+void Description(nsString& aDesc) const override;
 
 /**
  * Get the set of attributes on the proxied accessible.
@@ -239,11 +239,11 @@ KeyBinding AccessKey();
 KeyBinding KeyboardShortcut();
 void AtkKeyBinding(nsString& aBinding);
 
-double CurValue();
+double CurValue() const override;
+double MinValue() const override;
+double MaxValue() const override;
+double Step() const override;
 bool SetCurValue(double aValue);
-double MinValue();
-double MaxValue();
-double Step();
 
 void TakeFocus();
 RemoteAccessible* FocusedChild();

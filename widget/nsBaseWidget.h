@@ -57,7 +57,6 @@ class SourceSurface;
 }  // namespace gfx
 
 namespace layers {
-class BasicLayerManager;
 class CompositorBridgeChild;
 class CompositorBridgeParent;
 class IAPZCTreeManager;
@@ -66,6 +65,7 @@ class APZEventState;
 struct APZEventResult;
 class CompositorSession;
 class ImageContainer;
+class WebRenderLayerManager;
 struct ScrollableLayerGuid;
 class RemoteCompositorSession;
 }  // namespace layers
@@ -143,7 +143,6 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
   typedef base::Thread Thread;
   typedef mozilla::gfx::DrawTarget DrawTarget;
   typedef mozilla::gfx::SourceSurface SourceSurface;
-  typedef mozilla::layers::BasicLayerManager BasicLayerManager;
   typedef mozilla::layers::BufferMode BufferMode;
   typedef mozilla::layers::CompositorBridgeChild CompositorBridgeChild;
   typedef mozilla::layers::CompositorBridgeParent CompositorBridgeParent;
@@ -165,7 +164,7 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
  public:
   nsBaseWidget();
 
-  NS_DECL_ISUPPORTS
+  NS_DECL_THREADSAFE_ISUPPORTS
 
   // nsIWidget interface
   void CaptureMouse(bool aCapture) override {}
@@ -404,7 +403,6 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
 
    private:
     nsBaseWidget* mWidget;
-    RefPtr<BasicLayerManager> mLayerManager;
     mozilla::FallbackRenderer* mRenderer = nullptr;
   };
   friend class AutoLayerManagerSetup;
@@ -790,8 +788,9 @@ class nsBaseWidget : public nsIWidget, public nsSupportsWeakReference {
 #endif
 
  private:
-  already_AddRefed<LayerManager> CreateCompositorSession(
-      int aWidth, int aHeight, mozilla::layers::CompositorOptions* aOptionsOut);
+  already_AddRefed<mozilla::layers::WebRenderLayerManager>
+  CreateCompositorSession(int aWidth, int aHeight,
+                          mozilla::layers::CompositorOptions* aOptionsOut);
 };
 
 #endif  // nsBaseWidget_h__

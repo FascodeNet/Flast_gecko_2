@@ -20,6 +20,7 @@
 #include "js/experimental/JitInfo.h"
 #include "js/friend/XrayJitInfo.h"  // JS::XrayJitInfo
 #include "js/ScalarType.h"          // js::Scalar::Type
+#include "js/ValueArray.h"
 #include "vm/JSFunction.h"
 #include "vm/Shape.h"
 #include "wasm/WasmConstants.h"
@@ -521,6 +522,8 @@ enum class GuardClassKind : uint8_t {
   UnmappedArguments,
   WindowProxy,
   JSFunction,
+  Set,
+  Map,
 };
 
 // Some ops refer to shapes that might be in other zones. Instead of putting
@@ -887,18 +890,12 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   }
 
  public:
-  static uint32_t encodeNargsAndFlags(JSFunction* fun) {
-    static_assert(JSFunction::NArgsBits == 16);
-    static_assert(sizeof(decltype(fun->flags().toRaw())) == sizeof(uint16_t));
-    return (uint32_t(fun->nargs()) << 16) | fun->flags().toRaw();
-  }
-
   void guardSpecificFunction(ObjOperandId obj, JSFunction* expected) {
     // Guard object is a specific function. This implies immutable fields on
     // the JSFunction struct itself are unchanged.
     // Bake in the nargs and FunctionFlags so Warp can use them off-main thread,
     // instead of directly using the JSFunction fields.
-    uint32_t nargsAndFlags = encodeNargsAndFlags(expected);
+    uint32_t nargsAndFlags = expected->flagsAndArgCountRaw();
     guardSpecificFunction_(obj, expected, nargsAndFlags);
   }
 
@@ -908,7 +905,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     // lambda clones.
     // Bake in the nargs and FunctionFlags so Warp can use them off-main thread,
     // instead of directly using the JSFunction fields.
-    uint32_t nargsAndFlags = encodeNargsAndFlags(expected->function());
+    uint32_t nargsAndFlags = expected->function()->flagsAndArgCountRaw();
     guardFunctionScript_(fun, expected, nargsAndFlags);
   }
 
@@ -1038,7 +1035,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void callScriptedGetterResult(ValOperandId receiver, JSFunction* getter,
                                 bool sameRealm) {
     MOZ_ASSERT(getter->hasJitEntry());
-    uint32_t nargsAndFlags = encodeNargsAndFlags(getter);
+    uint32_t nargsAndFlags = getter->flagsAndArgCountRaw();
     callScriptedGetterResult_(receiver, getter, sameRealm, nargsAndFlags);
     trialInliningState_ = TrialInliningState::Candidate;
   }
@@ -1046,7 +1043,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void callInlinedGetterResult(ValOperandId receiver, JSFunction* getter,
                                ICScript* icScript, bool sameRealm) {
     MOZ_ASSERT(getter->hasJitEntry());
-    uint32_t nargsAndFlags = encodeNargsAndFlags(getter);
+    uint32_t nargsAndFlags = getter->flagsAndArgCountRaw();
     callInlinedGetterResult_(receiver, getter, icScript, sameRealm,
                              nargsAndFlags);
     trialInliningState_ = TrialInliningState::Inlined;
@@ -1055,14 +1052,14 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void callNativeGetterResult(ValOperandId receiver, JSFunction* getter,
                               bool sameRealm) {
     MOZ_ASSERT(getter->isNativeWithoutJitEntry());
-    uint32_t nargsAndFlags = encodeNargsAndFlags(getter);
+    uint32_t nargsAndFlags = getter->flagsAndArgCountRaw();
     callNativeGetterResult_(receiver, getter, sameRealm, nargsAndFlags);
   }
 
   void callScriptedSetter(ObjOperandId receiver, JSFunction* setter,
                           ValOperandId rhs, bool sameRealm) {
     MOZ_ASSERT(setter->hasJitEntry());
-    uint32_t nargsAndFlags = encodeNargsAndFlags(setter);
+    uint32_t nargsAndFlags = setter->flagsAndArgCountRaw();
     callScriptedSetter_(receiver, setter, rhs, sameRealm, nargsAndFlags);
     trialInliningState_ = TrialInliningState::Candidate;
   }
@@ -1070,7 +1067,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void callInlinedSetter(ObjOperandId receiver, JSFunction* setter,
                          ValOperandId rhs, ICScript* icScript, bool sameRealm) {
     MOZ_ASSERT(setter->hasJitEntry());
-    uint32_t nargsAndFlags = encodeNargsAndFlags(setter);
+    uint32_t nargsAndFlags = setter->flagsAndArgCountRaw();
     callInlinedSetter_(receiver, setter, rhs, icScript, sameRealm,
                        nargsAndFlags);
     trialInliningState_ = TrialInliningState::Inlined;
@@ -1079,7 +1076,7 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
   void callNativeSetter(ObjOperandId receiver, JSFunction* setter,
                         ValOperandId rhs, bool sameRealm) {
     MOZ_ASSERT(setter->isNativeWithoutJitEntry());
-    uint32_t nargsAndFlags = encodeNargsAndFlags(setter);
+    uint32_t nargsAndFlags = setter->flagsAndArgCountRaw();
     callNativeSetter_(receiver, setter, rhs, sameRealm, nargsAndFlags);
   }
 
@@ -1768,6 +1765,9 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
   AttachDecision tryAttachObjectToString(HandleFunction callee);
   AttachDecision tryAttachBigIntAsIntN(HandleFunction callee);
   AttachDecision tryAttachBigIntAsUintN(HandleFunction callee);
+  AttachDecision tryAttachSetHas(HandleFunction callee);
+  AttachDecision tryAttachMapHas(HandleFunction callee);
+  AttachDecision tryAttachMapGet(HandleFunction callee);
 
   AttachDecision tryAttachFunCall(HandleFunction calleeFunc);
   AttachDecision tryAttachFunApply(HandleFunction calleeFunc);

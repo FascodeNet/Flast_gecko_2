@@ -25,22 +25,20 @@
 
 #include <algorithm>
 
+#include "jsapi.h"
+
 #include "ds/IdValuePair.h"  // js::IdValuePair
 #include "gc/FreeOp.h"
 #include "jit/AtomicOperations.h"
+#include "jit/JitContext.h"
 #include "jit/JitOptions.h"
-#include "jit/JitRuntime.h"
 #include "jit/Simulator.h"
-#if defined(JS_CODEGEN_X64)  // Assembler::HasSSE41
-#  include "jit/x64/Assembler-x64.h"
-#  include "jit/x86-shared/Architecture-x86-shared.h"
-#  include "jit/x86-shared/Assembler-x86-shared.h"
-#endif
 #include "js/ForOfIterator.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/Printf.h"
 #include "js/PropertyAndElement.h"  // JS_DefineProperty, JS_GetProperty
 #include "js/PropertySpec.h"        // JS_{PS,FN}{,_END}
+#include "js/StreamConsumer.h"
 #include "util/StringBuffer.h"
 #include "util/Text.h"
 #include "vm/ErrorObject.h"
@@ -48,6 +46,7 @@
 #include "vm/GlobalObject.h"       // js::GlobalObject
 #include "vm/HelperThreadState.h"  // js::PromiseHelperTask
 #include "vm/Interpreter.h"
+#include "vm/JSFunction.h"
 #include "vm/PlainObject.h"    // js::PlainObject
 #include "vm/PromiseObject.h"  // js::PromiseObject
 #include "vm/StringType.h"
@@ -97,13 +96,11 @@ static inline bool IsFuzzingCranelift(JSContext* cx) {
 // These functions read flags and apply fuzzing intercession policies.  Never go
 // directly to the flags in code below, always go via these accessors.
 
-static inline bool WasmSimdWormholeFlag(JSContext* cx) {
 #ifdef ENABLE_WASM_SIMD_WORMHOLE
+static inline bool WasmSimdWormholeFlag(JSContext* cx) {
   return cx->options().wasmSimdWormhole();
-#else
-  return false;
-#endif
 }
+#endif
 
 static inline bool WasmThreadsFlag(JSContext* cx) {
   return cx->realm() &&
@@ -377,7 +374,7 @@ bool wasm::ThreadsAvailable(JSContext* cx) {
 bool wasm::HasPlatformSupport(JSContext* cx) {
 #if !MOZ_LITTLE_ENDIAN() || defined(JS_CODEGEN_NONE) || defined(__wasi__)
   return false;
-#endif
+#else
 
   if (gc::SystemPageSize() > wasm::PageSize) {
     return false;
@@ -413,6 +410,7 @@ bool wasm::HasPlatformSupport(JSContext* cx) {
   // they are enabled.
   return BaselinePlatformSupport() || IonPlatformSupport() ||
          CraneliftPlatformSupport();
+#endif
 }
 
 bool wasm::HasSupport(JSContext* cx) {
@@ -1051,6 +1049,32 @@ static JSObject* GetWasmConstructorPrototype(JSContext* cx,
     proto = GlobalObject::getOrCreatePrototype(cx, key);
   }
   return proto;
+}
+
+[[nodiscard]] bool ParseValTypeArguments(JSContext* cx, HandleValue src,
+                                         ValTypeVector& dest) {
+  JS::ForOfIterator iterator(cx);
+
+  if (!iterator.init(src, JS::ForOfIterator::ThrowOnNonIterable)) {
+    return false;
+  }
+
+  RootedValue nextParam(cx);
+  while (true) {
+    bool done;
+    if (!iterator.next(&nextParam, &done)) {
+      return false;
+    }
+    if (done) {
+      break;
+    }
+
+    ValType valType;
+    if (!ToValType(cx, nextParam, &valType) || !dest.append(valType)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 // ============================================================================
@@ -1740,7 +1764,8 @@ WasmInstanceObject* WasmInstanceObject::create(
     const GlobalDescVector& globals, const ValVector& globalImportValues,
     const WasmGlobalObjectVector& globalObjs, HandleObject proto,
     UniqueDebugState maybeDebug) {
-  UniquePtr<ExportMap> exports = js::MakeUnique<ExportMap>(cx->zone());
+  Rooted<UniquePtr<ExportMap>> exports(cx,
+                                       js::MakeUnique<ExportMap>(cx->zone()));
   if (!exports) {
     ReportOutOfMemory(cx);
     return nullptr;
@@ -1752,6 +1777,8 @@ WasmInstanceObject* WasmInstanceObject::create(
     ReportOutOfMemory(cx);
     return nullptr;
   }
+  // Note that `scopes` is a WeakCache, auto-linked into a sweep list on the
+  // Zone, and so does not require rooting.
 
   uint32_t indirectGlobals = 0;
 
@@ -2204,10 +2231,16 @@ bool WasmInstanceObject::getExportedFunction(
     if (!name) {
       return false;
     }
-
-    fun.set(NewNativeFunction(cx, WasmCall, numArgs, name,
-                              gc::AllocKind::FUNCTION_EXTENDED, TenuredObject,
-                              FunctionFlags::WASM));
+    RootedObject proto(cx);
+#ifdef ENABLE_WASM_TYPE_REFLECTIONS
+    proto = GlobalObject::getOrCreatePrototype(cx, JSProto_WasmFunction);
+    if (!proto) {
+      return false;
+    }
+#endif
+    fun.set(NewFunctionWithProto(
+        cx, WasmCall, numArgs, FunctionFlags::WASM, nullptr, name, proto,
+        gc::AllocKind::FUNCTION_EXTENDED, TenuredObject));
     if (!fun) {
       return false;
     }
@@ -3613,26 +3646,9 @@ bool WasmTagObject::construct(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  JS::ForOfIterator iterator(cx);
-  if (!iterator.init(paramsVal, JS::ForOfIterator::ThrowOnNonIterable)) {
-    return false;
-  }
-
   ValTypeVector params;
-  RootedValue nextParam(cx);
-  while (true) {
-    bool done;
-    if (!iterator.next(&nextParam, &done)) {
-      return false;
-    }
-    if (done) {
-      break;
-    }
-
-    ValType argType;
-    if (!ToValType(cx, nextParam, &argType) || !params.append(argType)) {
-      return false;
-    }
+  if (!ParseValTypeArguments(cx, paramsVal, params)) {
+    return false;
   }
 
   RootedObject proto(cx);
@@ -3903,8 +3919,7 @@ WasmExceptionObject* WasmExceptionObject::create(JSContext* cx,
                                                  wasm::SharedExceptionTag tag,
                                                  HandleArrayBufferObject values,
                                                  HandleArrayObject refs) {
-  RootedObject proto(
-      cx, &cx->global()->getPrototype(JSProto_WasmException).toObject());
+  RootedObject proto(cx, &cx->global()->getPrototype(JSProto_WasmException));
 
   AutoSetNewObjectMetadata metadata(cx);
   RootedWasmExceptionObject obj(
@@ -4050,6 +4065,254 @@ ArrayObject& WasmExceptionObject::refs() const {
 }
 
 // ============================================================================
+// WebAssembly.Function and methods
+#ifdef ENABLE_WASM_TYPE_REFLECTIONS
+static JSObject* CreateWasmFunctionPrototype(JSContext* cx, JSProtoKey key) {
+  // WasmFunction's prototype should inherit from JSFunction's prototype.
+  RootedObject jsProto(
+      cx, GlobalObject::getOrCreatePrototype(cx, JSProto_Function));
+  if (!jsProto) {
+    return nullptr;
+  }
+  return GlobalObject::createBlankPrototypeInheriting(cx, &PlainObject::class_,
+                                                      jsProto);
+}
+
+[[nodiscard]] static bool IsWasmFunction(HandleValue v) {
+  if (!v.isObject()) {
+    return false;
+  }
+  if (!v.toObject().is<JSFunction>()) {
+    return false;
+  }
+  return v.toObject().as<JSFunction>().isWasm();
+}
+
+/* static */
+static bool ValTypesToArray(JSContext* cx, Handle<jsid> key,
+                            const ValTypeVector& value,
+                            MutableHandle<IdValueVector> dest) {
+  RootedArrayObject result(cx, NewDenseEmptyArray(cx));
+  for (ValType v : value) {
+    RootedString type(cx, UTF8CharsToString(cx, ToString(v).get()));
+    if (!type) {
+      return false;
+    }
+    if (!NewbornArrayPush(cx, result, StringValue(type))) {
+      return false;
+    }
+  }
+  return dest.append(IdValuePair(key, ObjectValue(*result)));
+}
+
+bool WasmFunctionTypeImpl(JSContext* cx, const CallArgs& args) {
+  RootedFunction function(cx, &args.thisv().toObject().as<JSFunction>());
+
+  // Lookup the type information.
+  RootedWasmInstanceObject instanceObj(
+      cx, ExportedFunctionToInstanceObject(function));
+  uint32_t funcIndex = ExportedFunctionToFuncIndex(function);
+  Instance& instance = instanceObj->instance();
+  const FuncType& ft = instance.metadata(instance.code().bestTier())
+                           .lookupFuncExport(funcIndex)
+                           .funcType();
+
+  const ValTypeVector& parameters = ft.args();
+  RootedId parametersId(cx, NameToId(cx->names().parameters));
+  Rooted<IdValueVector> props(cx, IdValueVector(cx));
+  if (!ValTypesToArray(cx, parametersId, parameters, &props)) {
+    return false;
+  }
+
+  const ValTypeVector& results = ft.results();
+  RootedId resultsId(cx, NameToId(cx->names().results));
+  if (!ValTypesToArray(cx, resultsId, results, &props)) {
+    return false;
+  }
+
+  RootedObject functionType(
+      cx, NewPlainObjectWithProperties(cx, props.begin(), props.length(),
+                                       GenericObject));
+  if (!functionType) {
+    return false;
+  }
+
+  args.rval().setObject(*functionType);
+  return true;
+}
+
+bool WasmFunctionType(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  return CallNonGenericMethod<IsWasmFunction, WasmFunctionTypeImpl>(cx, args);
+}
+
+JSFunction* WasmFunctionCreate(JSContext* cx, HandleFunction fun,
+                               wasm::ValTypeVector&& params,
+                               wasm::ValTypeVector&& results,
+                               HandleObject proto) {
+  MOZ_RELEASE_ASSERT(!IsWasmExportedFunction(fun));
+
+  // We want to import the function to a wasm module and then export it again so
+  // that it behaves exactly like a normal wasm function and can be used like
+  // one in wasm tables. Below we create the wasm module with fun as it's import
+  // then exporting it.
+  FeatureOptions options;
+  ScriptedCaller scriptedCaller;
+  SharedCompileArgs compileArgs =
+      CompileArgs::build(cx, std::move(scriptedCaller), options);
+  ModuleEnvironment moduleEnv(compileArgs->features);
+  CompilerEnvironment compilerEnv(CompileMode::Once, Tier::Optimized,
+                                  OptimizedBackend::Ion, DebugEnabled::False);
+  compilerEnv.computeParameters();
+
+  // Add the Import for the function
+  FuncType funcType = FuncType(std::move(params), std::move(results));
+  TypeDef funcTypeDef = TypeDef(std::move(funcType));
+  if (!moduleEnv.types.append(std::move(funcTypeDef))) {
+    return nullptr;
+  }
+  if (!moduleEnv.typeIds.resize(1)) {
+    return nullptr;
+  }
+  FuncDesc funcDesc =
+      FuncDesc(&moduleEnv.types[0].funcType(), &moduleEnv.typeIds[0], 0);
+  if (!moduleEnv.funcs.append(funcDesc) ||
+      !moduleEnv.funcImportGlobalDataOffsets.resize(1)) {
+    return nullptr;
+  }
+  moduleEnv.declareFuncExported(0, false, false);
+
+  // We will be looking up and using the function in the future by index so the
+  // name doesn't matter.
+  CacheableChars fieldName = DuplicateString("");
+  if (!moduleEnv.exports.emplaceBack(std::move(fieldName), 0,
+                                     DefinitionKind::Function)) {
+    return nullptr;
+  }
+
+  ModuleGenerator mg(*compileArgs, &moduleEnv, &compilerEnv, nullptr, nullptr);
+  if (!mg.init(nullptr)) {
+    return nullptr;
+  }
+  ShareableBytes* sharableBytes = cx->new_<ShareableBytes>();
+  // We're not compiling any function definitions.
+  if (!mg.finishFuncDefs()) {
+    return nullptr;
+  }
+  SharedModule wasmModule = mg.finishModule(*sharableBytes);
+  // Instantiate the module.
+  Rooted<ImportValues> imports(cx);
+  imports.get().funcs.append(fun);
+  RootedWasmInstanceObject instanceObj(cx);
+  if (!wasmModule->instantiate(cx, imports.get(), nullptr, &instanceObj)) {
+    MOZ_ASSERT(cx->isThrowingOutOfMemory());
+    return nullptr;
+  }
+
+  // Get the exported function which wraps the JS function to return.
+  RootedFunction exportedFun(cx);
+  instanceObj->getExportedFunction(cx, instanceObj, 0, &exportedFun);
+  return exportedFun;
+}
+
+bool WasmFunctionConstruct(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  if (!ThrowIfNotConstructing(cx, args, "WebAssembly.Function")) {
+    return false;
+  }
+
+  if (!args.requireAtLeast(cx, "WebAssembly.Function", 2)) {
+    return false;
+  }
+
+  ValTypeVector params;
+  ValTypeVector results;
+  if (!args[0].isObject()) {
+    return false;
+  }
+  RootedObject obj(cx, &args[0].toObject());
+
+  RootedId parametersId(cx, NameToId(cx->names().parameters));
+  RootedValue parametersVal(cx);
+  if (!GetProperty(cx, obj, obj, parametersId, &parametersVal)) {
+    return false;
+  }
+  if (!ParseValTypeArguments(cx, parametersVal, params)) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_WASM_BAD_ARG_TYPE);
+    return false;
+  }
+
+  RootedId resultsId(cx, NameToId(cx->names().results));
+  RootedValue resultsVal(cx);
+  if (!GetProperty(cx, obj, obj, resultsId, &resultsVal)) {
+    return false;
+  }
+  if (!ParseValTypeArguments(cx, resultsVal, results)) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_WASM_BAD_ARG_TYPE);
+    return false;
+  }
+
+  if (!args[1].isObject() || !args[1].toObject().is<JSFunction>()) {
+    JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
+                             JSMSG_WASM_BAD_FUNCTION_VALUE);
+    return false;
+  }
+
+  RootedFunction funcObj(cx, &args[1].toObject().as<JSFunction>());
+
+  RootedObject proto(cx);
+  if (!GetPrototypeFromBuiltinConstructor(cx, args, JSProto_WasmFunction,
+                                          &proto)) {
+    return false;
+  }
+  if (!proto) {
+    proto = GlobalObject::getOrCreatePrototype(cx, JSProto_WasmFunction);
+  }
+
+  RootedFunction function(cx, WasmFunctionCreate(cx, funcObj, std::move(params),
+                                                 std::move(results), proto));
+  if (!function) {
+    return false;
+  }
+  args.rval().setObject(*function);
+
+  return true;
+}
+
+static JSObject* CreateWasmFunctionConstructor(JSContext* cx, JSProtoKey key) {
+  RootedObject proto(
+      cx, GlobalObject::getOrCreateFunctionConstructor(cx, cx->global()));
+  if (!proto) {
+    return nullptr;
+  }
+
+  HandlePropertyName name = cx->names().WasmFunction;
+  return NewFunctionWithProto(cx, WasmFunctionConstruct, 1,
+                              FunctionFlags::NATIVE_CTOR, nullptr, name, proto,
+                              gc::AllocKind::FUNCTION, TenuredObject);
+}
+
+const JSFunctionSpec WasmFunctionMethods[] = {
+    JS_FN("type", WasmFunctionType, 0, 0), JS_FS_END};
+
+const ClassSpec WasmFunctionClassSpec = {CreateWasmFunctionConstructor,
+                                         CreateWasmFunctionPrototype,
+                                         nullptr,
+                                         nullptr,
+                                         WasmFunctionMethods,
+                                         nullptr,
+                                         nullptr,
+                                         ClassSpec::DontDefineConstructor};
+
+const JSClass js::WasmFunctionClass = {
+    "WebAssembly.Function", 0, JS_NULL_CLASS_OPS, &WasmFunctionClassSpec};
+
+#endif
+
+// ============================================================================
 // WebAssembly class and static methods
 
 static bool WebAssembly_toSource(JSContext* cx, unsigned argc, Value* vp) {
@@ -4141,7 +4404,7 @@ class AsyncInstantiateTask : public OffThreadPromiseTask {
 
   bool resolve(JSContext* cx, Handle<PromiseObject*> promise) override {
     RootedObject instanceProto(
-        cx, &cx->global()->getPrototype(JSProto_WasmInstance).toObject());
+        cx, &cx->global()->getPrototype(JSProto_WasmInstance));
 
     RootedWasmInstanceObject instanceObj(cx);
     if (!module_->instantiate(cx, imports_.get(), instanceProto,
@@ -4158,8 +4421,8 @@ class AsyncInstantiateTask : public OffThreadPromiseTask {
         return RejectWithPendingException(cx, promise);
       }
 
-      RootedObject moduleProto(
-          cx, &cx->global()->getPrototype(JSProto_WasmModule).toObject());
+      RootedObject moduleProto(cx,
+                               &cx->global()->getPrototype(JSProto_WasmModule));
       RootedObject moduleObj(
           cx, WasmModuleObject::create(cx, *module_, moduleProto));
       if (!moduleObj) {
@@ -4207,8 +4470,7 @@ static bool AsyncInstantiate(JSContext* cx, const Module& module,
 
 static bool ResolveCompile(JSContext* cx, const Module& module,
                            Handle<PromiseObject*> promise) {
-  RootedObject proto(
-      cx, &cx->global()->getPrototype(JSProto_WasmModule).toObject());
+  RootedObject proto(cx, &cx->global()->getPrototype(JSProto_WasmModule));
   RootedObject moduleObj(cx, WasmModuleObject::create(cx, module, proto));
   if (!moduleObj) {
     return RejectWithPendingException(cx, promise);
@@ -5072,6 +5334,9 @@ static bool WebAssemblyClassFinish(JSContext* cx, HandleObject object,
       {"CompileError", GetExceptionProtoKey(JSEXN_WASMCOMPILEERROR)},
       {"LinkError", GetExceptionProtoKey(JSEXN_WASMLINKERROR)},
       {"RuntimeError", GetExceptionProtoKey(JSEXN_WASMRUNTIMEERROR)},
+#ifdef ENABLE_WASM_TYPE_REFLECTIONS
+      {"Function", JSProto_WasmFunction},
+#endif
   };
   RootedValue ctorValue(cx);
   RootedId id(cx);
@@ -5084,8 +5349,8 @@ static bool WebAssemblyClassFinish(JSContext* cx, HandleObject object,
 #ifdef ENABLE_WASM_EXCEPTIONS
   if (ExceptionsAvailable(cx)) {
     constexpr NameAndProtoKey exceptionEntries[] = {
-      {"Tag", JSProto_WasmTag},
-      {"Exception", JSProto_WasmException},
+        {"Tag", JSProto_WasmTag},
+        {"Exception", JSProto_WasmException},
     };
     for (const auto& entry : exceptionEntries) {
       if (!WebAssemblyDefineConstructor(cx, wasm, entry, &ctorValue, &id)) {

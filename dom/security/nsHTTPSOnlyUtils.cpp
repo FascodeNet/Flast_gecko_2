@@ -273,6 +273,25 @@ bool nsHTTPSOnlyUtils::IsUpgradeDowngradeEndlessLoop(
   nsAutoCString uriHost;
   aURI->GetAsciiHost(uriHost);
 
+  auto uriAndPrincipalComparator = [&](nsIPrincipal* aPrincipal) {
+    nsAutoCString principalHost;
+    aPrincipal->GetAsciiHost(principalHost);
+    bool checkPath = mozilla::StaticPrefs::
+        dom_security_https_only_check_path_upgrade_downgrade_endless_loop();
+    if (!checkPath) {
+      return uriHost.Equals(principalHost);
+    }
+
+    nsAutoCString uriPath;
+    nsresult rv = aURI->GetFilePath(uriPath);
+    if (NS_FAILED(rv)) {
+      return false;
+    }
+    nsAutoCString principalPath;
+    aPrincipal->GetFilePath(principalPath);
+    return uriHost.Equals(principalHost) && uriPath.Equals(principalPath);
+  };
+
   // 6. Check actual redirects. If the Principal that kicked off the
   // load/redirect is not https, then it's definitely not a redirect cause by
   // https-only. If the scheme of the principal however is https and the
@@ -283,12 +302,9 @@ bool nsHTTPSOnlyUtils::IsUpgradeDowngradeEndlessLoop(
     nsCOMPtr<nsIPrincipal> redirectPrincipal;
     for (nsIRedirectHistoryEntry* entry : aLoadInfo->RedirectChain()) {
       entry->GetPrincipal(getter_AddRefs(redirectPrincipal));
-      if (redirectPrincipal && redirectPrincipal->SchemeIs("https")) {
-        nsAutoCString redirectHost;
-        redirectPrincipal->GetAsciiHost(redirectHost);
-        if (uriHost.Equals(redirectHost)) {
-          return true;
-        }
+      if (redirectPrincipal && redirectPrincipal->SchemeIs("https") &&
+          uriAndPrincipalComparator(redirectPrincipal)) {
+        return true;
       }
     }
   } else {
@@ -308,12 +324,13 @@ bool nsHTTPSOnlyUtils::IsUpgradeDowngradeEndlessLoop(
   // then we are dealing with an upgrade downgrade scenario and we have to break
   // the cycle.
   nsCOMPtr<nsIPrincipal> triggeringPrincipal = aLoadInfo->TriggeringPrincipal();
-  if (!triggeringPrincipal->SchemeIs("https")) {
+  // Since https-first also accepts http sites, endless loops can also be
+  // triggered by http sites
+  if (!triggeringPrincipal->SchemeIs("https") && !enforceForHTTPSFirstMode) {
     return false;
   }
-  nsAutoCString triggeringHost;
-  triggeringPrincipal->GetAsciiHost(triggeringHost);
-  return uriHost.Equals(triggeringHost);
+
+  return uriAndPrincipalComparator(triggeringPrincipal);
 }
 
 /* static */

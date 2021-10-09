@@ -7,15 +7,12 @@
 #include "jit/RangeAnalysis.h"
 
 #include "mozilla/MathAlgorithms.h"
-#include "mozilla/TemplateLib.h"
 
 #include <algorithm>
 
 #include "jsmath.h"
-#include "jsnum.h"
 
 #include "jit/CompileInfo.h"
-#include "jit/Ion.h"
 #include "jit/IonAnalysis.h"
 #include "jit/JitSpewer.h"
 #include "jit/MIR.h"
@@ -1905,6 +1902,10 @@ void MNaNToZero::computeRange(TempAllocator& alloc) {
 ///////////////////////////////////////////////////////////////////////////////
 // Range Analysis
 ///////////////////////////////////////////////////////////////////////////////
+
+static BranchDirection NegateBranchDirection(BranchDirection dir) {
+  return (dir == FALSE_BRANCH) ? TRUE_BRANCH : FALSE_BRANCH;
+}
 
 bool RangeAnalysis::analyzeLoop(MBasicBlock* header) {
   MOZ_ASSERT(header->hasUniqueBackedge());

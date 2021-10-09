@@ -1024,7 +1024,7 @@ nsresult LoadLoadableCertsTask::LoadLoadableRoots() {
 // Table of pref names and SSL cipher ID
 typedef struct {
   const char* pref;
-  long id;
+  int32_t id;
   bool enabledByDefault;
 } CipherPref;
 
@@ -1075,12 +1075,13 @@ static const CipherPref sCipherPrefs[] = {
      true},  // deprecated (RSA key exchange)
     {"security.ssl3.rsa_aes_256_sha", TLS_RSA_WITH_AES_256_CBC_SHA,
      true},  // deprecated (RSA key exchange)
-    {"security.ssl3.rsa_des_ede3_sha", TLS_RSA_WITH_3DES_EDE_CBC_SHA,
-     true},  // deprecated (RSA key exchange, 3DES)
+};
 
-    // All the rest are disabled
-
-    {nullptr, 0}  // end marker
+// These ciphersuites can only be enabled if deprecated versions of TLS are
+// also enabled (via the preference "security.tls.version.enable-deprecated").
+static const CipherPref sDeprecatedTLS1CipherPrefs[] = {
+    {"security.ssl3.deprecated.rsa_des_ede3_sha", TLS_RSA_WITH_3DES_EDE_CBC_SHA,
+     true},
 };
 
 // This function will convert from pref values like 1, 2, ...
@@ -1357,6 +1358,25 @@ nsresult CipherSuiteChangeObserver::StartObserve() {
   return NS_OK;
 }
 
+// Enables or disabled ciphersuites from deprecated versions of TLS as
+// appropriate. If security.tls.version.enable-deprecated is true, these
+// ciphersuites may be enabled, if the corresponding preference is true.
+// Otherwise, these ciphersuites will be disabled.
+void SetDeprecatedTLS1CipherPrefs() {
+  if (Preferences::GetBool("security.tls.version.enable-deprecated", false)) {
+    for (const auto& deprecatedTLS1CipherPref : sDeprecatedTLS1CipherPrefs) {
+      bool cipherEnabled =
+          Preferences::GetBool(deprecatedTLS1CipherPref.pref,
+                               deprecatedTLS1CipherPref.enabledByDefault);
+      SSL_CipherPrefSetDefault(deprecatedTLS1CipherPref.id, cipherEnabled);
+    }
+  } else {
+    for (const auto& deprecatedTLS1CipherPref : sDeprecatedTLS1CipherPrefs) {
+      SSL_CipherPrefSetDefault(deprecatedTLS1CipherPref.id, false);
+    }
+  }
+}
+
 nsresult CipherSuiteChangeObserver::Observe(nsISupports* /*aSubject*/,
                                             const char* aTopic,
                                             const char16_t* someData) {
@@ -1366,16 +1386,16 @@ nsresult CipherSuiteChangeObserver::Observe(nsISupports* /*aSubject*/,
   if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
     NS_ConvertUTF16toUTF8 prefName(someData);
     // Look through the cipher table and set according to pref setting
-    const CipherPref* const cp = sCipherPrefs;
-    for (size_t i = 0; cp[i].pref; ++i) {
-      if (prefName.Equals(cp[i].pref)) {
+    for (const auto& cipherPref : sCipherPrefs) {
+      if (prefName.Equals(cipherPref.pref)) {
         bool cipherEnabled =
-            Preferences::GetBool(cp[i].pref, cp[i].enabledByDefault);
-        SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
-        nsNSSComponent::DoClearSSLExternalAndInternalSessionCache();
+            Preferences::GetBool(cipherPref.pref, cipherPref.enabledByDefault);
+        SSL_CipherPrefSetDefault(cipherPref.id, cipherEnabled);
         break;
       }
     }
+    SetDeprecatedTLS1CipherPrefs();
+    nsNSSComponent::DoClearSSLExternalAndInternalSessionCache();
   } else if (nsCRT::strcmp(aTopic, NS_XPCOM_SHUTDOWN_OBSERVER_ID) == 0) {
     Preferences::RemoveObserver(this, "security.");
     MOZ_ASSERT(sObserver.get() == this);
@@ -2519,6 +2539,23 @@ already_AddRefed<SharedCertVerifier> GetDefaultCertVerifier() {
   return result.forget();
 }
 
+// Helper for FindClientCertificatesWithPrivateKeys. Copies all
+// CERTCertificates from `from` to `to`.
+static inline void CopyCertificatesTo(UniqueCERTCertList& from,
+                                      UniqueCERTCertList& to) {
+  MOZ_ASSERT(from);
+  MOZ_ASSERT(to);
+  for (CERTCertListNode* n = CERT_LIST_HEAD(from.get());
+       !CERT_LIST_END(n, from.get()); n = CERT_LIST_NEXT(n)) {
+    UniqueCERTCertificate cert(CERT_DupCertificate(n->cert));
+    MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+            ("      provisionally adding '%s'", n->cert->subjectName));
+    if (CERT_AddCertToListTail(to.get(), cert.get()) == SECSuccess) {
+      Unused << cert.release();
+    }
+  }
+}
+
 // Lists all private keys on all modules and returns a list of any corresponding
 // client certificates. Returns null if no such certificates can be found. Also
 // returns null if an error is encountered, because this is called as part of
@@ -2537,6 +2574,8 @@ UniqueCERTCertList FindClientCertificatesWithPrivateKeys() {
     return nullptr;
   }
 
+  UniquePK11SlotInfo internalSlot(PK11_GetInternalKeySlot());
+
   AutoSECMODListReadLock secmodLock;
   SECMODModuleList* list = SECMOD_GetDefaultModuleList();
   while (list) {
@@ -2546,45 +2585,70 @@ UniqueCERTCertList FindClientCertificatesWithPrivateKeys() {
       PK11SlotInfo* slot = list->module->slots[i];
       MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
               ("    slot '%s'", PK11_GetSlotName(slot)));
-      if (!PK11_IsPresent(slot)) {
-        MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (not present)"));
-        continue;
-      }
-      // We may need to log in to be able to find private keys.
-      if (PK11_Authenticate(slot, true, nullptr) != SECSuccess) {
-        MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (couldn't authenticate)"));
-        continue;
-      }
-      UniqueSECKEYPrivateKeyList privateKeys(
-          PK11_ListPrivKeysInSlot(slot, nullptr, nullptr));
-      if (!privateKeys) {
-        MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("      (no private keys)"));
-        continue;
-      }
-      for (SECKEYPrivateKeyListNode* node = PRIVKEY_LIST_HEAD(privateKeys);
-           !PRIVKEY_LIST_END(node, privateKeys);
-           node = PRIVKEY_LIST_NEXT(node)) {
-        UniqueCERTCertList certs(PK11_GetCertsMatchingPrivateKey(node->key));
-        if (!certs) {
-          MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-                  ("      PK11_GetCertsMatchingPrivateKey encountered an error "
-                   "- returning"));
-          return nullptr;
-        }
-        if (CERT_LIST_EMPTY(certs)) {
-          MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("      (no certs for key)"));
+      // If this is the internal certificate/key slot, there may be many more
+      // certificates than private keys, so search by private keys.
+      if (internalSlot.get() == slot) {
+        MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                ("    (looking at internal slot)"));
+        if (PK11_Authenticate(slot, true, nullptr) != SECSuccess) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (couldn't authenticate)"));
           continue;
         }
-        for (CERTCertListNode* n = CERT_LIST_HEAD(certs);
-             !CERT_LIST_END(n, certs); n = CERT_LIST_NEXT(n)) {
-          UniqueCERTCertificate cert(CERT_DupCertificate(n->cert));
-          MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
-                  ("      provisionally adding '%s'", n->cert->subjectName));
-          if (CERT_AddCertToListTail(certsWithPrivateKeys.get(), cert.get()) ==
-              SECSuccess) {
-            Unused << cert.release();
-          }
+        UniqueSECKEYPrivateKeyList privateKeys(
+            PK11_ListPrivKeysInSlot(slot, nullptr, nullptr));
+        if (!privateKeys) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("      (no private keys)"));
+          continue;
         }
+        for (SECKEYPrivateKeyListNode* node = PRIVKEY_LIST_HEAD(privateKeys);
+             !PRIVKEY_LIST_END(node, privateKeys);
+             node = PRIVKEY_LIST_NEXT(node)) {
+          UniqueCERTCertList certs(PK11_GetCertsMatchingPrivateKey(node->key));
+          if (!certs) {
+            MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                    ("      PK11_GetCertsMatchingPrivateKey encountered an "
+                     "error "));
+            continue;
+          }
+          if (CERT_LIST_EMPTY(certs)) {
+            MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("      (no certs for key)"));
+            continue;
+          }
+          CopyCertificatesTo(certs, certsWithPrivateKeys);
+        }
+      } else {
+        // ... otherwise, optimistically assume that searching by certificate
+        // won't take too much time. Since "friendly" slots expose certificates
+        // without needing to be authenticated to, this results in fewer PIN
+        // dialogs shown to the user.
+        MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                ("    (looking at non-internal slot)"));
+
+        if (!PK11_IsPresent(slot)) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (not present)"));
+          continue;
+        }
+        // If this isn't a "friendly" slot, authenticate to expose certificates.
+        if (!PK11_IsFriendly(slot) &&
+            PK11_Authenticate(slot, true, nullptr) != SECSuccess) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug, ("    (couldn't authenticate)"));
+          continue;
+        }
+        UniqueCERTCertList certsInSlot(PK11_ListCertsInSlot(slot));
+        if (!certsInSlot) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                  ("      (couldn't list certs in slot)"));
+          continue;
+        }
+        // When NSS decodes a certificate, if that certificate has a
+        // corresponding private key (or public key, if the slot it's on hasn't
+        // been logged into), it notes it as a "user cert".
+        if (CERT_FilterCertListForUserCerts(certsInSlot.get()) != SECSuccess) {
+          MOZ_LOG(gPIPNSSLog, LogLevel::Debug,
+                  ("      (couldn't filter certs)"));
+          continue;
+        }
+        CopyCertificatesTo(certsInSlot, certsWithPrivateKeys);
       }
     }
     list = list->next;
@@ -2729,12 +2793,13 @@ nsresult InitializeCipherSuite() {
   }
 
   // Now only set SSL/TLS ciphers we knew about at compile time
-  const CipherPref* const cp = sCipherPrefs;
-  for (size_t i = 0; cp[i].pref; ++i) {
+  for (const auto& cipherPref : sCipherPrefs) {
     bool cipherEnabled =
-        Preferences::GetBool(cp[i].pref, cp[i].enabledByDefault);
-    SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
+        Preferences::GetBool(cipherPref.pref, cipherPref.enabledByDefault);
+    SSL_CipherPrefSetDefault(cipherPref.id, cipherEnabled);
   }
+
+  SetDeprecatedTLS1CipherPrefs();
 
   // Enable ciphers for PKCS#12
   SEC_PKCS12EnableCipher(PKCS12_RC4_40, 1);

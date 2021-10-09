@@ -24,8 +24,6 @@
 
 #include "jsapi.h"
 
-#define NS_CRASHREPORTER_CONTRACTID "@mozilla.org/toolkit/crash-reporter;1"
-
 using namespace mozilla;
 using namespace mozilla::widget;
 
@@ -459,11 +457,6 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
     IMPLEMENT_MAC_DRIVER_BLOCKLIST(OperatingSystem::OSX, DeviceFamily::AppleAll,
                                    nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_ALLOW_ALWAYS,
                                    "FEATURE_ROLLOUT_APPLE_SILICON_MAC");
-
-    // FEATURE_WEBRENDER_SOFTWARE - ALLOWLIST
-    IMPLEMENT_MAC_DRIVER_BLOCKLIST(OperatingSystem::OSX, DeviceFamily::All,
-                                   nsIGfxInfo::FEATURE_WEBRENDER_SOFTWARE,
-                                   nsIGfxInfo::FEATURE_ALLOW_ALWAYS, "FEATURE_ROLLOUT_SOFTWARE_WR");
   }
   return *sDriverInfo;
 }

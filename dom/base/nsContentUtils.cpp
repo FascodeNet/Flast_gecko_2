@@ -737,6 +737,7 @@ nsresult nsContentUtils::Init() {
 
   sNameSpaceManager = nsNameSpaceManager::GetInstance();
   NS_ENSURE_TRUE(sNameSpaceManager, NS_ERROR_OUT_OF_MEMORY);
+  NS_ADDREF(sNameSpaceManager);
 
   sXPConnect = nsXPConnect::XPConnect();
   // We hold a strong ref to sXPConnect to ensure that it does not go away until
@@ -1873,6 +1874,7 @@ void nsContentUtils::Shutdown() {
   NS_IF_RELEASE(sNullSubjectPrincipal);
   NS_IF_RELEASE(sIOService);
   NS_IF_RELEASE(sUUIDGenerator);
+  NS_IF_RELEASE(sNameSpaceManager);
   sLineBreaker = nullptr;
   sWordBreaker = nullptr;
   sBidiKeyboard = nullptr;
@@ -3032,7 +3034,7 @@ void nsContentUtils::GenerateStateKey(nsIContent* aContent, Document* aDocument,
       KeyAppendInt(int32_t(control->ControlType()), aKey);
 
       // If in a form, add form name / index of form / index in form
-      HTMLFormElement* formElement = control->GetFormElement();
+      HTMLFormElement* formElement = control->GetForm();
       if (formElement) {
         if (IsAutocompleteOff(formElement)) {
           aKey.Truncate();
@@ -5907,16 +5909,21 @@ bool nsContentUtils::CheckForSubFrameDrop(nsIDragSession* aDragSession,
     return false;
   }
 
-  // If there is no source node, then this is a drag from another
+  WindowContext* targetWC = target->OwnerDoc()->GetWindowContext();
+
+  // If there is no source browsing context, then this is a drag from another
   // application, which should be allowed.
-  RefPtr<Document> doc(aDragSession->GetSourceDocument());
-  if (doc && doc->GetBrowsingContext()) {
+  RefPtr<WindowContext> sourceWC;
+  aDragSession->GetSourceWindowContext(getter_AddRefs(sourceWC));
+  if (sourceWC) {
     // Get each successive parent of the source document and compare it to
     // the drop document. If they match, then this is a drag from a child frame.
-    for (BrowsingContext* bc = doc->GetBrowsingContext()->GetParent(); bc;
-         bc = bc->GetParent()) {
-      if (bc == targetBC) {
-        // The drag is from a descendant frame.
+    for (sourceWC = sourceWC->GetParentWindowContext(); sourceWC;
+         sourceWC = sourceWC->GetParentWindowContext()) {
+      // If the source and the target match, then the drag started in a
+      // descendant frame. If the source is discarded, err on the side of
+      // caution and treat it as a subframe drag.
+      if (sourceWC == targetWC || sourceWC->IsDiscarded()) {
         return true;
       }
     }
@@ -8388,67 +8395,6 @@ bool nsContentUtils::IsNonSubresourceInternalPolicyType(
          aType == nsIContentPolicy::TYPE_INTERNAL_FRAME ||
          aType == nsIContentPolicy::TYPE_INTERNAL_WORKER ||
          aType == nsIContentPolicy::TYPE_INTERNAL_SHARED_WORKER;
-}
-
-// static public
-bool nsContentUtils::IsThirdPartyWindowOrChannel(nsPIDOMWindowInner* aWindow,
-                                                 nsIChannel* aChannel,
-                                                 nsIURI* aURI) {
-  MOZ_ASSERT(!aWindow || !aChannel,
-             "A window and channel should not both be provided.");
-
-  ThirdPartyUtil* thirdPartyUtil = ThirdPartyUtil::GetInstance();
-  if (!thirdPartyUtil) {
-    return false;
-  }
-
-  // In the absence of a window or channel, we assume that we are first-party.
-  bool thirdParty = false;
-
-  if (aWindow) {
-    nsresult rv = thirdPartyUtil->IsThirdPartyWindow(aWindow->GetOuterWindow(),
-                                                     aURI, &thirdParty);
-    if (NS_FAILED(rv)) {
-      // Ideally we would do something similar to the channel code path here,
-      // but existing code depends on this behaviour.
-      return false;
-    }
-  }
-
-  if (aChannel) {
-    // Note, we must call IsThirdPartyChannel() here and not just try to
-    // use nsILoadInfo.isThirdPartyContext.  That nsILoadInfo property only
-    // indicates if the parent loading window is third party or not.  We
-    // want to check the channel URI against the loading principal as well.
-    nsresult rv =
-        thirdPartyUtil->IsThirdPartyChannel(aChannel, nullptr, &thirdParty);
-    if (NS_FAILED(rv)) {
-      // Assume third-party in case of failure
-      thirdParty = true;
-    }
-
-    // We check isThirdPartyWindow to expand the list of domains that are
-    // considered first party (e.g., if facebook.com includes an iframe from
-    // fatratgames.com, all subsources included in that iframe are considered
-    // third-party with isThirdPartyChannel, even if they are not third-party
-    // w.r.t.  facebook.com), and isThirdPartyChannel to prevent top-level
-    // navigations from being detected as third-party.
-    bool isThirdPartyWindow = true;
-    nsCOMPtr<nsIHttpChannelInternal> chan = do_QueryInterface(aChannel, &rv);
-    if (NS_SUCCEEDED(rv) && chan) {
-      nsCOMPtr<nsIURI> topWinURI;
-      rv = chan->GetTopWindowURI(getter_AddRefs(topWinURI));
-      if (NS_SUCCEEDED(rv) && topWinURI) {
-        rv = thirdPartyUtil->IsThirdPartyURI(aURI, topWinURI,
-                                             &isThirdPartyWindow);
-        if (NS_SUCCEEDED(rv)) {
-          thirdParty = thirdParty && isThirdPartyWindow;
-        }
-      }
-    }
-  }
-
-  return thirdParty;
 }
 
 // static public

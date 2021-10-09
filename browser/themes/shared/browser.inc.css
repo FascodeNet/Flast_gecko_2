@@ -256,7 +256,7 @@ menupopup::part(drop-indicator) {
   list-style-image: none;
   height: 2px;
   margin-inline-end: -4em;
-  background-color: Highlight;
+  background-color: SelectedItem;
   pointer-events: none;
 }
 
@@ -732,7 +732,7 @@ popupnotificationcontent {
 }
 
 .popup-notification-checkbox {
-  margin-block: 8px 0;
+  margin-block: 12px 0;
 }
 
 .popup-notification-body-container {

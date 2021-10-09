@@ -10,7 +10,6 @@
 
 #include "mozilla/Maybe.h"  // mozilla::Maybe, mozilla::Some
 
-#include "jsapi.h"    // JS_ReportErrorNumberASCII
 #include "jspubtd.h"  // JSProto_ReadableStream
 
 #include "builtin/Array.h"                   // js::NewDenseFullyAllocatedArray
@@ -25,6 +24,7 @@
 #include "js/CallArgs.h"                     // JS::CallArgs{,FromVp}
 #include "js/Class.h"        // JSCLASS_SLOT0_IS_NSISUPPORTS, JS_NULL_CLASS_OPS
 #include "js/Conversions.h"  // JS::ToBoolean
+#include "js/ErrorReport.h"  // JS_ReportErrorNumberASCII
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/PropertySpec.h"  // JS{Function,Property}Spec, JS_FN, JS_PSG, JS_{FS,PS}_END
 #include "js/RootingAPI.h"        // JS::Handle, JS::Rooted, js::CanGC
@@ -113,7 +113,7 @@ bool ReadableStream::constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
   // Implicit in the spec: argument default values.
   Rooted<Value> underlyingSource(cx, args.get(0));
   if (underlyingSource.isUndefined()) {
-    JSObject* emptyObj = NewBuiltinClassInstance<PlainObject>(cx);
+    JSObject* emptyObj = NewPlainObject(cx);
     if (!emptyObj) {
       return false;
     }
@@ -122,7 +122,7 @@ bool ReadableStream::constructor(JSContext* cx, unsigned argc, JS::Value* vp) {
 
   Rooted<Value> strategy(cx, args.get(1));
   if (strategy.isUndefined()) {
-    JSObject* emptyObj = NewBuiltinClassInstance<PlainObject>(cx);
+    JSObject* emptyObj = NewPlainObject(cx);
     if (!emptyObj) {
       return false;
     }
@@ -385,7 +385,7 @@ static bool ReadableStream_pipeTo(JSContext* cx, unsigned argc, Value* vp) {
   // Implicit in the spec: argument default values.
   Rooted<Value> options(cx, args.get(1));
   if (options.isUndefined()) {
-    JSObject* emptyObj = NewBuiltinClassInstance<PlainObject>(cx);
+    JSObject* emptyObj = NewPlainObject(cx);
     if (!emptyObj) {
       return false;
     }

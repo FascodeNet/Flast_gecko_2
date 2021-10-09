@@ -10,9 +10,7 @@
 #include <limits>
 
 #include "ActiveLayerTracker.h"
-#include "ClientLayerManager.h"
 #include "DisplayItemClip.h"
-#include "FrameLayerBuilder.h"
 #include "gfx2DGlue.h"
 #include "gfxContext.h"
 #include "gfxDrawable.h"
@@ -155,7 +153,6 @@
 #include "RegionBuilder.h"
 #include "RetainedDisplayListBuilder.h"
 #include "TextDrawTarget.h"
-#include "TiledLayerBuffer.h"  // For TILEDLAYERBUFFER_TILE_SIZE
 #include "UnitTransforms.h"
 #include "ViewportFrame.h"
 
@@ -1410,49 +1407,6 @@ SideBits nsLayoutUtils::GetSideBitsAndAdjustAnchorForFixedPositionContent(
     }
   }
   return sides;
-}
-
-/* static */
-void nsLayoutUtils::SetFixedPositionLayerData(
-    Layer* aLayer, const nsIFrame* aViewportFrame, const nsRect& aAnchorRect,
-    const nsIFrame* aFixedPosFrame, nsPresContext* aPresContext,
-    const ContainerLayerParameters& aContainerParameters) {
-  // Find out the rect of the viewport frame relative to the reference frame.
-  // This, in conjunction with the container scale, will correspond to the
-  // coordinate-space of the built layer.
-  float factor = aPresContext->AppUnitsPerDevPixel();
-  Rect anchorRect(NSAppUnitsToFloatPixels(aAnchorRect.x, factor) *
-                      aContainerParameters.mXScale,
-                  NSAppUnitsToFloatPixels(aAnchorRect.y, factor) *
-                      aContainerParameters.mYScale,
-                  NSAppUnitsToFloatPixels(aAnchorRect.width, factor) *
-                      aContainerParameters.mXScale,
-                  NSAppUnitsToFloatPixels(aAnchorRect.height, factor) *
-                      aContainerParameters.mYScale);
-  // Need to transform anchorRect from the container layer's coordinate system
-  // into aLayer's coordinate system.
-  Matrix transform2d;
-  if (aLayer->GetTransform().Is2D(&transform2d)) {
-    transform2d.Invert();
-    anchorRect = transform2d.TransformBounds(anchorRect);
-  } else {
-    NS_ERROR(
-        "3D transform found between fixedpos content and its viewport (should "
-        "never happen)");
-    anchorRect = Rect(0, 0, 0, 0);
-  }
-
-  // Work out the anchor point for this fixed position layer. We assume that
-  // any positioning set (left/top/right/bottom) indicates that the
-  // corresponding side of its container should be the anchor point,
-  // defaulting to top-left.
-  LayerPoint anchor(anchorRect.x, anchorRect.y);
-
-  SideBits sides = GetSideBitsAndAdjustAnchorForFixedPositionContent(
-      aViewportFrame, aFixedPosFrame, &anchor, &anchorRect);
-
-  ViewID id = ScrollIdForRootScrollFrame(aPresContext);
-  aLayer->SetFixedPositionData(id, anchor, sides);
 }
 
 ScrollableLayerGuid::ViewID nsLayoutUtils::ScrollIdForRootScrollFrame(
@@ -2866,7 +2820,7 @@ FrameMetrics nsLayoutUtils::CalculateBasicFrameMetrics(
       nsLayoutUtils::CalculateCompositionSizeForFrame(frame);
   LayoutDeviceToParentLayerScale2D compBoundsScale;
   if (frame == presShell->GetRootScrollFrame() &&
-      presContext->IsRootContentDocument()) {
+      presContext->IsRootContentDocumentCrossProcess()) {
     if (presContext->GetParentPresContext()) {
       float res = presContext->GetParentPresContext()
                       ->PresShell()
@@ -3031,39 +2985,6 @@ static void ApplyEffectsUpdates(
   }
 }
 
-static void LogPaintedPixelCount(LayerManager* aLayerManager,
-                                 const TimeStamp aPaintStart) {
-  static std::vector<std::pair<TimeStamp, uint32_t>> history;
-
-  const TimeStamp now = TimeStamp::Now();
-  const double rasterizeTime = (now - aPaintStart).ToMilliseconds();
-
-  const uint32_t pixelCount = aLayerManager->GetAndClearPaintedPixelCount();
-  if (pixelCount) {
-    history.push_back(std::make_pair(now, pixelCount));
-  }
-
-  uint32_t paintedInLastSecond = 0;
-  for (auto i = history.begin(); i != history.end(); i++) {
-    if ((now - i->first).ToMilliseconds() > 1000.0f) {
-      // more than 1000ms ago, don't count it
-      continue;
-    }
-
-    if (paintedInLastSecond == 0) {
-      // This is the first one in the last 1000ms, so drop everything earlier
-      history.erase(history.begin(), i);
-      i = history.begin();
-    }
-
-    paintedInLastSecond += i->second;
-    MOZ_ASSERT(paintedInLastSecond);  // all historical pixel counts are > 0
-  }
-
-  printf_stderr("Painted %u pixels in %fms (%u in the last 1000ms)\n",
-                pixelCount, rasterizeTime, paintedInLastSecond);
-}
-
 static void DumpBeforePaintDisplayList(UniquePtr<std::stringstream>& aStream,
                                        nsDisplayListBuilder* aBuilder,
                                        nsDisplayList* aList,
@@ -3114,17 +3035,10 @@ static void DumpBeforePaintDisplayList(UniquePtr<std::stringstream>& aStream,
 
 static void DumpAfterPaintDisplayList(UniquePtr<std::stringstream>& aStream,
                                       nsDisplayListBuilder* aBuilder,
-                                      nsDisplayList* aList,
-                                      LayerManager* aManager) {
+                                      nsDisplayList* aList) {
   *aStream << "Painting --- after optimization:\n";
   nsIFrame::PrintDisplayList(aBuilder, *aList, *aStream,
                              gfxEnv::DumpPaintToFile());
-
-  *aStream << "Painting --- layer tree:\n";
-  if (aManager) {
-    FrameLayerBuilder::DumpRetainedLayerTree(aManager, *aStream,
-                                             gfxEnv::DumpPaintToFile());
-  }
 
   fprint_stderr(gfxUtils::sDumpPaintFile, *aStream);
 
@@ -3139,9 +3053,6 @@ static void DumpAfterPaintDisplayList(UniquePtr<std::stringstream>& aStream,
 
   std::stringstream lsStream;
   nsIFrame::PrintDisplayList(aBuilder, *aList, lsStream);
-  if (aManager && aManager->GetRoot()) {
-    aManager->GetRoot()->SetDisplayListLog(lsStream.str().c_str());
-  }
 }
 
 struct TemporaryDisplayListBuilder {
@@ -3157,12 +3068,10 @@ struct TemporaryDisplayListBuilder {
   RetainedDisplayListMetrics mMetrics;
 };
 
-nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
-                                   nsIFrame* aFrame,
-                                   const nsRegion& aDirtyRegion,
-                                   nscolor aBackstop,
-                                   nsDisplayListBuilderMode aBuilderMode,
-                                   PaintFrameFlags aFlags) {
+void nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext, nsIFrame* aFrame,
+                               const nsRegion& aDirtyRegion, nscolor aBackstop,
+                               nsDisplayListBuilderMode aBuilderMode,
+                               PaintFrameFlags aFlags) {
   AUTO_PROFILER_LABEL("nsLayoutUtils::PaintFrame", GRAPHICS);
 
 #ifdef MOZ_DUMP_PAINTING
@@ -3374,22 +3283,10 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
     PerfStats::AutoMetricRecording<PerfStats::Metric::DisplayListBuilding>
         autoRecording;
     {
-      // If a scrollable container layer is created in
-      // nsDisplayList::PaintForFrame, it will be the scroll parent for display
-      // items that are built in the BuildDisplayListForStackingContext call
-      // below. We need to set the scroll parent on the display list builder
-      // while we build those items, so that they can pick up their scroll
-      // parent's id.
       ViewID id = ScrollableLayerGuid::NULL_SCROLL_ID;
-      if (ignoreViewportScrolling && presContext->IsRootContentDocument()) {
-        if (nsIFrame* rootScrollFrame = presShell->GetRootScrollFrame()) {
-          if (nsIContent* content = rootScrollFrame->GetContent()) {
-            id = nsLayoutUtils::FindOrCreateIDFor(content);
-          }
-        }
-      } else if (presShell->GetDocument() &&
-                 presShell->GetDocument()->IsRootDisplayDocument() &&
-                 !presShell->GetRootScrollFrame()) {
+      if (presShell->GetDocument() &&
+          presShell->GetDocument()->IsRootDisplayDocument() &&
+          !presShell->GetRootScrollFrame()) {
         // In cases where the root document is a XUL document, we want to take
         // the ViewID from the root element, as that will be the ViewID of the
         // root APZC in the tree. Skip doing this in cases where we know
@@ -3482,16 +3379,6 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
     builder->IncrementPresShellPaintCount(presShell);
   }
 
-  if (StaticPrefs::layers_acceleration_draw_fps()) {
-    RefPtr<LayerManager> lm = builder->GetWidgetLayerManager();
-    PaintTiming* pt = ClientLayerManager::MaybeGetPaintTiming(lm);
-
-    if (pt) {
-      pt->dlMs() = static_cast<float>(metrics->mPartialBuildDuration);
-      pt->dl2Ms() = static_cast<float>(metrics->mFullBuildDuration);
-    }
-  }
-
   MOZ_ASSERT(updateState != PartialUpdateResult::Failed);
   builder->Check();
 
@@ -3552,8 +3439,7 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
 #endif
 
   TimeStamp paintStart = TimeStamp::Now();
-  RefPtr<LayerManager> layerManager = list->PaintRoot(
-      builder, aRenderingContext, flags, Some(geckoDLBuildTime));
+  list->PaintRoot(builder, aRenderingContext, flags, Some(geckoDLBuildTime));
   Telemetry::AccumulateTimeDelta(Telemetry::PAINT_RASTERIZE_TIME, paintStart);
 
   if (builder->IsPaintingToWindow()) {
@@ -3561,23 +3447,13 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
   }
   builder->Check();
 
-  if (StaticPrefs::gfx_logging_painted_pixel_count_enabled()) {
-    LogPaintedPixelCount(layerManager, paintStart);
-  }
-
   if (consoleNeedsDisplayList) {
-    DumpAfterPaintDisplayList(ss, builder, list, layerManager);
+    DumpAfterPaintDisplayList(ss, builder, list);
   }
 
 #ifdef MOZ_DUMP_PAINTING
   gfxUtils::sDumpPaintFile = savedDumpFile;
 #endif
-
-  if (StaticPrefs::layers_dump_client_layers() && layerManager) {
-    std::stringstream ss;
-    FrameLayerBuilder::DumpRetainedLayerTree(layerManager, ss, false);
-    print_stderr(ss);
-  }
 
   // Update the widget's opaque region information. This sets
   // glass boundaries on Windows. Also set up the window dragging region.
@@ -3626,8 +3502,6 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
     }
   }
 #endif
-
-  return NS_OK;
 }
 
 /**
@@ -4191,7 +4065,6 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetFontMetricsForComputedStyle(
   // pass along to CreateFontGroup
   params.userFontSet = aPresContext->GetUserFontSet();
   params.textPerf = aPresContext->GetTextPerfMetrics();
-  params.fontStats = aPresContext->GetFontMatchingStats();
   params.featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
 
   // When aInflation is 1.0 and we don't require width variant, avoid
@@ -4200,8 +4073,7 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetFontMetricsForComputedStyle(
   // which would be lossy.  Fortunately, in such cases, aInflation is
   // guaranteed to be 1.0f.
   if (aInflation == 1.0f && aVariantWidth == NS_FONT_VARIANT_WIDTH_NORMAL) {
-    return aPresContext->DeviceContext()->GetMetricsFor(styleFont->mFont,
-                                                        params);
+    return aPresContext->GetMetricsFor(styleFont->mFont, params);
   }
 
   nsFont font = styleFont->mFont;
@@ -4212,7 +4084,7 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetFontMetricsForComputedStyle(
     font.size = {0};
   }
   font.variantWidth = aVariantWidth;
-  return aPresContext->DeviceContext()->GetMetricsFor(font, params);
+  return aPresContext->GetMetricsFor(font, params);
 }
 
 nsIFrame* nsLayoutUtils::FindChildContainingDescendant(
@@ -6096,24 +5968,19 @@ nsIFrame* nsLayoutUtils::GetClosestLayer(nsIFrame* aFrame) {
 }
 
 SamplingFilter nsLayoutUtils::GetSamplingFilterForFrame(nsIFrame* aForFrame) {
-  SamplingFilter defaultFilter = SamplingFilter::GOOD;
-  ComputedStyle* sc;
-  if (nsCSSRendering::IsCanvasFrame(aForFrame)) {
-    nsCSSRendering::FindBackground(aForFrame, &sc);
-  } else {
-    sc = aForFrame->Style();
-  }
-
-  switch (sc->StyleVisibility()->mImageRendering) {
-    case StyleImageRendering::Optimizespeed:
-      return SamplingFilter::POINT;
+  switch (aForFrame->UsedImageRendering()) {
+    case StyleImageRendering::Smooth:
     case StyleImageRendering::Optimizequality:
       return SamplingFilter::LINEAR;
     case StyleImageRendering::CrispEdges:
+    case StyleImageRendering::Optimizespeed:
+    case StyleImageRendering::Pixelated:
       return SamplingFilter::POINT;
-    default:
-      return defaultFilter;
+    case StyleImageRendering::Auto:
+      return SamplingFilter::GOOD;
   }
+  MOZ_ASSERT_UNREACHABLE("Unknown image-rendering value");
+  return SamplingFilter::GOOD;
 }
 
 /**
@@ -7041,7 +6908,7 @@ nsIFrame* nsLayoutUtils::GetReferenceFrame(nsIFrame* aFrame) {
     if (f->IsTransformed() || f->IsPreserve3DLeaf() || IsPopup(f)) {
       return f;
     }
-    nsIFrame* parent = GetCrossDocParentFrame(f);
+    nsIFrame* parent = GetCrossDocParentFrameInProcess(f);
     if (!parent) {
       return f;
     }
@@ -8475,31 +8342,22 @@ nsRect nsLayoutUtils::CalculateExpandedScrollableRect(nsIFrame* aFrame) {
 }
 
 /* static */
-void nsLayoutUtils::DoLogTestDataForPaint(LayerManager* aManager,
+void nsLayoutUtils::DoLogTestDataForPaint(WebRenderLayerManager* aManager,
                                           ViewID aScrollId,
                                           const std::string& aKey,
                                           const std::string& aValue) {
   MOZ_ASSERT(nsLayoutUtils::IsAPZTestLoggingEnabled(), "don't call me");
-  if (ClientLayerManager* mgr = aManager->AsClientLayerManager()) {
-    mgr->LogTestDataForCurrentPaint(aScrollId, aKey, aValue);
-  } else if (WebRenderLayerManager* wrlm =
-                 aManager->AsWebRenderLayerManager()) {
-    wrlm->LogTestDataForCurrentPaint(aScrollId, aKey, aValue);
-  }
+  aManager->LogTestDataForCurrentPaint(aScrollId, aKey, aValue);
 }
 
 void nsLayoutUtils::LogAdditionalTestData(nsDisplayListBuilder* aBuilder,
                                           const std::string& aKey,
                                           const std::string& aValue) {
-  LayerManager* manager = aBuilder->GetWidgetLayerManager(nullptr);
+  WebRenderLayerManager* manager = aBuilder->GetWidgetLayerManager(nullptr);
   if (!manager) {
     return;
   }
-  if (ClientLayerManager* clm = manager->AsClientLayerManager()) {
-    clm->LogAdditionalTestData(aKey, aValue);
-  } else if (WebRenderLayerManager* wrlm = manager->AsWebRenderLayerManager()) {
-    wrlm->LogAdditionalTestData(aKey, aValue);
-  }
+  manager->LogAdditionalTestData(aKey, aValue);
 }
 
 /* static */
@@ -8613,18 +8471,6 @@ void StrokeLineWithSnapping(const nsPoint& aP1, const nsPoint& aP2,
   aDrawTarget.StrokeLine(p1, p2, aPattern, aStrokeOptions, aDrawOptions);
 }
 
-namespace layout {
-
-void MaybeSetupTransactionIdAllocator(layers::LayerManager* aManager,
-                                      nsPresContext* aPresContext) {
-  auto backendType = aManager->GetBackendType();
-  if (backendType == LayersBackend::LAYERS_CLIENT ||
-      backendType == LayersBackend::LAYERS_WR) {
-    aManager->SetTransactionIdAllocator(aPresContext->RefreshDriver());
-  }
-}
-
-}  // namespace layout
 }  // namespace mozilla
 
 /* static */
@@ -8694,10 +8540,9 @@ bool nsLayoutUtils::CanScrollOriginClobberApz(ScrollOrigin aScrollOrigin) {
 ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
     const nsIFrame* aForFrame, const nsIFrame* aScrollFrame,
     nsIContent* aContent, const nsIFrame* aReferenceFrame,
-    LayerManager* aLayerManager, ViewID aScrollParentId,
+    WebRenderLayerManager* aLayerManager, ViewID aScrollParentId,
     const nsSize& aScrollPortSize, const Maybe<nsRect>& aClipRect,
-    bool aIsRootContent,
-    const Maybe<ContainerLayerParameters>& aContainerParameters) {
+    bool aIsRootContent) {
   const nsPresContext* presContext = aForFrame->PresContext();
   int32_t auPerDevPixel = presContext->AppUnitsPerDevPixel();
 
@@ -8927,11 +8772,8 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
   // don't have a aContainerParameters. In that case we're also not rasterizing
   // in Gecko anyway, so the only resolution we care about here is the presShell
   // resolution which we need to propagate to WebRender.
-  metrics.SetCumulativeResolution(
-      aContainerParameters
-          ? aContainerParameters->Scale()
-          : LayoutDeviceToLayerScale2D(LayoutDeviceToLayerScale(
-                presShell->GetCumulativeResolution())));
+  metrics.SetCumulativeResolution(LayoutDeviceToLayerScale2D(
+      LayoutDeviceToLayerScale(presShell->GetCumulativeResolution())));
 
   LayoutDeviceToScreenScale2D resolutionToScreen(
       presShell->GetCumulativeResolution() *
@@ -9071,8 +8913,7 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
 
 /*static*/
 Maybe<ScrollMetadata> nsLayoutUtils::GetRootMetadata(
-    nsDisplayListBuilder* aBuilder, LayerManager* aLayerManager,
-    const ContainerLayerParameters& aContainerParameters,
+    nsDisplayListBuilder* aBuilder, WebRenderLayerManager* aLayerManager,
     const std::function<bool(ViewID& aScrollId)>& aCallback) {
   nsIFrame* frame = aBuilder->RootReferenceFrame();
   nsPresContext* presContext = frame->PresContext();
@@ -9122,7 +8963,7 @@ Maybe<ScrollMetadata> nsLayoutUtils::GetRootMetadata(
     return Some(nsLayoutUtils::ComputeScrollMetadata(
         frame, rootScrollFrame, content, aBuilder->FindReferenceFrameFor(frame),
         aLayerManager, ScrollableLayerGuid::NULL_SCROLL_ID, scrollPortSize,
-        Nothing(), isRootContent, Some(aContainerParameters)));
+        Nothing(), isRootContent));
   }
 
   return Nothing();
@@ -9373,7 +9214,7 @@ CSSPoint nsLayoutUtils::GetCumulativeApzCallbackTransform(nsIFrame* aFrame) {
 
     // Keep track of whether we've encountered the RCD-RSF's content element.
     nsPresContext* pc = frame->PresContext();
-    if (pc->IsRootContentDocument()) {
+    if (pc->IsRootContentDocumentCrossProcess()) {
       if (PresShell* shell = pc->GetPresShell()) {
         if (nsIFrame* rsf = shell->GetRootScrollFrame()) {
           if (frame->GetContent() == rsf->GetContent()) {
@@ -9390,7 +9231,7 @@ CSSPoint nsLayoutUtils::GetCumulativeApzCallbackTransform(nsIFrame* aFrame) {
     // which applies to fixed content as well.
     ViewportFrame* viewportFrame = do_QueryFrame(frame);
     if (viewportFrame) {
-      if (pc->IsRootContentDocument() && !seenRcdRsf) {
+      if (pc->IsRootContentDocumentCrossProcess() && !seenRcdRsf) {
         applyCallbackTransformForFrame(pc->PresShell()->GetRootScrollFrame());
       }
     }
@@ -9749,9 +9590,8 @@ already_AddRefed<nsFontMetrics> nsLayoutUtils::GetMetricsFor(
   params.userFontSet =
       aUseUserFontSet ? aPresContext->GetUserFontSet() : nullptr;
   params.textPerf = aPresContext->GetTextPerfMetrics();
-  params.fontStats = aPresContext->GetFontMatchingStats();
   params.featureValueLookup = aPresContext->GetFontFeatureValuesLookup();
-  return aPresContext->DeviceContext()->GetMetricsFor(font, params);
+  return aPresContext->GetMetricsFor(font, params);
 }
 
 /* static */

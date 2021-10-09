@@ -56,7 +56,7 @@ class PrototypeDocumentParser final : public nsIParser,
 
   virtual void SetDocumentCharset(NotNull<const Encoding*> aEncoding,
                                   int32_t aSource,
-                                  bool aChannelHadCharset) override {}
+                                  bool aForceAutoDetection) override {}
 
   NS_IMETHOD GetChannel(nsIChannel** aChannel) override {
     return NS_ERROR_NOT_IMPLEMENTED;
@@ -80,9 +80,7 @@ class PrototypeDocumentParser final : public nsIParser,
 
   NS_IMETHOD_(bool) IsComplete() override;
 
-  NS_IMETHOD Parse(nsIURI* aURL, nsIRequestObserver* aListener = nullptr,
-                   void* aKey = 0,
-                   nsDTDMode aMode = eDTDMode_autodetect) override;
+  NS_IMETHOD Parse(nsIURI* aURL, void* aKey = nullptr) override;
 
   NS_IMETHOD Terminate() override { return NS_ERROR_NOT_IMPLEMENTED; }
 

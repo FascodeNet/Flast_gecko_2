@@ -28,8 +28,11 @@ UNSUPPORTED_FEATURES = set(
         "Atomics.waitAsync",
         "legacy-regexp",
         "import-assertions",
+        "json-modules",
         "resizable-arraybuffer",
         "Temporal",
+        "callable-boundary-realms",
+        "array-find-from-last",
     ]
 )
 FEATURE_CHECK_NEEDED = {
@@ -39,10 +42,7 @@ FEATURE_CHECK_NEEDED = {
     "WeakRef": "!this.hasOwnProperty('WeakRef')",
 }
 RELEASE_OR_BETA = set([])
-SHELL_OPTIONS = {
-    "top-level-await": "--enable-top-level-await",
-    "class-static-block": "--enable-class-static-blocks",
-}
+SHELL_OPTIONS = {}
 
 
 @contextlib.contextmanager

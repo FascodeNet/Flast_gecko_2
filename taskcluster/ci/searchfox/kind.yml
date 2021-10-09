@@ -58,7 +58,7 @@ jobs:
                 - linux64-cbindgen
                 - linux64-dump_syms
                 - sysroot-x86_64-linux-gnu
-                - wasi-sysroot
+                - sysroot-wasm32-wasi
 
     macosx64-searchfox/debug:
         description: "MacOS X x64 Debug Cross-compile Searchfox"
@@ -68,7 +68,7 @@ jobs:
             platform: osx-cross/debug
         worker-type: b-linux
         worker:
-            docker-image: {in-tree: debian10-amd64-build}
+            docker-image: {in-tree: debian11-amd64-build}
             max-run-time: 36000
             env:
                 PERFHERDER_EXTRA_OPTIONS: searchfox
@@ -99,7 +99,7 @@ jobs:
                 - linux64-dump_syms
                 - macosx64-sdk-10.12
                 - sysroot-x86_64-linux-gnu
-                - wasi-sysroot
+                - sysroot-wasm32-wasi
 
     win64-searchfox/debug:
         description: "Win64 Searchfox Debug (clang-cl)"
@@ -109,10 +109,10 @@ jobs:
             platform: windows2012-64/debug
         worker-type: b-linux
         worker:
-            docker-image: {in-tree: debian10-amd64-build}
+            docker-image: {in-tree: debian11-amd64-build}
             max-run-time: 36000
             env:
-                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/vs2017-15.8.manifest"
+                TOOLTOOL_MANIFEST: "browser/config/tooltool-manifests/vs2017-15.9.manifest"
                 PERFHERDER_EXTRA_OPTIONS: searchfox
                 RUSTC_BOOTSTRAP: "1"
                 MOZSEARCH_PLATFORM: "windows"
@@ -131,7 +131,7 @@ jobs:
                 mozconfig_platform: win64
                 env:
                     LD_PRELOAD: "/builds/worker/fetches/liblowercase/liblowercase.so"
-                    LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.8.4"
+                    LOWERCASE_DIRS: "/builds/worker/checkouts/gecko/vs2017_15.9.6"
         use-sccache: true
         fetches:
             toolchain:
@@ -148,6 +148,7 @@ jobs:
                 - linux64-liblowercase
                 - linux64-winchecksec
                 - sysroot-x86_64-linux-gnu
+                - sysroot-wasm32-wasi
             fetch:
                 - nsis-3.01-win
                 - upx-3.95-win

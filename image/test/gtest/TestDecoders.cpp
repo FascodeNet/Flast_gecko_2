@@ -708,6 +708,14 @@ TEST_F(ImageDecoders, AVIFSingleChunk) {
   CheckDecoderSingleChunk(GreenAVIFTestCase());
 }
 
+TEST_F(ImageDecoders, AVIFSingleChunkNonzeroReserved) {
+  CheckDecoderSingleChunk(NonzeroReservedAVIFTestCase());
+}
+
+TEST_F(ImageDecoders, AVIFSingleChunkMultipleColr) {
+  CheckDecoderSingleChunk(MultipleColrAVIFTestCase());
+}
+
 TEST_F(ImageDecoders, AVIFSingleChunkTransparent10bit420) {
   CheckDecoderSingleChunk(Transparent10bit420AVIFTestCase());
 }

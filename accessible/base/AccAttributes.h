@@ -35,11 +35,19 @@ struct Color {
   nscolor mValue;
 };
 
+// A special type. If an entry has a value of this type, it instructs the
+// target instance of an Update to remove the entry with the same key value.
+struct DeleteEntry {
+  DeleteEntry() : mValue(true) {}
+  bool mValue;
+};
+
 class AccAttributes {
   friend struct IPC::ParamTraits<AccAttributes*>;
 
-  using AttrValueType =
-      Variant<bool, float, int32_t, RefPtr<nsAtom>, CSSCoord, FontSize, Color>;
+  using AttrValueType = Variant<bool, float, double, int32_t, RefPtr<nsAtom>,
+                                CSSCoord, FontSize, Color, DeleteEntry>;
+  static_assert(sizeof(AttrValueType) <= 16);
   using AtomVariantMap = nsTHashMap<nsRefPtrHashKey<nsAtom>, AttrValueType>;
 
  protected:
@@ -90,6 +98,8 @@ class AccAttributes {
 
   uint32_t Count() const { return mData.Count(); }
 
+  void Update(AccAttributes* aOther);
+
   // An entry class for our iterator.
   class Entry {
    public:
@@ -127,6 +137,8 @@ class AccAttributes {
    private:
     nsAtom* mName;
     const AttrValueType* mValue;
+
+    friend class AccAttributes;
   };
 
   class Iterator {

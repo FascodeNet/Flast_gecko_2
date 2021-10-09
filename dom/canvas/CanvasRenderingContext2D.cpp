@@ -2419,14 +2419,13 @@ class CanvasUserSpaceMetrics : public UserSpaceMetricsWithSize {
   }
 
   virtual float GetExLength() const override {
-    nsDeviceContext* dc = mPresContext->DeviceContext();
     nsFontMetrics::Params params;
     params.language = mFontLanguage;
     params.explicitLanguage = mExplicitLanguage;
     params.textPerf = mPresContext->GetTextPerfMetrics();
-    params.fontStats = mPresContext->GetFontMatchingStats();
     params.featureValueLookup = mPresContext->GetFontFeatureValuesLookup();
-    RefPtr<nsFontMetrics> fontMetrics = dc->GetMetricsFor(mFont, params);
+    RefPtr<nsFontMetrics> fontMetrics =
+        mPresContext->GetMetricsFor(mFont, params);
     return NSAppUnitsToFloatPixels(fontMetrics->XHeight(),
                                    AppUnitsPerCSSPixel());
   }
@@ -2548,49 +2547,39 @@ void CanvasRenderingContext2D::FillRect(double aX, double aY, double aW,
 
   const ContextState* state = &CurrentState();
   if (state->patternStyles[Style::FILL]) {
-    CanvasPattern::RepeatMode repeat =
-        state->patternStyles[Style::FILL]->mRepeat;
+    auto& style = state->patternStyles[Style::FILL];
+    CanvasPattern::RepeatMode repeat = style->mRepeat;
     // In the FillRect case repeat modes are easy to deal with.
     bool limitx = repeat == CanvasPattern::RepeatMode::NOREPEAT ||
                   repeat == CanvasPattern::RepeatMode::REPEATY;
     bool limity = repeat == CanvasPattern::RepeatMode::NOREPEAT ||
                   repeat == CanvasPattern::RepeatMode::REPEATX;
-
-    IntSize patternSize =
-        state->patternStyles[Style::FILL]->mSurface->GetSize();
-
-    // We always need to execute painting for non-over operators, even if
-    // we end up with w/h = 0.
-    if (limitx) {
-      if (aX < 0) {
-        aW += aX;
-        if (aW < 0) {
-          aW = 0;
-        }
-
-        aX = 0;
+    if ((limitx || limity) && style->mTransform.IsRectilinear()) {
+      // For rectilinear transforms, we can just get the transformed pattern
+      // bounds and intersect them with the fill rectangle bounds.
+      // TODO: If the transform is not rectilinear, then we would need a fully
+      // general clip path to represent the X and Y clip planes bounding the
+      // pattern. For such cases, it would be more efficient to rely on Skia's
+      // Decal tiling mode rather than trying to generate a path. Until then,
+      // just punt to relying on the default Clamp mode.
+      gfx::Rect patternBounds(style->mSurface->GetRect());
+      patternBounds = style->mTransform.TransformBounds(patternBounds);
+      gfx::Rect bounds(aX, aY, aW, aH);
+      // We always need to execute painting for non-over operators, even if
+      // we end up with w/h = 0.
+      bounds = bounds.Intersect(patternBounds);
+      if (style->mTransform.HasNonAxisAlignedTransform()) {
+        // If there is an rotation (90 or 270 degrees), the X axis of the
+        // pattern projects onto the Y axis of the geometry, and vice versa.
+        std::swap(limitx, limity);
       }
-      if (aX + aW > patternSize.width) {
-        aW = patternSize.width - aX;
-        if (aW < 0) {
-          aW = 0;
-        }
+      if (limitx) {
+        aX = bounds.x;
+        aW = bounds.width;
       }
-    }
-    if (limity) {
-      if (aY < 0) {
-        aH += aY;
-        if (aH < 0) {
-          aH = 0;
-        }
-
-        aY = 0;
-      }
-      if (aY + aH > patternSize.height) {
-        aH = patternSize.height - aY;
-        if (aH < 0) {
-          aH = 0;
-        }
+      if (limity) {
+        aY = bounds.y;
+        aH = bounds.height;
       }
     }
   }
@@ -3273,9 +3262,7 @@ bool CanvasRenderingContext2D::SetFontInternal(const nsACString& aFont,
   params.explicitLanguage = fontStyle->mExplicitLanguage;
   params.userFontSet = c->GetUserFontSet();
   params.textPerf = c->GetTextPerfMetrics();
-  params.fontStats = c->GetFontMatchingStats();
-  RefPtr<nsFontMetrics> metrics =
-      c->DeviceContext()->GetMetricsFor(resizedFont, params);
+  RefPtr<nsFontMetrics> metrics = c->GetMetricsFor(resizedFont, params);
 
   gfxFontGroup* newFontGroup = metrics->GetThebesFontGroup();
   CurrentState().fontGroup = newFontGroup;
@@ -4046,19 +4033,16 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
 
   RefPtr<PresShell> presShell = GetPresShell();
   gfxTextPerfMetrics* tp = nullptr;
-  FontMatchingStats* fontStats = nullptr;
   if (presShell && !presShell->IsDestroying()) {
     nsPresContext* pc = presShell->GetPresContext();
     tp = pc->GetTextPerfMetrics();
-    fontStats = pc->GetFontMatchingStats();
   }
 
   // If we have a cached fontGroup, check that it is valid for the current
   // prescontext; if not, we need to discard and re-create it.
   RefPtr<gfxFontGroup>& fontGroup = CurrentState().fontGroup;
   if (fontGroup) {
-    if (fontGroup->GetFontMatchingStats() != fontStats ||
-        fontGroup->GetTextPerfMetrics() != tp) {
+    if (fontGroup->GetTextPerfMetrics() != tp) {
       fontGroup = nullptr;
     }
   }
@@ -4086,8 +4070,8 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
       const auto* sans =
           Servo_FontFamily_Generic(StyleGenericFontFamily::SansSerif);
       fontGroup = gfxPlatform::GetPlatform()->CreateFontGroup(
-          sans->families, &style, language, explicitLanguage, tp, fontStats,
-          nullptr, devToCssSize);
+          sans->families, &style, language, explicitLanguage, tp, nullptr,
+          devToCssSize);
       if (fontGroup) {
         CurrentState().font = kDefaultFontStyle;
       } else {

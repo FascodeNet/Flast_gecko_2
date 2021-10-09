@@ -11,11 +11,8 @@ import org.hamcrest.Matchers.*
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.mozilla.geckoview.GeckoResult
-import org.mozilla.geckoview.GeckoSession
 import org.junit.Assume.assumeTrue
 import org.mozilla.geckoview.PanZoomController
-import org.mozilla.geckoview.test.rule.GeckoSessionTestRule
-import org.mozilla.geckoview.test.util.Callbacks
 
 @RunWith(AndroidJUnit4::class)
 @MediumTest
@@ -25,11 +22,8 @@ class PanZoomControllerTest : BaseSessionTest() {
 
     private fun setupDocument(documentPath: String) {
         sessionRule.session.loadTestPath(documentPath)
-        sessionRule.waitUntilCalled(object : Callbacks.ContentDelegate {
-            @GeckoSessionTestRule.AssertCalled(count = 1)
-            override fun onFirstContentfulPaint(session: GeckoSession) {
-            }
-        })
+        sessionRule.session.waitForPageStop()
+        sessionRule.session.promiseAllPaintsDone()
         sessionRule.session.flushApzRepaints()
     }
 

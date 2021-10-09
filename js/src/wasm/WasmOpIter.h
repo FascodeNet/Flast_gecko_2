@@ -24,7 +24,6 @@
 
 #include <type_traits>
 
-#include "jit/AtomicOp.h"
 #include "js/Printf.h"
 #include "wasm/WasmIntrinsic.h"
 #include "wasm/WasmUtility.h"
@@ -132,6 +131,7 @@ enum class OpKind {
   Nop,
   Unary,
   Binary,
+  Ternary,
   Comparison,
   Conversion,
   Load,
@@ -199,7 +199,6 @@ enum class OpKind {
   LoadLane,
   StoreLane,
   VectorShift,
-  VectorSelect,
   VectorShuffle,
 #  endif
 #  ifdef ENABLE_WASM_EXCEPTIONS
@@ -222,11 +221,11 @@ OpKind Classify(OpBytes op);
 template <typename Value>
 struct LinearMemoryAddress {
   Value base;
-  uint32_t offset;
+  uint64_t offset;
   uint32_t align;
 
   LinearMemoryAddress() : offset(0), align(0) {}
-  LinearMemoryAddress(Value base, uint32_t offset, uint32_t align)
+  LinearMemoryAddress(Value base, uint64_t offset, uint32_t align)
       : base(base), offset(offset), align(align) {}
 };
 
@@ -532,6 +531,8 @@ class MOZ_STACK_CLASS OpIter : private Policy {
   [[nodiscard]] bool readBinary(ValType operandType, Value* lhs, Value* rhs);
   [[nodiscard]] bool readComparison(ValType operandType, Value* lhs,
                                     Value* rhs);
+  [[nodiscard]] bool readTernary(ValType operandType, Value* v0, Value* v1,
+                                 Value* v2);
   [[nodiscard]] bool readLoad(ValType resultType, uint32_t byteSize,
                               LinearMemoryAddress<Value>* addr);
   [[nodiscard]] bool readStore(ValType resultType, uint32_t byteSize,
@@ -645,7 +646,6 @@ class MOZ_STACK_CLASS OpIter : private Policy {
                                      uint32_t* laneIndex, Value* baseValue,
                                      Value* operand);
   [[nodiscard]] bool readVectorShift(Value* baseValue, Value* shift);
-  [[nodiscard]] bool readVectorSelect(Value* v1, Value* v2, Value* controlMask);
   [[nodiscard]] bool readVectorShuffle(Value* v1, Value* v2, V128* selectMask);
   [[nodiscard]] bool readV128Const(V128* value);
   [[nodiscard]] bool readLoadSplat(uint32_t byteSize,
@@ -1765,6 +1765,28 @@ inline bool OpIter<Policy>::readComparison(ValType operandType, Value* lhs,
   return true;
 }
 
+template <typename Policy>
+inline bool OpIter<Policy>::readTernary(ValType operandType, Value* v0,
+                                        Value* v1, Value* v2) {
+  MOZ_ASSERT(Classify(op_) == OpKind::Ternary);
+
+  if (!popWithType(operandType, v2)) {
+    return false;
+  }
+
+  if (!popWithType(operandType, v1)) {
+    return false;
+  }
+
+  if (!popWithType(operandType, v0)) {
+    return false;
+  }
+
+  infalliblePush(operandType);
+
+  return true;
+}
+
 // For memories, the index is currently always a placeholder zero byte.
 //
 // For tables, the index is a placeholder zero byte until we get multi-table
@@ -1795,20 +1817,32 @@ inline bool OpIter<Policy>::readLinearMemoryAddress(
     return fail("can't touch memory without memory");
   }
 
+  IndexType it = env_.memory->indexType();
+
   uint8_t alignLog2;
   if (!readFixedU8(&alignLog2)) {
     return fail("unable to read load alignment");
   }
 
-  if (!readVarU32(&addr->offset)) {
+  if (!readVarU64(&addr->offset)) {
     return fail("unable to read load offset");
+  }
+
+  if (it == IndexType::I32 && addr->offset > UINT32_MAX) {
+    return fail("offset too large for memory type");
+  }
+
+  // Temporary implementation limit on the offset, required by MemoryAddressDesc
+  // in Assembler-shared.h.
+  if (addr->offset > UINT32_MAX) {
+    return fail("temporary implementation limit");
   }
 
   if (alignLog2 >= 32 || (uint32_t(1) << alignLog2) > byteSize) {
     return fail("greater than natural alignment");
   }
 
-  if (!popWithType(ValType::I32, &addr->base)) {
+  if (!popWithType(ToValType(it), &addr->base)) {
     return false;
   }
 
@@ -1903,7 +1937,8 @@ inline bool OpIter<Policy>::readMemorySize() {
     return fail("unexpected flags");
   }
 
-  return push(ValType::I32);
+  ValType ptrType = ToValType(env_.memory->indexType());
+  return push(ptrType);
 }
 
 template <typename Policy>
@@ -1923,11 +1958,12 @@ inline bool OpIter<Policy>::readMemoryGrow(Value* input) {
     return fail("unexpected flags");
   }
 
-  if (!popWithType(ValType::I32, input)) {
+  ValType ptrType = ToValType(env_.memory->indexType());
+  if (!popWithType(ptrType, input)) {
     return false;
   }
 
-  infalliblePush(ValType::I32);
+  infalliblePush(ptrType);
 
   return true;
 }
@@ -2563,15 +2599,17 @@ inline bool OpIter<Policy>::readMemOrTableCopy(bool isMem,
     }
   }
 
-  if (!popWithType(ValType::I32, len)) {
+  ValType ptrType = isMem ? ToValType(env_.memory->indexType()) : ValType::I32;
+
+  if (!popWithType(ptrType, len)) {
     return false;
   }
 
-  if (!popWithType(ValType::I32, src)) {
+  if (!popWithType(ptrType, src)) {
     return false;
   }
 
-  if (!popWithType(ValType::I32, dst)) {
+  if (!popWithType(ptrType, dst)) {
     return false;
   }
 
@@ -2622,7 +2660,9 @@ inline bool OpIter<Policy>::readMemFill(Value* start, Value* val, Value* len) {
     return fail("memory index must be zero");
   }
 
-  if (!popWithType(ValType::I32, len)) {
+  ValType ptrType = ToValType(env_.memory->indexType());
+
+  if (!popWithType(ptrType, len)) {
     return false;
   }
 
@@ -2630,7 +2670,7 @@ inline bool OpIter<Policy>::readMemFill(Value* start, Value* val, Value* len) {
     return false;
   }
 
-  if (!popWithType(ValType::I32, start)) {
+  if (!popWithType(ptrType, start)) {
     return false;
   }
 
@@ -2645,18 +2685,6 @@ inline bool OpIter<Policy>::readMemOrTableInit(bool isMem, uint32_t* segIndex,
   MOZ_ASSERT(Classify(op_) == OpKind::MemOrTableInit);
   MOZ_ASSERT(segIndex != dstTableIndex);
 
-  if (!popWithType(ValType::I32, len)) {
-    return false;
-  }
-
-  if (!popWithType(ValType::I32, src)) {
-    return false;
-  }
-
-  if (!popWithType(ValType::I32, dst)) {
-    return false;
-  }
-
   if (!readVarU32(segIndex)) {
     return fail("unable to read segment index");
   }
@@ -2665,6 +2693,7 @@ inline bool OpIter<Policy>::readMemOrTableInit(bool isMem, uint32_t* segIndex,
   if (!readMemOrTableIndex(isMem, &memOrTableIndex)) {
     return false;
   }
+
   if (isMem) {
     if (!env_.usesMemory()) {
       return fail("can't touch memory without memory");
@@ -2691,6 +2720,20 @@ inline bool OpIter<Policy>::readMemOrTableInit(bool isMem, uint32_t* segIndex,
                           env_.tables[*dstTableIndex].elemType)) {
       return false;
     }
+  }
+
+  if (!popWithType(ValType::I32, len)) {
+    return false;
+  }
+
+  if (!popWithType(ValType::I32, src)) {
+    return false;
+  }
+
+  ValType ptrType = isMem ? ToValType(env_.memory->indexType()) : ValType::I32;
+
+  if (!popWithType(ptrType, dst)) {
+    return false;
   }
 
   return true;
@@ -3225,7 +3268,7 @@ inline bool OpIter<Policy>::readBrOnCast(uint32_t* relativeDepth, Value* rtt,
                                 branchTargetType, values);
 }
 
-#endif // ENABLE_WASM_GC
+#endif  // ENABLE_WASM_GC
 
 #ifdef ENABLE_WASM_SIMD
 
@@ -3295,28 +3338,6 @@ inline bool OpIter<Policy>::readVectorShift(Value* baseValue, Value* shift) {
   }
 
   if (!popWithType(ValType::V128, baseValue)) {
-    return false;
-  }
-
-  infalliblePush(ValType::V128);
-
-  return true;
-}
-
-template <typename Policy>
-inline bool OpIter<Policy>::readVectorSelect(Value* v1, Value* v2,
-                                             Value* controlMask) {
-  MOZ_ASSERT(Classify(op_) == OpKind::VectorSelect);
-
-  if (!popWithType(ValType::V128, controlMask)) {
-    return false;
-  }
-
-  if (!popWithType(ValType::V128, v2)) {
-    return false;
-  }
-
-  if (!popWithType(ValType::V128, v1)) {
     return false;
   }
 

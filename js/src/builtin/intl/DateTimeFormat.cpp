@@ -16,8 +16,6 @@
 #include "mozilla/Range.h"
 #include "mozilla/Span.h"
 
-#include "jsfriendapi.h"
-
 #include "builtin/Array.h"
 #include "builtin/intl/CommonFunctions.h"
 #include "builtin/intl/FormatBuffer.h"
@@ -430,7 +428,6 @@ bool js::intl_defaultTimeZone(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   args.rval().setString(str);
-
   return true;
 }
 
@@ -1259,7 +1256,7 @@ static bool intl_FormatToPartsDateTime(JSContext* cx,
   RootedValue val(cx);
 
   auto AppendPart = [&](FieldType type, size_t beginIndex, size_t endIndex) {
-    singlePart = NewBuiltinClassInstance<PlainObject>(cx);
+    singlePart = NewPlainObject(cx);
     if (!singlePart) {
       return false;
     }
@@ -1655,7 +1652,7 @@ static bool FormatDateTimeRangeToParts(JSContext* cx,
 
   auto AppendPart = [&](FieldType type, size_t beginIndex, size_t endIndex,
                         FieldType source) {
-    singlePart = NewBuiltinClassInstance<PlainObject>(cx);
+    singlePart = NewPlainObject(cx);
     if (!singlePart) {
       return false;
     }

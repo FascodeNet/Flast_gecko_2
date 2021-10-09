@@ -26,6 +26,7 @@
 #include "mozilla/ProfilerLabels.h"
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/ProfilerState.h"
+#include "mozilla/ProfilerThreadState.h"
 
 enum class IsFastShutdown {
   No,
@@ -41,7 +42,7 @@ enum class IsFastShutdown {
 // following macros and functions, which encapsulate the most common operations
 // and thus avoid the need for many #ifdefs.
 
-#  define AUTO_PROFILER_INIT
+#  define AUTO_PROFILER_INIT ::profiler_init_main_thread_id()
 #  define AUTO_PROFILER_INIT2
 
 #  define PROFILER_REGISTER_THREAD(name)

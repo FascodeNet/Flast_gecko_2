@@ -13,6 +13,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   setTimeout: "resource://gre/modules/Timer.jsm",
   Services: "resource://gre/modules/Services.jsm",
   Snapshots: "resource:///modules/Snapshots.jsm",
+  SnapshotSelector: "resource:///modules/SnapshotSelector.jsm",
   TestUtils: "resource://testing-common/TestUtils.jsm",
 });
 
@@ -189,6 +190,13 @@ function assertSnapshot(actual, expected) {
       actual.lastInteractionAt,
       expected.lastUpdated,
       "Should have a last interaction time greater than or equal to the expected last updated time"
+    );
+  }
+  if (expected.commonName) {
+    Assert.equal(
+      actual.commonName,
+      expected.commonName,
+      "Should have the Snapshot URL's common name."
     );
   }
   if (expected.removedAt) {

@@ -70,9 +70,8 @@
 #include "nsRefreshDriver.h"
 #include "Layers.h"
 #include "LayerUserData.h"
-#include "ClientLayerManager.h"
 #include "mozilla/dom/NotifyPaintEvent.h"
-
+#include "nsFontCache.h"
 #include "nsFrameLoader.h"
 #include "nsContentUtils.h"
 #include "nsPIWindowRoot.h"
@@ -110,8 +109,6 @@ using namespace mozilla::dom;
 using namespace mozilla::gfx;
 using namespace mozilla::layers;
 
-uint8_t gNotifySubDocInvalidationData;
-
 /**
  * Layer UserData for ContainerLayers that want to be notified
  * of local invalidations of them and their descendant layers.
@@ -139,21 +136,42 @@ bool nsPresContext::IsDOMPaintEventPending() {
   return false;
 }
 
-void nsPresContext::ForceReflowForFontInfoUpdate() {
-  // Flush the device context's font cache, so that we won't risk getting
-  // stale nsFontMetrics objects from it.
-  DeviceContext()->FlushFontCache();
+void nsPresContext::ForceReflowForFontInfoUpdate(bool aNeedsReframe) {
+  // In the case of a static-clone document used for printing or print-preview,
+  // this is undesirable because the nsPrintJob is holding weak refs to frames
+  // that will get blown away unexpectedly by this reconstruction. So the
+  // prescontext for a print/preview doc ignores the font-list update.
+  //
+  // This means the print document may still be using cached fonts that are no
+  // longer present in the font list, but that should be safe given that all the
+  // required font instances have already been created, so it won't be depending
+  // on access to the font-list entries.
+  //
+  // XXX Actually, I think it's probably a bad idea to do *any* restyling of
+  // print documents in response to pref changes. We could be in the middle
+  // of printing the document, and reflowing all the frames might cause some
+  // kind of unwanted mid-document discontinuity.
+  if (IsPrintingOrPrintPreview()) {
+    return;
+  }
 
   // If there's a user font set, discard any src:local() faces it may have
   // loaded because their font entries may no longer be valid.
-  if (Document()->GetFonts()) {
-    Document()->GetFonts()->GetUserFontSet()->ForgetLocalFaces();
+  if (auto* fonts = Document()->GetFonts()) {
+    fonts->GetUserFontSet()->ForgetLocalFaces();
   }
 
-  // We can trigger reflow by pretending a font.* preference has changed;
-  // this is the same mechanism as gfxPlatform::ForceGlobalReflow() uses
-  // if new fonts are installed during the session, for example.
-  PreferenceChanged("font.internaluseonly.changed");
+  FlushFontCache();
+
+  nsChangeHint changeHint =
+      aNeedsReframe ? nsChangeHint_ReconstructFrame : NS_STYLE_HINT_REFLOW;
+
+  // We also need to trigger restyling for ex/ch units changes to take effect,
+  // if needed.
+  auto restyleHint =
+      UsesExChUnits() ? RestyleHint::RecascadeSubtree() : RestyleHint{0};
+
+  RebuildAllStyleData(changeHint, restyleHint);
 }
 
 static bool IsVisualCharset(NotNull<const Encoding*> aCharset) {
@@ -180,7 +198,6 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mElementsRestyled(0),
       mFramesConstructed(0),
       mFramesReflowed(0),
-      mChangeHintForPrefChange(nsChangeHint(0)),
       mInterruptChecksToSkip(0),
       mNextFrameRateMultiplier(0),
       mViewportScrollStyles(StyleOverflow::Auto, StyleOverflow::Auto),
@@ -206,7 +223,6 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mPendingThemeChanged(false),
       mPendingThemeChangeKind(0),
       mPendingUIResolutionChanged(false),
-      mPostedPrefChangedRunnable(false),
       mIsGlyph(false),
       mUsesExChUnits(false),
       mCounterStylesDirty(true),
@@ -249,11 +265,6 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
     mMissingFonts = MakeUnique<gfxMissingFontRecorder>();
   }
 
-  // TODO: check whether this is too expensive to do for all pages;
-  // maybe we could throttle and only collect stats on 1% of page-loads,
-  // or something like that.
-  mFontStats = MakeUnique<FontMatchingStats>();
-
   if (StaticPrefs::layout_dynamic_toolbar_max_height() > 0) {
     // The pref for dynamic toolbar max height is only used in reftests so it's
     // fine to set here.
@@ -288,6 +299,11 @@ void nsPresContext::Destroy() {
     mEventManager->NotifyDestroyPresContext(this);
     mEventManager->SetPresContext(nullptr);
     mEventManager = nullptr;
+  }
+
+  if (mFontCache) {
+    mFontCache->Destroy();
+    mFontCache = nullptr;
   }
 
   // Unregister preference callbacks
@@ -398,7 +414,6 @@ static void HandleGlobalThemeChange() {
   }
 }
 
-
 void nsPresContext::GetUserPreferences() {
   if (!GetPresShell()) {
     // No presshell means nothing to do here.  We'll do this when we
@@ -446,7 +461,7 @@ void nsPresContext::GetUserPreferences() {
   SET_BIDI_OPTION_NUMERAL(bidiOptions, prefInt);
 
   // We don't need to force reflow: either we are initializing a new
-  // prescontext or we are being called from UpdateAfterPreferencesChanged()
+  // prescontext or we are being called from PreferenceChanged()
   // which triggers a reflow anyway.
   SetBidi(bidiOptions);
 }
@@ -468,9 +483,7 @@ void nsPresContext::AppUnitsPerDevPixelChanged() {
 
   InvalidatePaintedLayers();
 
-  if (mDeviceContext) {
-    mDeviceContext->FlushFontCache();
-  }
+  FlushFontCache();
 
   MediaFeatureValuesChanged(
       {RestyleHint::RecascadeSubtree(), NS_STYLE_HINT_REFLOW,
@@ -552,6 +565,8 @@ void nsPresContext::PreferenceChanged(const char* aPrefName) {
     }
   }
 
+  auto changeHint = nsChangeHint{0};
+  auto restyleHint = RestyleHint{0};
   // Changing any of these potentially changes the value of @media
   // (prefers-contrast).
   if (prefName.EqualsLiteral("layout.css.prefers-contrast.enabled") ||
@@ -567,7 +582,7 @@ void nsPresContext::PreferenceChanged(const char* aPrefName) {
       if (!mMissingFonts) {
         mMissingFonts = MakeUnique<gfxMissingFontRecorder>();
         // trigger reflow to detect missing fonts on the current page
-        mChangeHintForPrefChange |= NS_STYLE_HINT_REFLOW;
+        changeHint |= NS_STYLE_HINT_REFLOW;
       }
     } else {
       if (mMissingFonts) {
@@ -576,56 +591,61 @@ void nsPresContext::PreferenceChanged(const char* aPrefName) {
       mMissingFonts = nullptr;
     }
   }
-  if (prefName.EqualsLiteral("font.internaluseonly.changed") &&
-      !IsPrintingOrPrintPreview()) {
-    // If there's a change to the font list, we generally need to reconstruct
-    // frames, as the existing frames may be referring to fonts that are no
-    // longer available. But in the case of a static-clone document used for
-    // printing or print-preview, this is undesirable because the nsPrintJob
-    // is holding weak refs to frames that will get blown away unexpectedly by
-    // this reconstruction. So the prescontext for a print/preview doc ignores
-    // the font-list update.
-    //
-    // This means the print document may still be using cached fonts that are
-    // no longer present in the font list, but that should be safe given that
-    // all the required font instances have already been created, so it won't
-    // be depending on access to the font-list entries.
-    //
-    // XXX Actually, I think it's probably a bad idea to do *any* restyling of
-    // print documents in response to pref changes. We could be in the middle
-    // of printing the document, and reflowing all the frames might cause some
-    // kind of unwanted mid-document discontinuity.
-    mChangeHintForPrefChange |= nsChangeHint_ReconstructFrame;
-  } else if (StringBeginsWith(prefName, "font."_ns) ||
-             // Changes to font family preferences don't change anything in the
-             // computed style data, so the style system won't generate a reflow
-             // hint for us.  We need to do that manually.
-             prefName.EqualsLiteral("intl.accept_languages") ||
-             // Changes to bidi prefs need to trigger a reflow (see bug 443629)
-             StringBeginsWith(prefName, "bidi."_ns) ||
-             // Changes to font_rendering prefs need to trigger a reflow
-             StringBeginsWith(prefName, "gfx.font_rendering."_ns)) {
-    mChangeHintForPrefChange |= NS_STYLE_HINT_REFLOW;
-  }
 
-  // We will end up calling InvalidatePreferenceSheets one from each pres
-  // context, but all it's doing is clearing its cached sheet pointers, so it
-  // won't be wastefully recreating the sheet multiple times.
-  //
-  // The first pres context that has its pref changed runnable called will
-  // be the one to cause the reconstruction of the pref style sheet.
-  GlobalStyleSheetCache::InvalidatePreferenceSheets();
-  PreferenceSheet::Refresh();
-  // Same, this just frees a bunch of memory.
-  StaticPresData::Get()->InvalidateFontPrefs();
-  Document()->SetMayNeedFontPrefsUpdate();
-  DispatchPrefChangedRunnableIfNeeded();
+  if (StringBeginsWith(prefName, "font."_ns) ||
+      // Changes to font family preferences don't change anything in the
+      // computed style data, so the style system won't generate a reflow hint
+      // for us.  We need to do that manually.
+      prefName.EqualsLiteral("intl.accept_languages") ||
+      // Changes to bidi prefs need to trigger a reflow (see bug 443629)
+      StringBeginsWith(prefName, "bidi."_ns) ||
+      // Changes to font_rendering prefs need to trigger a reflow
+      StringBeginsWith(prefName, "gfx.font_rendering."_ns)) {
+    changeHint |= NS_STYLE_HINT_REFLOW;
+    if (UsesExChUnits()) {
+      restyleHint |= RestyleHint::RecascadeSubtree();
+    }
+  }
 
   if (prefName.EqualsLiteral("nglayout.debug.paint_flashing") ||
       prefName.EqualsLiteral("nglayout.debug.paint_flashing_chrome")) {
     mPaintFlashingInitialized = false;
     return;
   }
+
+  // We will end up calling InvalidatePreferenceSheets one from each pres
+  // context, but all it's doing is clearing its cached sheet pointers, so it
+  // won't be wastefully recreating the sheet multiple times.
+  //
+  // The first pres context that flushes will be the one to cause the
+  // reconstruction of the pref style sheet via the UpdatePreferenceStyles call
+  // in FlushPendingNotifications.
+  if (GlobalStyleSheetCache::AffectedByPref(prefName)) {
+    restyleHint |= RestyleHint::RestyleSubtree();
+    GlobalStyleSheetCache::InvalidatePreferenceSheets();
+  }
+
+  if (PreferenceSheet::AffectedByPref(prefName)) {
+    restyleHint |= RestyleHint::RestyleSubtree();
+    PreferenceSheet::Refresh();
+  }
+
+  // Same, this just frees a bunch of memory.
+  StaticPresData::Get()->InvalidateFontPrefs();
+  Document()->SetMayNeedFontPrefsUpdate();
+
+  // Initialize our state from the user preferences.
+  GetUserPreferences();
+
+  FlushFontCache();
+
+  // Preferences require rerunning selector matching because we rebuild
+  // the pref style sheet for some preference changes.
+  if (changeHint || restyleHint) {
+    RebuildAllStyleData(changeHint, restyleHint);
+  }
+
+  InvalidatePaintedLayers();
 }
 
 struct WeakRunnableMethod : Runnable {
@@ -645,45 +665,6 @@ struct WeakRunnableMethod : Runnable {
   WeakPtr<nsPresContext> mPresContext;
   Method mMethod;
 };
-
-void nsPresContext::DispatchPrefChangedRunnableIfNeeded() {
-  if (mPostedPrefChangedRunnable) {
-    return;
-  }
-
-  nsCOMPtr<nsIRunnable> runnable = new WeakRunnableMethod(
-      "nsPresContext::UpdateAfterPreferencesChanged", this,
-      &nsPresContext::UpdateAfterPreferencesChanged);
-  RefreshDriver()->AddEarlyRunner(runnable);
-  mPostedPrefChangedRunnable = true;
-}
-
-void nsPresContext::UpdateAfterPreferencesChanged() {
-  mPostedPrefChangedRunnable = false;
-  if (!mPresShell) {
-    return;
-  }
-
-  if (mDocument->IsInChromeDocShell()) {
-    // FIXME(emilio): Do really all these prefs not affect chrome docs? I
-    // suspect we should move this check somewhere else.
-    return;
-  }
-
-  // Initialize our state from the user preferences
-  GetUserPreferences();
-
-  // update the presShell: tell it to set the preference style rules up
-  mPresShell->UpdatePreferenceStyles();
-
-  InvalidatePaintedLayers();
-  mDeviceContext->FlushFontCache();
-
-  // Preferences require rerunning selector matching because we rebuild
-  // the pref style sheet for some preference changes.
-  RebuildAllStyleData(mChangeHintForPrefChange, RestyleHint::RestyleSubtree());
-  mChangeHintForPrefChange = nsChangeHint(0);
-}
 
 nsresult nsPresContext::Init(nsDeviceContext* aDeviceContext) {
   NS_ASSERTION(!mInitialized, "attempt to reinit pres context");
@@ -705,7 +686,7 @@ nsresult nsPresContext::Init(nsDeviceContext* aDeviceContext) {
   }
 
   if (mDeviceContext->SetFullZoom(mFullZoom)) {
-    mDeviceContext->FlushFontCache();
+    FlushFontCache();
   }
   mCurAppUnitsPerDevPixel = mDeviceContext->AppUnitsPerDevPixel();
 
@@ -776,6 +757,39 @@ nsresult nsPresContext::Init(nsDeviceContext* aDeviceContext) {
   mInitialized = true;
 #endif
 
+  return NS_OK;
+}
+
+void nsPresContext::InitFontCache() {
+  if (!mFontCache) {
+    mFontCache = new nsFontCache();
+    mFontCache->Init(this);
+  }
+}
+
+void nsPresContext::UpdateFontCacheUserFonts(gfxUserFontSet* aUserFontSet) {
+  if (mFontCache) {
+    mFontCache->UpdateUserFonts(aUserFontSet);
+  }
+}
+
+already_AddRefed<nsFontMetrics> nsPresContext::GetMetricsFor(
+    const nsFont& aFont, const nsFontMetrics::Params& aParams) {
+  InitFontCache();
+  return mFontCache->GetMetricsFor(aFont, aParams);
+}
+
+nsresult nsPresContext::FlushFontCache(void) {
+  if (mFontCache) {
+    mFontCache->Flush();
+  }
+  return NS_OK;
+}
+
+nsresult nsPresContext::FontMetricsDeleted(const nsFontMetrics* aFontMetrics) {
+  if (mFontCache) {
+    mFontCache->FontMetricsDeleted(aFontMetrics);
+  }
   return NS_OK;
 }
 
@@ -894,7 +908,7 @@ void nsPresContext::DetachPresShell() {
 
 void nsPresContext::DocumentCharSetChanged(NotNull<const Encoding*> aCharSet) {
   UpdateCharSet(aCharSet);
-  mDeviceContext->FlushFontCache();
+  FlushFontCache();
 
   // If a document contains one or more <script> elements, frame construction
   // might happen earlier than the UpdateCharSet(), so we need to restyle
@@ -1978,26 +1992,6 @@ bool nsPresContext::MayHavePaintEventListener() {
   return ::MayHavePaintEventListener(mDocument->GetInnerWindow());
 }
 
-bool nsPresContext::MayHavePaintEventListenerInSubDocument() {
-  if (MayHavePaintEventListener()) {
-    return true;
-  }
-
-  bool result = false;
-  auto recurse = [&result](dom::Document& aSubDoc) {
-    if (nsPresContext* pc = aSubDoc.GetPresContext()) {
-      if (pc->MayHavePaintEventListenerInSubDocument()) {
-        result = true;
-        return CallState::Stop;
-      }
-    }
-    return CallState::Continue;
-  };
-
-  mDocument->EnumerateSubDocuments(recurse);
-  return result;
-}
-
 void nsPresContext::NotifyInvalidation(TransactionId aTransactionId,
                                        const nsIntRect& aRect) {
   // Prevent values from overflow after DevPixelsToAppUnits().
@@ -2053,49 +2047,6 @@ void nsPresContext::NotifyInvalidation(TransactionId aTransactionId,
   TransactionInvalidations* transaction = GetInvalidations(aTransactionId);
   MOZ_ASSERT(transaction);
   transaction->mInvalidations.AppendElement(aRect);
-}
-
-/* static */
-void nsPresContext::NotifySubDocInvalidation(ContainerLayer* aContainer,
-                                             const nsIntRegion* aRegion) {
-  ContainerLayerPresContext* data = static_cast<ContainerLayerPresContext*>(
-      aContainer->GetUserData(&gNotifySubDocInvalidationData));
-  if (!data) {
-    return;
-  }
-
-  TransactionId transactionId = aContainer->Manager()->GetLastTransactionId();
-  IntRect visibleBounds =
-      aContainer->GetVisibleRegion().GetBounds().ToUnknownRect();
-
-  if (!aRegion) {
-    IntRect rect(IntPoint(0, 0), visibleBounds.Size());
-    data->mPresContext->NotifyInvalidation(transactionId, rect);
-    return;
-  }
-
-  nsIntPoint topLeft = visibleBounds.TopLeft();
-  for (auto iter = aRegion->RectIter(); !iter.Done(); iter.Next()) {
-    nsIntRect rect(iter.Get());
-    // PresContext coordinate space is relative to the start of our visible
-    // region. Is this really true? This feels like the wrong way to get the
-    // right answer.
-    rect.MoveBy(-topLeft);
-    data->mPresContext->NotifyInvalidation(transactionId, rect);
-  }
-}
-
-void nsPresContext::SetNotifySubDocInvalidationData(
-    ContainerLayer* aContainer) {
-  ContainerLayerPresContext* pres = new ContainerLayerPresContext;
-  pres->mPresContext = this;
-  aContainer->SetUserData(&gNotifySubDocInvalidationData, pres);
-}
-
-/* static */
-void nsPresContext::ClearNotifySubDocInvalidationData(
-    ContainerLayer* aContainer) {
-  aContainer->SetUserData(&gNotifySubDocInvalidationData, nullptr);
 }
 
 class DelayedFireDOMPaintEvent : public Runnable {
@@ -2466,7 +2417,7 @@ bool nsPresContext::IsRootContentDocumentCrossProcess() const {
 void nsPresContext::NotifyNonBlankPaint() {
   MOZ_ASSERT(!mHadNonBlankPaint);
   mHadNonBlankPaint = true;
-  if (IsRootContentDocument()) {
+  if (IsRootContentDocumentCrossProcess()) {
     RefPtr<nsDOMNavigationTiming> timing = mDocument->GetNavigationTiming();
     if (timing && !IsPrintingOrPrintPreview()) {
       timing->NotifyNonBlankPaintForRootContentDocument();
@@ -2531,7 +2482,7 @@ void nsPresContext::NotifyPaintStatusReset() {
 
 void nsPresContext::NotifyDOMContentFlushed() {
   NS_ENSURE_TRUE_VOID(mPresShell);
-  if (IsRootContentDocument()) {
+  if (IsRootContentDocumentCrossProcess()) {
     RefPtr<nsDOMNavigationTiming> timing = mDocument->GetNavigationTiming();
     if (timing) {
       timing->NotifyDOMContentFlushedForRootContentDocument();

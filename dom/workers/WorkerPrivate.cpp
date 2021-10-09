@@ -62,6 +62,7 @@
 #include "mozilla/WorkerTimelineMarker.h"
 #include "nsCycleCollector.h"
 #include "nsGlobalWindowInner.h"
+#include "nsIDUtils.h"
 #include "nsNetUtil.h"
 #include "nsIFile.h"
 #include "nsIMemoryReporter.h"
@@ -144,8 +145,8 @@ const uint32_t kClampTimeoutNestingLevel = 5u;
 
 template <class T>
 class UniquePtrComparator {
-  typedef UniquePtr<T> A;
-  typedef T* B;
+  using A = UniquePtr<T>;
+  using B = T*;
 
  public:
   bool Equals(const A& a, const A& b) const {
@@ -916,14 +917,8 @@ nsString ComputeWorkerPrivateId() {
   nsID uuid;
   rv = uuidGenerator->GenerateUUIDInPlace(&uuid);
   MOZ_ASSERT(NS_SUCCEEDED(rv));
-  char buffer[NSID_LENGTH];
-  uuid.ToProvidedString(buffer);
 
-  nsString id;
-  // Remove {} and the null terminator
-  id.AssignASCII(&buffer[1], NSID_LENGTH - 3);
-
-  return id;
+  return NSID_TrimBracketsUTF16(uuid);
 }
 
 class WorkerPrivate::EventTarget final : public nsISerialEventTarget {

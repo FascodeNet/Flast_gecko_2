@@ -208,8 +208,8 @@ Maybe<RawId> WebGPUChild::AdapterRequestDevice(
   ffi::WGPUDeviceDescriptor desc = {};
   ffi::wgpu_client_fill_default_limits(&desc.limits);
 
-  if (aDesc.mNonGuaranteedLimits.WasPassed()) {
-    for (const auto& entry : aDesc.mNonGuaranteedLimits.Value().Entries()) {
+  if (aDesc.mRequiredLimits.WasPassed()) {
+    for (const auto& entry : aDesc.mRequiredLimits.Value().Entries()) {
       Unused << entry;  // TODO
     }
     /*desc.limits.max_bind_groups = lim.mMaxBindGroups;
@@ -735,7 +735,7 @@ RawId WebGPUChild::DeviceCreateRenderPipeline(
       if (!vertex_desc.IsNull()) {
         const auto& vd = vertex_desc.Value();
         vb_desc.array_stride = vd.mArrayStride;
-        vb_desc.step_mode = ffi::WGPUInputStepMode(vd.mStepMode);
+        vb_desc.step_mode = ffi::WGPUVertexStepMode(vd.mStepMode);
         // Note: we are setting the length but not the pointer
         vb_desc.attributes_length = vd.mAttributes.Length();
         for (const auto& vat : vd.mAttributes) {

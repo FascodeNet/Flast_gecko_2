@@ -12,7 +12,6 @@ EXPORTS += [
     "DisplayItemClip.h",
     "DisplayItemClipChain.h",
     "DisplayListClipState.h",
-    "FrameLayerBuilder.h",
     "HitTestInfo.h",
     "LayerState.h",
     "MatrixStack.h",
@@ -41,7 +40,6 @@ UNIFIED_SOURCES += [
     "DisplayItemClipChain.cpp",
     "DisplayListClipState.cpp",
     "DottedCornerFinder.cpp",
-    "FrameLayerBuilder.cpp",
     "HitTestInfo.cpp",
     "MaskLayerImageCache.cpp",
     "nsCSSRendering.cpp",
@@ -75,3 +73,5 @@ FINAL_LIBRARY = "xul"
 
 if CONFIG["CC_TYPE"] in ("clang", "gcc"):
     CXXFLAGS += ["-Wno-error=shadow"]
+
+REQUIRES_UNIFIED_BUILD = True

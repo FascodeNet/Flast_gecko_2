@@ -19,8 +19,6 @@
 #include <stddef.h>    // ptrdiff_t
 #include <stdint.h>    // uint16_t, uint32_t
 
-#include "jsapi.h"  // CompletionKind
-
 #include "frontend/AbstractScopePtr.h"           // ScopeIndex
 #include "frontend/BCEParserHandle.h"            // BCEParserHandle
 #include "frontend/BytecodeControlStructures.h"  // NestableControl
@@ -48,6 +46,7 @@
 #include "vm/BuiltinObjectKind.h"          // BuiltinObjectKind
 #include "vm/BytecodeUtil.h"               // JSOp
 #include "vm/CheckIsObjectKind.h"          // CheckIsObjectKind
+#include "vm/CompletionKind.h"             // CompletionKind
 #include "vm/FunctionPrefixKind.h"         // FunctionPrefixKind
 #include "vm/GeneratorResumeKind.h"        // GeneratorResumeKind
 #include "vm/JSFunction.h"                 // JSFunction
@@ -202,8 +201,6 @@ enum class ValueIsOnStack { Yes, No };
 //       helper.emitEnd();
 //   * helper classes should track state transition and assert it in each
 //     method call, to avoid misuse
-//   * parameters related to source code offset should use `mozilla::Maybe`,
-//     to support the case that there's no position information
 //   * it's recommended to defer receiving parameter until the parameter value
 //     is actually used in the method, instead of receiving and storing them
 //     into instance fields
@@ -362,7 +359,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   NameLocation lookupName(TaggedParserAtomIndex name);
 
   // See EmitterScope::lookupPrivate for details around brandLoc
-  bool lookupPrivate(TaggedParserAtomIndex name, NameLocation& loc,
+  void lookupPrivate(TaggedParserAtomIndex name, NameLocation& loc,
                      mozilla::Maybe<NameLocation>& brandLoc);
 
   // To implement Annex B and the formal parameter defaults scope semantics
@@ -452,8 +449,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   }
 
   void reportError(ParseNode* pn, unsigned errorNumber, ...);
-  void reportError(const mozilla::Maybe<uint32_t>& maybeOffset,
-                   unsigned errorNumber, ...);
+  void reportError(uint32_t offset, unsigned errorNumber, ...);
 
   // Fill in a ScriptStencil using this BCE data.
   bool intoScriptStencil(ScriptIndex scriptIndex);
@@ -583,8 +579,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   [[nodiscard]] bool emitThisLiteral(ThisLiteral* pn);
   [[nodiscard]] bool emitGetFunctionThis(NameNode* thisName);
-  [[nodiscard]] bool emitGetFunctionThis(
-      const mozilla::Maybe<uint32_t>& offset);
   [[nodiscard]] bool emitGetThisForSuperBase(UnaryNode* superBase);
   [[nodiscard]] bool emitSetThis(BinaryNode* setThisNode);
   [[nodiscard]] bool emitCheckDerivedClassConstructorReturn();
@@ -603,7 +597,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   [[nodiscard]] bool emitCall(JSOp op, uint16_t argc, ParseNode* pn = nullptr);
   [[nodiscard]] bool emitCallIncDec(UnaryNode* incDec);
 
-  mozilla::Maybe<uint32_t> getOffsetForLoop(ParseNode* nextpn);
+  uint32_t getOffsetForLoop(ParseNode* nextpn);
 
   enum class GotoKind { Break, Continue };
   [[nodiscard]] bool emitGoto(NestableControl* target, JumpList* jumplist,
@@ -639,8 +633,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   [[nodiscard]] bool emitPropertyList(ListNode* obj, PropertyEmitter& pe,
                                       PropListType type);
 
-  [[nodiscard]] bool emitPropertyListObjLiteral(ListNode* obj,
-                                                ObjLiteralFlags flags,
+  [[nodiscard]] bool emitPropertyListObjLiteral(ListNode* obj, JSOp op,
                                                 bool useObjLiteralValues);
 
   [[nodiscard]] bool emitDestructuringRestExclusionSetObjLiteral(
@@ -705,7 +698,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   [[nodiscard]] bool emitPrepareIteratorResult();
   [[nodiscard]] bool emitFinishIteratorResult(bool done);
-  [[nodiscard]] bool iteratorResultShape(GCThingIndex* outShape);
 
   // Convert and add `writer` data to stencil.
   // Iff it suceeds, `outIndex` out parameter is initialized to the index of the
@@ -856,7 +848,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   [[nodiscard]] bool emitInitializer(ParseNode* initializer,
                                      ParseNode* pattern);
 
-  [[nodiscard]] bool emitCallSiteObjectArray(ListNode* cookedOrRaw,
+  [[nodiscard]] bool emitCallSiteObjectArray(JSOp op, ListNode* cookedOrRaw,
                                              GCThingIndex* outArrayIndex);
   [[nodiscard]] bool emitCallSiteObject(CallSiteNode* callSiteObj);
   [[nodiscard]] bool emitTemplateString(ListNode* templateString);

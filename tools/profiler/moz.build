@@ -25,7 +25,6 @@ if CONFIG["MOZ_GECKO_PROFILER"]:
         "core/ProfilerBacktrace.cpp",
         "core/ProfilerCodeAddressService.cpp",
         "core/ProfilerMarkers.cpp",
-        "core/RegisteredThread.cpp",
         "gecko/ChildProfilerController.cpp",
         "gecko/nsProfilerStartParams.cpp",
         "gecko/ProfilerChild.cpp",
@@ -113,9 +112,6 @@ if CONFIG["MOZ_GECKO_PROFILER"]:
             "/toolkit/crashreporter/google-breakpad/src/common/android/include",
         ]
 
-    if CONFIG["ENABLE_TESTS"]:
-        DIRS += ["tests/gtest"]
-
     if CONFIG["MOZ_VTUNE"]:
         DEFINES["MOZ_VTUNE_INSTRUMENTATION"] = True
         UNIFIED_SOURCES += [
@@ -129,6 +125,10 @@ if CONFIG["MOZ_GECKO_PROFILER"]:
 UNIFIED_SOURCES += [
     "core/MicroGeckoProfiler.cpp",
     "core/ProfilerBindings.cpp",
+    "core/ProfilerThreadRegistration.cpp",
+    "core/ProfilerThreadRegistrationData.cpp",
+    "core/ProfilerThreadRegistry.cpp",
+    "core/ProfilerUtils.cpp",
     "gecko/ProfilerParent.cpp",
 ]
 
@@ -156,6 +156,12 @@ EXPORTS.mozilla += [
     "public/ProfilerMarkersPrerequisites.h",
     "public/ProfilerMarkerTypes.h",
     "public/ProfilerState.h",
+    "public/ProfilerThreadPlatformData.h",
+    "public/ProfilerThreadRegistration.h",
+    "public/ProfilerThreadRegistrationData.h",
+    "public/ProfilerThreadRegistrationInfo.h",
+    "public/ProfilerThreadRegistry.h",
+    "public/ProfilerThreadState.h",
     "public/ProfilerUtils.h",
 ]
 
@@ -171,6 +177,9 @@ CONFIGURE_SUBST_FILES += [
 ]
 
 FINAL_LIBRARY = "xul"
+
+if CONFIG["ENABLE_TESTS"]:
+    DIRS += ["tests/gtest"]
 
 if CONFIG["CC_TYPE"] in ("clang", "gcc"):
     CXXFLAGS += [

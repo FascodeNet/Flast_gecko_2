@@ -54,7 +54,9 @@
       </menupopup>
     </menu>
     <menu id="context_sendTabToDevice"
-          class="sync-ui-item">
+          class="sync-ui-item"
+          data-lazy-l10n-id="tab-context-send-tabs-to-device"
+          data-l10n-args='{"tabCount": 1}'>
       <menupopup id="context_sendTabToDevicePopupMenu"
                  onpopupshowing="gSync.populateSendTabToDevicesMenu(event.target, TabContextMenu.contextTab.linkedBrowser.currentURI.spec, TabContextMenu.contextTab.linkedBrowser.contentTitle, TabContextMenu.contextTab.multiselected);"/>
     </menu>
@@ -159,7 +161,7 @@
 
   <html:template id="invalidFormTemplate">
     <!-- for invalid form error message -->
-    <panel id="invalid-form-popup" type="arrow" orient="vertical" noautofocus="true" level="parent">
+    <panel id="invalid-form-popup" type="arrow" orient="vertical" noautofocus="true" level="parent" locationspecific="true">
       <description/>
     </panel>
   </html:template>
@@ -175,14 +177,10 @@
            aria-labelledby="editBookmarkPanelTitle">
       <box class="panel-header">
         <html:h1 id="editBookmarkPanelTitle"/>
-        <toolbarbutton tabindex="0" id="editBookmarkPanelInfoButton" class="panel-info-button" oncommand="StarUI.toggleRecommendation();" >
-          <image/>
-        </toolbarbutton>
       </box>
       <toolbarseparator id="editBookmarkHeaderSeparator"></toolbarseparator>
       <vbox class="panel-subview-body">
         <html:div id="editBookmarkPanelInfoArea">
-          <html:div id="editBookmarkPanelRecommendation"></html:div>
           <html:div id="editBookmarkPanelFaviconContainer">
             <html:img id="editBookmarkPanelFavicon"/>
           </html:div>
@@ -240,7 +238,7 @@
           <hbox id="UITourTooltipTitleContainer">
             <label id="UITourTooltipTitle" flex="1"/>
             <toolbarbutton id="UITourTooltipClose" class="close-icon"
-                           tooltiptext="&uiTour.infoPanel.close;"/>
+                           data-l10n-id="ui-tour-info-panel-close"/>
           </hbox>
           <description id="UITourTooltipDescription" flex="1"/>
         </vbox>
@@ -382,18 +380,12 @@
              onpopupshowing="gPopupBlockerObserver.fillPopupList(event);"
              onpopuphiding="gPopupBlockerObserver.onPopupHiding(event);">
     <menuitem id="blockedPopupAllowSite"
-              accesskey="&allowPopups.accesskey;"
               oncommand="gPopupBlockerObserver.toggleAllowPopupsForSite(event);"/>
     <menuitem
-#ifdef XP_WIN
-              label="&editPopupSettings.label;"
-#else
-              label="&editPopupSettingsUnix.label;"
-#endif
-              accesskey="&editPopupSettings.accesskey;"
+              data-l10n-id="edit-popup-settings"
               oncommand="gPopupBlockerObserver.editPopupSettings();"/>
     <menuitem id="blockedPopupDontShowMessage"
-              accesskey="&dontShowMessage.accesskey;"
+              data-l10n-id="popups-infobar-dont-show-message"
               type="checkbox"
               oncommand="gPopupBlockerObserver.dontShowMessage();"/>
     <menuseparator id="blockedPopupsSeparator"/>
@@ -424,8 +416,7 @@
   </menupopup>
 
   <menupopup id="pictureInPictureToggleContextMenu">
-    <menuitem label="&pictureInPictureHideToggle.label;"
-              accesskey="&pictureInPictureHideToggle.accesskey;"
+    <menuitem data-l10n-id="picture-in-picture-hide-toggle"
               oncommand="PictureInPicture.hideToggle();" />
   </menupopup>
 

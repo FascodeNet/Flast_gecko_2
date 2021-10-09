@@ -1113,17 +1113,19 @@ var gPopupBlockerObserver = {
       ) {
         // Offer an item to block popups for this site, if an allow-list entry exists
         // already for it.
-        let blockString = gNavigatorBundle.getFormattedString("popupBlock", [
-          uriHost,
-        ]);
-        blockedPopupAllowSite.setAttribute("label", blockString);
+        document.l10n.setAttributes(
+          blockedPopupAllowSite,
+          "popups-infobar-block",
+          { uriHost }
+        );
         blockedPopupAllowSite.setAttribute("block", "true");
       } else {
         // Offer an item to allow popups for this site
-        let allowString = gNavigatorBundle.getFormattedString("popupAllow", [
-          uriHost,
-        ]);
-        blockedPopupAllowSite.setAttribute("label", allowString);
+        document.l10n.setAttributes(
+          blockedPopupAllowSite,
+          "popups-infobar-allow",
+          { uriHost }
+        );
         blockedPopupAllowSite.removeAttribute("block");
       }
     } catch (e) {
@@ -1137,10 +1139,6 @@ var gPopupBlockerObserver = {
       "privacy.popups.showBrowserMessage"
     );
     blockedPopupDontShowMessage.setAttribute("checked", !showMessage);
-    blockedPopupDontShowMessage.setAttribute(
-      "label",
-      gNavigatorBundle.getString("popupWarningDontShowFromMessage")
-    );
 
     let blockedPopupsSeparator = document.getElementById(
       "blockedPopupsSeparator"
@@ -1493,8 +1491,14 @@ function _loadURI(browser, uri, params = {}) {
     uri = "about:blank";
   }
 
-  let { triggeringPrincipal, referrerInfo, postData, userContextId, csp } =
-    params || {};
+  let {
+    triggeringPrincipal,
+    referrerInfo,
+    postData,
+    userContextId,
+    csp,
+    remoteTypeOverride,
+  } = params || {};
   let loadFlags =
     params.loadFlags || params.flags || Ci.nsIWebNavigation.LOAD_FLAGS_NONE;
   let hasValidUserGestureActivation =
@@ -1539,6 +1543,7 @@ function _loadURI(browser, uri, params = {}) {
     referrerInfo,
     postData,
     hasValidUserGestureActivation,
+    remoteTypeOverride,
   };
   try {
     browser.webNavigation.loadURI(uri, loadURIOptions);
@@ -1828,10 +1833,6 @@ var gBrowserInit = {
         document,
         "appMenu-quit-button2"
       )?.removeAttribute("key");
-      PanelMultiView.getViewNode(
-        document,
-        "appMenu-quit-button"
-      )?.removeAttribute("key");
     }
 
     this._loadHandled = true;
@@ -2015,16 +2016,6 @@ var gBrowserInit = {
       SidebarUI.startDelayedLoad();
 
       PanicButtonNotifier.init();
-    });
-
-    gBrowser.tabContainer.addEventListener("TabSelect", function() {
-      for (let panel of document.querySelectorAll(
-        "panel[tabspecific='true']"
-      )) {
-        if (panel.state == "open") {
-          panel.hidePopup();
-        }
-      }
     });
 
     if (BrowserHandler.kiosk) {
@@ -3165,6 +3156,7 @@ async function BrowserViewSourceOfDocument(args) {
     preferredRemoteType,
     initialBrowsingContextGroupId,
     triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+    skipLoad: true,
   });
   args.viewSourceBrowser = tabBrowser.getBrowserForTab(tab);
   top.gViewSourceUtils.viewSourceInBrowser(args);
@@ -5420,6 +5412,25 @@ var XULBrowserWindow = {
       );
     }
 
+    let closeOpenPanels = selector => {
+      for (let panel of document.querySelectorAll(selector)) {
+        if (panel.state != "closed") {
+          panel.hidePopup();
+        }
+      }
+    };
+
+    // If the location is changed due to switching tabs,
+    // ensure we close any open tabspecific panels.
+    if (aIsSimulated) {
+      closeOpenPanels("panel[tabspecific='true']");
+    }
+
+    // Ensure we close any remaining open locationspecific panels
+    if (!isSameDocument) {
+      closeOpenPanels("panel[locationspecific='true']");
+    }
+
     // About pages other than about:reader are not currently supported by
     // screenshots (see Bug 1620992).
     Services.obs.notifyObservers(
@@ -6871,7 +6882,6 @@ const nodeToTooltipMap = {
   "context-stop": "stopButton.tooltip",
   "downloads-button": "downloads.tooltip",
   "fullscreen-button": "fullscreenButton.tooltip",
-  "appMenu-fullscreen-button": "fullscreenButton.tooltip",
   "appMenu-fullscreen-button2": "fullscreenButton.tooltip",
   "new-window-button": "newWindowButton.tooltip",
   "new-tab-button": "newTabButton.tooltip",
@@ -6879,14 +6889,8 @@ const nodeToTooltipMap = {
   "reload-button": "reloadButton.tooltip",
   "stop-button": "stopButton.tooltip",
   "urlbar-zoom-button": "urlbar-zoom-button.tooltip",
-  "appMenu-cut-button": "cut-button.tooltip",
-  "appMenu-copy-button": "copy-button.tooltip",
-  "appMenu-paste-button": "paste-button.tooltip",
-  "appMenu-zoomEnlarge-button": "zoomEnlarge-button.tooltip",
   "appMenu-zoomEnlarge-button2": "zoomEnlarge-button.tooltip",
-  "appMenu-zoomReset-button": "zoomReset-button.tooltip",
   "appMenu-zoomReset-button2": "zoomReset-button.tooltip",
-  "appMenu-zoomReduce-button": "zoomReduce-button.tooltip",
   "appMenu-zoomReduce-button2": "zoomReduce-button.tooltip",
   "reader-mode-button": "reader-mode-button.tooltip",
   "reader-mode-button-icon": "reader-mode-button.tooltip",
@@ -6898,7 +6902,6 @@ const nodeToShortcutMap = {
   "context-stop": "key_stop",
   "downloads-button": "key_openDownloads",
   "fullscreen-button": "key_fullScreen",
-  "appMenu-fullscreen-button": "key_fullScreen",
   "appMenu-fullscreen-button2": "key_fullScreen",
   "new-window-button": "key_newNavigator",
   "new-tab-button": "key_newNavigatorTab",
@@ -6906,14 +6909,8 @@ const nodeToShortcutMap = {
   "reload-button": "key_reload",
   "stop-button": "key_stop",
   "urlbar-zoom-button": "key_fullZoomReset",
-  "appMenu-cut-button": "key_cut",
-  "appMenu-copy-button": "key_copy",
-  "appMenu-paste-button": "key_paste",
-  "appMenu-zoomEnlarge-button": "key_fullZoomEnlarge",
   "appMenu-zoomEnlarge-button2": "key_fullZoomEnlarge",
-  "appMenu-zoomReset-button": "key_fullZoomReset",
   "appMenu-zoomReset-button2": "key_fullZoomReset",
-  "appMenu-zoomReduce-button": "key_fullZoomReduce",
   "appMenu-zoomReduce-button2": "key_fullZoomReduce",
   "reader-mode-button": "key_toggleReaderMode",
   "reader-mode-button-icon": "key_toggleReaderMode",

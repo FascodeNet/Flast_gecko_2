@@ -446,6 +446,7 @@ pub enum WrAnimationType {
 pub struct WrAnimationProperty {
     effect_type: WrAnimationType,
     id: u64,
+    key: SpatialTreeItemKey,
 }
 
 /// cbindgen:derive-eq=false
@@ -473,6 +474,13 @@ pub struct WrComputedTransformData {
     pub scale_from: LayoutSize,
     pub vertical_flip: bool,
     pub rotation: WrRotation,
+    pub key: SpatialTreeItemKey,
+}
+
+#[repr(C)]
+pub struct WrTransformInfo {
+    pub transform: LayoutTransform,
+    pub key: SpatialTreeItemKey,
 }
 
 fn get_proc_address(glcontext_ptr: *mut c_void, name: &str) -> *const c_void {
@@ -1027,11 +1035,12 @@ impl AsyncPropertySampler for SamplerCallback {
             None => ptr::null_mut(),
         };
         let mut transaction = Transaction::new();
+        // Reset the pending properties first because omta_sample and apz_sample_transforms
+        // may be failed to reset them due to null samplers.
+        transaction.reset_dynamic_properties();
         unsafe {
-            // XXX: When we implement scroll-linked animations, we will probably
-            // need to call apz_sample_transforms prior to omta_sample.
+            apz_sample_transforms(self.window_id, generated_frame_id, &mut transaction);
             omta_sample(self.window_id, &mut transaction);
-            apz_sample_transforms(self.window_id, generated_frame_id, &mut transaction)
         };
         transaction.get_frame_ops()
     }
@@ -1332,7 +1341,12 @@ impl Compositor for WrCompositor {
         }
     }
 
-    fn start_compositing(&mut self, clear_color: ColorF, dirty_rects: &[DeviceIntRect], opaque_rects: &[DeviceIntRect]) {
+    fn start_compositing(
+        &mut self,
+        clear_color: ColorF,
+        dirty_rects: &[DeviceIntRect],
+        opaque_rects: &[DeviceIntRect],
+    ) {
         unsafe {
             wr_compositor_start_compositing(
                 self.0,
@@ -1488,6 +1502,9 @@ pub extern "C" fn wr_window_new(
 ) -> bool {
     assert!(unsafe { is_in_render_thread() });
 
+    // Ensure the WR profiler callbacks are hooked up to the Gecko profiler.
+    set_profiler_hooks(Some(&PROFILER_HOOKS));
+
     let software = !swgl_context.is_null();
     let (gl, sw_gl) = if software {
         let ctx = swgl::Context::from(swgl_context);
@@ -1634,9 +1651,6 @@ pub extern "C" fn wr_window_new(
         low_quality_pinch_zoom,
         ..Default::default()
     };
-
-    // Ensure the WR profiler callbacks are hooked up to the Gecko profiler.
-    set_profiler_hooks(Some(&PROFILER_HOOKS));
 
     let window_size = DeviceIntSize::new(window_width, window_height);
     let notifier = Box::new(CppNotifier { window_id });
@@ -1835,7 +1849,9 @@ pub extern "C" fn wr_transaction_set_display_list(
     viewport_size: LayoutSize,
     pipeline_id: WrPipelineId,
     dl_descriptor: BuiltDisplayListDescriptor,
-    dl_data: &mut WrVecU8,
+    dl_items_data: &mut WrVecU8,
+    dl_cache_data: &mut WrVecU8,
+    dl_spatial_tree_data: &mut WrVecU8,
 ) {
     let color = if background.a == 0.0 { None } else { Some(background) };
 
@@ -1845,7 +1861,9 @@ pub extern "C" fn wr_transaction_set_display_list(
     let preserve_frame_state = true;
 
     let payload = DisplayListPayload {
-        data: dl_data.flush_into_vec(),
+        items_data: dl_items_data.flush_into_vec(),
+        cache_data: dl_cache_data.flush_into_vec(),
+        spatial_tree: dl_spatial_tree_data.flush_into_vec(),
     };
 
     let dl = BuiltDisplayList::from_data(payload, dl_descriptor);
@@ -1894,7 +1912,7 @@ fn wr_animation_properties_into_vec<T>(
 }
 
 #[no_mangle]
-pub extern "C" fn wr_transaction_update_dynamic_properties(
+pub extern "C" fn wr_transaction_append_dynamic_properties(
     txn: &mut Transaction,
     opacity_array: *const WrOpacityProperty,
     opacity_count: usize,
@@ -1903,6 +1921,10 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
     color_array: *const WrColorProperty,
     color_count: usize,
 ) {
+    if opacity_count == 0 && transform_count == 0 && color_count == 0 {
+        return;
+    }
+
     let mut properties = DynamicProperties {
         transforms: Vec::with_capacity(transform_count),
         floats: Vec::with_capacity(opacity_count),
@@ -1915,7 +1937,7 @@ pub extern "C" fn wr_transaction_update_dynamic_properties(
 
     wr_animation_properties_into_vec(color_array, color_count, &mut properties.colors);
 
-    txn.update_dynamic_properties(properties);
+    txn.append_dynamic_properties(properties);
 }
 
 #[no_mangle]
@@ -2130,13 +2152,14 @@ pub unsafe extern "C" fn wr_transaction_clear_display_list(
     pipeline_id: WrPipelineId,
 ) {
     let preserve_frame_state = true;
-    let frame_builder = WebRenderFrameBuilder::new(pipeline_id);
+    let mut frame_builder = WebRenderFrameBuilder::new(pipeline_id);
+    frame_builder.dl_builder.begin();
 
     txn.set_display_list(
         epoch,
         None,
         LayoutSize::new(0.0, 0.0),
-        frame_builder.dl_builder.finalize(),
+        frame_builder.dl_builder.end(),
         preserve_frame_state,
     );
 }
@@ -2355,12 +2378,6 @@ impl WebRenderFrameBuilder {
             dl_builder: DisplayListBuilder::new(root_pipeline_id),
         }
     }
-    pub fn with_capacity(root_pipeline_id: WrPipelineId, capacity: usize) -> WebRenderFrameBuilder {
-        WebRenderFrameBuilder {
-            root_pipeline_id,
-            dl_builder: DisplayListBuilder::with_capacity(root_pipeline_id, capacity),
-        }
-    }
 }
 
 pub struct WrState {
@@ -2369,12 +2386,12 @@ pub struct WrState {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_state_new(pipeline_id: WrPipelineId, capacity: usize) -> *mut WrState {
+pub extern "C" fn wr_state_new(pipeline_id: WrPipelineId) -> *mut WrState {
     assert!(unsafe { !is_in_render_thread() });
 
     let state = Box::new(WrState {
         pipeline_id,
-        frame_builder: WebRenderFrameBuilder::with_capacity(pipeline_id, capacity),
+        frame_builder: WebRenderFrameBuilder::new(pipeline_id),
     });
 
     Box::into_raw(state)
@@ -2444,7 +2461,7 @@ pub extern "C" fn wr_dp_push_stacking_context(
     bounds: LayoutRect,
     spatial_id: WrSpatialId,
     params: &WrStackingContextParams,
-    transform: *const LayoutTransform,
+    transform: *const WrTransformInfo,
     filters: *const FilterOp,
     filter_count: usize,
     filter_datas: *const WrFilterData,
@@ -2472,7 +2489,9 @@ pub extern "C" fn wr_dp_push_stacking_context(
         .collect();
 
     let transform_ref = unsafe { transform.as_ref() };
-    let mut transform_binding = transform_ref.map(|t| PropertyBinding::Value(*t));
+    let mut transform_binding = transform_ref.map(|info| {
+        (PropertyBinding::Value(info.transform), info.key)
+    });
 
     let computed_ref = unsafe { params.computed_transform.as_ref() };
     let opacity_ref = unsafe { params.opacity.as_ref() };
@@ -2496,11 +2515,16 @@ pub extern "C" fn wr_dp_push_stacking_context(
                 has_opacity_animation = true;
             }
             WrAnimationType::Transform => {
-                transform_binding = Some(PropertyBinding::Binding(
-                    PropertyBindingKey::new(anim.id),
-                    // Same as above opacity case.
-                    transform_ref.cloned().unwrap_or_else(LayoutTransform::identity),
-                ));
+                transform_binding = Some(
+                    (
+                        PropertyBinding::Binding(
+                            PropertyBindingKey::new(anim.id),
+                            // Same as above opacity case.
+                            transform_ref.map(|info| info.transform).unwrap_or_else(LayoutTransform::identity),
+                        ),
+                        anim.key,
+                    )
+                );
             }
             _ => unreachable!("{:?} should not create a stacking context", anim.effect_type),
         }
@@ -2544,8 +2568,9 @@ pub extern "C" fn wr_dp_push_stacking_context(
             origin,
             wr_spatial_id,
             params.transform_style,
-            transform_binding,
+            transform_binding.0,
             reference_frame_kind,
+            transform_binding.1,
         );
 
         origin = LayoutPoint::zero();
@@ -2564,6 +2589,7 @@ pub extern "C" fn wr_dp_push_stacking_context(
             Some(data.scale_from),
             data.vertical_flip,
             rotation,
+            data.key,
         );
 
         origin = LayoutPoint::zero();
@@ -2676,11 +2702,7 @@ pub extern "C" fn wr_dp_define_rounded_rect_clip_with_parent_clip_chain(
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dp_define_rect_clip(
-    state: &mut WrState,
-    space: WrSpatialId,
-    clip_rect: LayoutRect,
-) -> WrClipId {
+pub extern "C" fn wr_dp_define_rect_clip(state: &mut WrState, space: WrSpatialId, clip_rect: LayoutRect) -> WrClipId {
     debug_assert!(unsafe { is_in_main_thread() });
 
     let space_and_clip = SpaceAndClipInfo {
@@ -2722,6 +2744,7 @@ pub extern "C" fn wr_dp_define_sticky_frame(
     vertical_bounds: StickyOffsetBounds,
     horizontal_bounds: StickyOffsetBounds,
     applied_offset: LayoutVector2D,
+    key: SpatialTreeItemKey,
 ) -> WrSpatialId {
     assert!(unsafe { is_in_main_thread() });
     let spatial_id = state.frame_builder.dl_builder.define_sticky_frame(
@@ -2736,6 +2759,7 @@ pub extern "C" fn wr_dp_define_sticky_frame(
         vertical_bounds,
         horizontal_bounds,
         applied_offset,
+        key,
     );
 
     WrSpatialId { id: spatial_id.0 }
@@ -2749,6 +2773,7 @@ pub extern "C" fn wr_dp_define_scroll_layer(
     content_rect: LayoutRect,
     clip_rect: LayoutRect,
     scroll_offset: LayoutPoint,
+    key: SpatialTreeItemKey,
 ) -> WrSpatialId {
     assert!(unsafe { is_in_main_thread() });
 
@@ -2761,6 +2786,7 @@ pub extern "C" fn wr_dp_define_scroll_layer(
         // TODO(gw): We should also update the Gecko-side APIs to provide
         //           this as a vector rather than a point.
         scroll_offset.to_vector(),
+        key,
     );
 
     WrSpatialId::from_webrender(space_and_clip)
@@ -3766,15 +3792,25 @@ pub extern "C" fn wr_dump_serialized_display_list(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn wr_api_finalize_builder(
+pub unsafe extern "C" fn wr_api_begin_builder(
+    state: &mut WrState,
+) {
+    state.frame_builder.dl_builder.begin();
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn wr_api_end_builder(
     state: &mut WrState,
     dl_descriptor: &mut BuiltDisplayListDescriptor,
-    dl_data: &mut WrVecU8,
+    dl_items_data: &mut WrVecU8,
+    dl_cache_data: &mut WrVecU8,
+    dl_spatial_tree: &mut WrVecU8,
 ) {
-    let frame_builder = mem::replace(&mut state.frame_builder, WebRenderFrameBuilder::new(state.pipeline_id));
-    let (_, dl) = frame_builder.dl_builder.finalize();
+    let (_, dl) = state.frame_builder.dl_builder.end();
     let (payload, descriptor) = dl.into_data();
-    *dl_data = WrVecU8::from_vec(payload.data);
+    *dl_items_data = WrVecU8::from_vec(payload.items_data);
+    *dl_cache_data = WrVecU8::from_vec(payload.cache_data);
+    *dl_spatial_tree = WrVecU8::from_vec(payload.spatial_tree);
     *dl_descriptor = descriptor;
 }
 
@@ -3877,9 +3913,7 @@ impl WrSpatialId {
     }
 
     fn from_webrender(id: SpatialId) -> Self {
-        WrSpatialId {
-            id: id.0,
-        }
+        WrSpatialId { id: id.0 }
     }
 }
 

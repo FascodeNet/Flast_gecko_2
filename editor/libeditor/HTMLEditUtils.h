@@ -35,8 +35,11 @@ class HTMLEditUtils final {
   using Selection = dom::Selection;
 
  public:
-  static const char16_t kSpace = 0x0020;
-  static const char16_t kNBSP = 0x00A0;
+  static constexpr char16_t kNewLine = '\n';
+  static constexpr char16_t kCarridgeReturn = '\r';
+  static constexpr char16_t kSpace = ' ';
+  static constexpr char16_t kNBSP = 0x00A0;
+  static constexpr char16_t kGreaterThan = '>';
 
   /**
    * IsSimplyEditableNode() returns true when aNode is simply editable.
@@ -45,6 +48,21 @@ class HTMLEditUtils final {
    */
   static bool IsSimplyEditableNode(const nsINode& aNode) {
     return aNode.IsEditable();
+  }
+
+  /**
+   * IsNeverContentEditableElementByUser() returns true if the element's content
+   * is never editable by user.  E.g., the content is always replaced by
+   * native anonymous node or something.
+   */
+  static bool IsNeverElementContentsEditableByUser(const nsIContent& aContent) {
+    return aContent.IsElement() &&
+           (!HTMLEditUtils::IsContainerNode(aContent) ||
+            aContent.IsAnyOfHTMLElements(
+                nsGkAtoms::applet, nsGkAtoms::colgroup, nsGkAtoms::frameset,
+                nsGkAtoms::head, nsGkAtoms::html, nsGkAtoms::iframe,
+                nsGkAtoms::meter, nsGkAtoms::picture, nsGkAtoms::progress,
+                nsGkAtoms::select, nsGkAtoms::textarea));
   }
 
   /**
@@ -65,18 +83,37 @@ class HTMLEditUtils final {
   /*
    * IsRemovalNode() returns true when parent of aContent is editable even
    * if aContent isn't editable.
+   * This is a valid method to check it if you find the content from point
+   * of view of siblings or parents of aContent.
+   * Note that padding `<br>` element for empty editor and manual native
+   * anonymous content should be deletable even after `HTMLEditor` is destroyed
+   * because they are owned/managed by `HTMLEditor`.
    */
   static bool IsRemovableNode(const nsIContent& aContent) {
-    return aContent.GetParentNode() && aContent.GetParentNode()->IsEditable();
+    return EditorUtils::IsPaddingBRElementForEmptyEditor(aContent) ||
+           aContent.IsRootOfNativeAnonymousSubtree() ||
+           (aContent.GetParentNode() &&
+            aContent.GetParentNode()->IsEditable() &&
+            &aContent != aContent.OwnerDoc()->GetBody() &&
+            &aContent != aContent.OwnerDoc()->GetDocumentElement());
   }
 
   /**
    * IsRemovableFromParentNode() returns true when aContent is editable, has a
    * parent node and the parent node is also editable.
+   * This is a valid method to check it if you find the content from point
+   * of view of descendants of aContent.
+   * Note that padding `<br>` element for empty editor and manual native
+   * anonymous content should be deletable even after `HTMLEditor` is destroyed
+   * because they are owned/managed by `HTMLEditor`.
    */
   static bool IsRemovableFromParentNode(const nsIContent& aContent) {
-    return aContent.IsEditable() && aContent.GetParentNode() &&
-           aContent.GetParentNode()->IsEditable();
+    return EditorUtils::IsPaddingBRElementForEmptyEditor(aContent) ||
+           aContent.IsRootOfNativeAnonymousSubtree() ||
+           (aContent.IsEditable() && aContent.GetParentNode() &&
+            aContent.GetParentNode()->IsEditable() &&
+            &aContent != aContent.OwnerDoc()->GetBody() &&
+            &aContent != aContent.OwnerDoc()->GetDocumentElement());
   }
 
   /**
@@ -104,7 +141,7 @@ class HTMLEditUtils final {
   /**
    * IsInlineElement() returns true if aElement is an element node but
    * shouldn't be treated as a block or aElement is not an element.
-   * XXX This looks odd.  For example, how about a comment node?
+   * XXX This name is wrong.  Must be renamed to IsInlineContent() or something.
    */
   static bool IsInlineElement(const nsIContent& aContent) {
     return !IsBlockElement(aContent);
@@ -117,18 +154,18 @@ class HTMLEditUtils final {
    * styles.
    */
   static bool IsRemovableInlineStyleElement(dom::Element& aElement);
-  static bool IsFormatNode(nsINode* aNode);
+  static bool IsFormatNode(const nsINode* aNode);
   static bool IsNodeThatCanOutdent(nsINode* aNode);
   static bool IsHeader(nsINode& aNode);
   static bool IsListItem(const nsINode* aNode);
   static bool IsTable(nsINode* aNode);
   static bool IsTableRow(nsINode* aNode);
-  static bool IsAnyTableElement(nsINode* aNode);
+  static bool IsAnyTableElement(const nsINode* aNode);
   static bool IsAnyTableElementButNotTable(nsINode* aNode);
   static bool IsTableCell(const nsINode* aNode);
   static bool IsTableCellOrCaption(nsINode& aNode);
   static bool IsAnyListElement(nsINode* aNode);
-  static bool IsPre(nsINode* aNode);
+  static bool IsPre(const nsINode* aNode);
   static bool IsImage(nsINode* aNode);
   static bool IsLink(nsINode* aNode);
   static bool IsNamedAnchor(const nsINode* aNode);
@@ -227,11 +264,18 @@ class HTMLEditUtils final {
    * IsSplittableNode() returns true if aContent can split.
    */
   static bool IsSplittableNode(const nsIContent& aContent) {
+    if (!EditorUtils::IsEditableContent(aContent,
+                                        EditorUtils::EditorType::HTML) ||
+        !HTMLEditUtils::IsRemovableFromParentNode(aContent)) {
+      return false;
+    }
     if (aContent.IsElement()) {
       // XXX Perhaps, instead of using container, we should have "splittable"
       //     information in the DB.  E.g., `<template>`, `<script>` elements
       //     can have children, but shouldn't be split.
-      return HTMLEditUtils::IsContainerNode(aContent);
+      return HTMLEditUtils::IsContainerNode(aContent) &&
+             !aContent.IsAnyOfHTMLElements(nsGkAtoms::body, nsGkAtoms::head,
+                                           nsGkAtoms::html);
     }
     return aContent.IsText() && aContent.Length() > 0;
   }
@@ -703,6 +747,13 @@ class HTMLEditUtils final {
     MOZ_ASSERT_IF(
         aLeafNodeTypes.contains(LeafNodeType::OnlyEditableLeafNode),
         !aLeafNodeTypes.contains(LeafNodeType::LeafNodeOrNonEditableNode));
+    // editor shouldn't touch child nodes which are replaced with native
+    // anonymous nodes.
+    if (aNode.IsElement() &&
+        HTMLEditUtils::IsNeverElementContentsEditableByUser(
+            *aNode.AsElement())) {
+      return nullptr;
+    }
     for (nsIContent* content = aNode.GetLastChild(); content;) {
       if (aLeafNodeTypes.contains(LeafNodeType::OnlyEditableLeafNode) &&
           !EditorUtils::IsEditableContent(*content,
@@ -716,7 +767,8 @@ class HTMLEditUtils final {
           HTMLEditUtils::IsBlockElement(*content)) {
         return content;
       }
-      if (!content->HasChildren()) {
+      if (!content->HasChildren() ||
+          HTMLEditUtils::IsNeverElementContentsEditableByUser(*content)) {
         return content;
       }
       if (aLeafNodeTypes.contains(LeafNodeType::LeafNodeOrNonEditableNode) &&
@@ -739,6 +791,13 @@ class HTMLEditUtils final {
     MOZ_ASSERT_IF(
         aLeafNodeTypes.contains(LeafNodeType::OnlyEditableLeafNode),
         !aLeafNodeTypes.contains(LeafNodeType::LeafNodeOrNonEditableNode));
+    // editor shouldn't touch child nodes which are replaced with native
+    // anonymous nodes.
+    if (aNode.IsElement() &&
+        HTMLEditUtils::IsNeverElementContentsEditableByUser(
+            *aNode.AsElement())) {
+      return nullptr;
+    }
     for (nsIContent* content = aNode.GetFirstChild(); content;) {
       if (aLeafNodeTypes.contains(LeafNodeType::OnlyEditableLeafNode) &&
           !EditorUtils::IsEditableContent(*content,
@@ -752,7 +811,8 @@ class HTMLEditUtils final {
           HTMLEditUtils::IsBlockElement(*content)) {
         return content;
       }
-      if (!content->HasChildren()) {
+      if (!content->HasChildren() ||
+          HTMLEditUtils::IsNeverElementContentsEditableByUser(*content)) {
         return content;
       }
       if (aLeafNodeTypes.contains(LeafNodeType::LeafNodeOrNonEditableNode) &&
@@ -1069,81 +1129,36 @@ class HTMLEditUtils final {
       TableBoundary aHowToTreatTableBoundary);
 
   /**
-   * GetAncestorBlockElement() returns parent or nearest ancestor of aContent
-   * which is a block element.  If aAncestorLimiter is not nullptr,
-   * this stops looking for the result when it meets the limiter.
+   * GetAncestorElement() and GetInclusiveAncestorElement() return
+   * (inclusive) block ancestor element of aContent whose time matches
+   * aAncestorTypes.
    */
-  static Element* GetAncestorBlockElement(
-      const nsIContent& aContent, const nsINode* aAncestorLimiter = nullptr) {
-    MOZ_ASSERT(
-        !aAncestorLimiter || aContent.IsInclusiveDescendantOf(aAncestorLimiter),
-        "aContent isn't in aAncestorLimiter");
+  enum class AncestorType {
+    ClosestBlockElement,
+    MostDistantInlineElementInBlock,
+    EditableElement,
+    IgnoreHRElement,  // Ignore ancestor <hr> element since invalid structure
+  };
+  using AncestorTypes = EnumSet<AncestorType>;
+  constexpr static AncestorTypes
+      ClosestEditableBlockElementOrInlineEditingHost = {
+          AncestorType::ClosestBlockElement,
+          AncestorType::MostDistantInlineElementInBlock,
+          AncestorType::EditableElement};
+  constexpr static AncestorTypes ClosestBlockElement = {
+      AncestorType::ClosestBlockElement};
+  constexpr static AncestorTypes ClosestEditableBlockElement = {
+      AncestorType::ClosestBlockElement, AncestorType::EditableElement};
+  constexpr static AncestorTypes ClosestEditableBlockElementExceptHRElement = {
+      AncestorType::ClosestBlockElement, AncestorType::IgnoreHRElement,
+      AncestorType::EditableElement};
+  static Element* GetAncestorElement(const nsIContent& aContent,
+                                     const AncestorTypes& aAncestorTypes,
+                                     const Element* aAncestorLimiter = nullptr);
+  static Element* GetInclusiveAncestorElement(
+      const nsIContent& aContent, const AncestorTypes& aAncestorTypes,
+      const Element* aAncestorLimiter = nullptr);
 
-    // The caller has already reached the limiter.
-    if (&aContent == aAncestorLimiter) {
-      return nullptr;
-    }
-
-    for (Element* element : aContent.AncestorsOfType<Element>()) {
-      if (HTMLEditUtils::IsBlockElement(*element)) {
-        return element;
-      }
-      // Now, we have reached the limiter, there is no block in its ancestors.
-      if (element == aAncestorLimiter) {
-        return nullptr;
-      }
-    }
-
-    return nullptr;
-  }
-
-  /**
-   * GetInclusiveAncestorBlockElement() returns aContent itself, or parent or
-   * nearest ancestor of aContent which is a block element.  If aAncestorLimiter
-   * is not nullptr, this stops looking for the result when it meets the
-   * limiter.
-   */
-  static Element* GetInclusiveAncestorBlockElement(
-      const nsIContent& aContent, const nsINode* aAncestorLimiter = nullptr) {
-    MOZ_ASSERT(
-        !aAncestorLimiter || aContent.IsInclusiveDescendantOf(aAncestorLimiter),
-        "aContent isn't in aAncestorLimiter");
-
-    if (!aContent.IsContent()) {
-      return nullptr;
-    }
-
-    if (HTMLEditUtils::IsBlockElement(aContent)) {
-      return const_cast<Element*>(aContent.AsElement());
-    }
-    return GetAncestorBlockElement(aContent, aAncestorLimiter);
-  }
-
-  /**
-   * GetInclusiveAncestorBlockElementExceptHRElement() returns inclusive
-   * ancestor block element except `<hr>` element.
-   */
-  static Element* GetInclusiveAncestorBlockElementExceptHRElement(
-      const nsIContent& aContent, const nsINode* aAncestorLimiter = nullptr) {
-    Element* blockElement =
-        GetInclusiveAncestorBlockElement(aContent, aAncestorLimiter);
-    if (!blockElement || !blockElement->IsHTMLElement(nsGkAtoms::hr)) {
-      return blockElement;
-    }
-    if (!blockElement->GetParentElement()) {
-      return nullptr;
-    }
-    return GetInclusiveAncestorBlockElementExceptHRElement(
-        *blockElement->GetParentElement(), aAncestorLimiter);
-  }
-
-  /**
-   * GetInclusiveAncestorEditableBlockElementOrInlineEditingHost() returns
-   * inclusive block ancestor element of aContent.  If aContent is in inline
-   * editing host, returns the editing host instead.
-   */
-  static Element* GetInclusiveAncestorEditableBlockElementOrInlineEditingHost(
-      const nsIContent& aContent);
   /**
    * GetClosestAncestorTableElement() returns the nearest inclusive ancestor
    * <table> element of aContent.
@@ -1448,7 +1463,7 @@ class HTMLEditUtils final {
     MOZ_ASSERT(aOffset <= textFragment.GetLength());
     for (uint32_t i = aOffset; i; i--) {
       char16_t ch = textFragment.CharAt(i - 1);
-      if (!nsCRT::IsAsciiSpace(ch) && ch != kNBSP) {
+      if (!nsCRT::IsAsciiSpace(ch) && ch != HTMLEditUtils::kNBSP) {
         return Some(i - 1);
       }
     }
@@ -1472,7 +1487,7 @@ class HTMLEditUtils final {
     MOZ_ASSERT(aOffset <= textFragment.GetLength());
     for (uint32_t i = aOffset; i < textFragment.GetLength(); i++) {
       char16_t ch = textFragment.CharAt(i);
-      if (!nsCRT::IsAsciiSpace(ch) && ch != kNBSP) {
+      if (!nsCRT::IsAsciiSpace(ch) && ch != HTMLEditUtils::kNBSP) {
         return Some(i);
       }
     }

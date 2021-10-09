@@ -11,11 +11,11 @@
 #include "jsmath.h"
 
 #include "builtin/DataViewObject.h"
+#include "builtin/MapObject.h"
 #include "jit/AtomicOp.h"
 #include "jit/CacheIR.h"
 #include "jit/CacheIRCompiler.h"
 #include "jit/CacheIROpsGenerated.h"
-#include "jit/CompileInfo.h"
 #include "jit/LIR.h"
 #include "jit/MIR.h"
 #include "jit/MIRGenerator.h"
@@ -26,7 +26,7 @@
 #include "js/ScalarType.h"  // js::Scalar::Type
 #include "vm/ArgumentsObject.h"
 #include "vm/BytecodeLocation.h"
-#include "wasm/WasmInstance.h"
+#include "wasm/WasmCode.h"
 
 #include "gc/ObjectKind-inl.h"
 
@@ -193,6 +193,8 @@ class MOZ_RAII WarpCacheIRTranspiler : public WarpBuilderShared {
   // Returns either MConstant or MNurseryIndex. See WarpObjectField.
   MInstruction* objectStubField(uint32_t offset);
 
+  const JSClass* classForGuardClassKind(GuardClassKind kind);
+
   [[nodiscard]] bool emitGuardTo(ValOperandId inputId, MIRType type);
 
   [[nodiscard]] bool emitToString(OperandId inputId, StringOperandId resultId);
@@ -343,42 +345,44 @@ bool WarpCacheIRTranspiler::emitGuardClass(ObjOperandId objId,
                                            GuardClassKind kind) {
   MDefinition* def = getOperand(objId);
 
-  const JSClass* classp = nullptr;
-  switch (kind) {
-    case GuardClassKind::Array:
-      classp = &ArrayObject::class_;
-      break;
-    case GuardClassKind::ArrayBuffer:
-      classp = &ArrayBufferObject::class_;
-      break;
-    case GuardClassKind::SharedArrayBuffer:
-      classp = &SharedArrayBufferObject::class_;
-      break;
-    case GuardClassKind::DataView:
-      classp = &DataViewObject::class_;
-      break;
-    case GuardClassKind::MappedArguments:
-      classp = &MappedArgumentsObject::class_;
-      break;
-    case GuardClassKind::UnmappedArguments:
-      classp = &UnmappedArgumentsObject::class_;
-      break;
-    case GuardClassKind::WindowProxy:
-      classp = mirGen().runtime->maybeWindowProxyClass();
-      break;
-    case GuardClassKind::JSFunction:
-      classp = &JSFunction::class_;
-      break;
-    default:
-      MOZ_CRASH("not yet supported");
+  MInstruction* ins;
+  if (kind == GuardClassKind::JSFunction) {
+    ins = MGuardToFunction::New(alloc(), def);
+  } else {
+    const JSClass* classp = classForGuardClassKind(kind);
+    ins = MGuardToClass::New(alloc(), def, classp);
   }
-  MOZ_ASSERT(classp);
 
-  auto* ins = MGuardToClass::New(alloc(), def, classp);
   add(ins);
 
   setOperand(objId, ins);
   return true;
+}
+
+const JSClass* WarpCacheIRTranspiler::classForGuardClassKind(
+    GuardClassKind kind) {
+  switch (kind) {
+    case GuardClassKind::Array:
+      return &ArrayObject::class_;
+    case GuardClassKind::ArrayBuffer:
+      return &ArrayBufferObject::class_;
+    case GuardClassKind::SharedArrayBuffer:
+      return &SharedArrayBufferObject::class_;
+    case GuardClassKind::DataView:
+      return &DataViewObject::class_;
+    case GuardClassKind::MappedArguments:
+      return &MappedArgumentsObject::class_;
+    case GuardClassKind::UnmappedArguments:
+      return &UnmappedArgumentsObject::class_;
+    case GuardClassKind::WindowProxy:
+      return mirGen().runtime->maybeWindowProxyClass();
+    case GuardClassKind::Set:
+      return &SetObject::class_;
+    case GuardClassKind::Map:
+      return &MapObject::class_;
+    default:
+      MOZ_CRASH("not yet supported");
+  }
 }
 
 bool WarpCacheIRTranspiler::emitGuardAnyClass(ObjOperandId objId,
@@ -1811,6 +1815,31 @@ bool WarpCacheIRTranspiler::emitLoadTypedArrayElementExistsResult(
 
   pushResult(ins);
   return true;
+}
+
+static MIRType MIRTypeForArrayBufferViewRead(Scalar::Type arrayType,
+                                             bool forceDoubleForUint32) {
+  switch (arrayType) {
+    case Scalar::Int8:
+    case Scalar::Uint8:
+    case Scalar::Uint8Clamped:
+    case Scalar::Int16:
+    case Scalar::Uint16:
+    case Scalar::Int32:
+      return MIRType::Int32;
+    case Scalar::Uint32:
+      return forceDoubleForUint32 ? MIRType::Double : MIRType::Int32;
+    case Scalar::Float32:
+      return MIRType::Float32;
+    case Scalar::Float64:
+      return MIRType::Double;
+    case Scalar::BigInt64:
+    case Scalar::BigUint64:
+      return MIRType::BigInt;
+    default:
+      break;
+  }
+  MOZ_CRASH("Unknown typed array type");
 }
 
 bool WarpCacheIRTranspiler::emitLoadTypedArrayElementResult(
@@ -3866,6 +3895,331 @@ bool WarpCacheIRTranspiler::emitBigIntAsUintNResult(Int32OperandId bitsId,
 
   auto* ins = MBigIntAsUintN::New(alloc(), bits, bigInt);
   add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitGuardToNonGCThing(ValOperandId inputId) {
+  MDefinition* def = getOperand(inputId);
+  if (IsNonGCThing(def->type())) {
+    return true;
+  }
+
+  auto* ins = MGuardNonGCThing::New(alloc(), def);
+  add(ins);
+
+  setOperand(inputId, ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitSetHasNonGCThingResult(ObjOperandId setId,
+                                                       ValOperandId valId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* val = getOperand(valId);
+
+  auto* hashValue = MToHashableNonGCThing::New(alloc(), val);
+  add(hashValue);
+
+  auto* hash = MHashNonGCThing::New(alloc(), hashValue);
+  add(hash);
+
+  auto* ins = MSetObjectHasNonBigInt::New(alloc(), set, hashValue, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitSetHasStringResult(ObjOperandId setId,
+                                                   StringOperandId strId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* str = getOperand(strId);
+
+  auto* hashValue = MToHashableString::New(alloc(), str);
+  add(hashValue);
+
+  auto* hash = MHashString::New(alloc(), hashValue);
+  add(hash);
+
+  auto* ins = MSetObjectHasNonBigInt::New(alloc(), set, hashValue, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitSetHasSymbolResult(ObjOperandId setId,
+                                                   SymbolOperandId symId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* sym = getOperand(symId);
+
+  auto* hash = MHashSymbol::New(alloc(), sym);
+  add(hash);
+
+  auto* ins = MSetObjectHasNonBigInt::New(alloc(), set, sym, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitSetHasBigIntResult(ObjOperandId setId,
+                                                   BigIntOperandId bigIntId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* bigInt = getOperand(bigIntId);
+
+  auto* hash = MHashBigInt::New(alloc(), bigInt);
+  add(hash);
+
+  auto* ins = MSetObjectHasBigInt::New(alloc(), set, bigInt, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitSetHasObjectResult(ObjOperandId setId,
+                                                   ObjOperandId objId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* obj = getOperand(objId);
+
+  auto* hash = MHashObject::New(alloc(), set, obj);
+  add(hash);
+
+  auto* ins = MSetObjectHasNonBigInt::New(alloc(), set, obj, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitSetHasResult(ObjOperandId setId,
+                                             ValOperandId valId) {
+  MDefinition* set = getOperand(setId);
+  MDefinition* val = getOperand(valId);
+
+#ifdef JS_PUNBOX64
+  auto* hashValue = MToHashableValue::New(alloc(), val);
+  add(hashValue);
+
+  auto* hash = MHashValue::New(alloc(), set, hashValue);
+  add(hash);
+
+  auto* ins = MSetObjectHasValue::New(alloc(), set, hashValue, hash);
+  add(ins);
+#else
+  auto* ins = MSetObjectHasValueVMCall::New(alloc(), set, val);
+  add(ins);
+#endif
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapHasNonGCThingResult(ObjOperandId mapId,
+                                                       ValOperandId valId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* val = getOperand(valId);
+
+  auto* hashValue = MToHashableNonGCThing::New(alloc(), val);
+  add(hashValue);
+
+  auto* hash = MHashNonGCThing::New(alloc(), hashValue);
+  add(hash);
+
+  auto* ins = MMapObjectHasNonBigInt::New(alloc(), map, hashValue, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapHasStringResult(ObjOperandId mapId,
+                                                   StringOperandId strId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* str = getOperand(strId);
+
+  auto* hashValue = MToHashableString::New(alloc(), str);
+  add(hashValue);
+
+  auto* hash = MHashString::New(alloc(), hashValue);
+  add(hash);
+
+  auto* ins = MMapObjectHasNonBigInt::New(alloc(), map, hashValue, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapHasSymbolResult(ObjOperandId mapId,
+                                                   SymbolOperandId symId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* sym = getOperand(symId);
+
+  auto* hash = MHashSymbol::New(alloc(), sym);
+  add(hash);
+
+  auto* ins = MMapObjectHasNonBigInt::New(alloc(), map, sym, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapHasBigIntResult(ObjOperandId mapId,
+                                                   BigIntOperandId bigIntId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* bigInt = getOperand(bigIntId);
+
+  auto* hash = MHashBigInt::New(alloc(), bigInt);
+  add(hash);
+
+  auto* ins = MMapObjectHasBigInt::New(alloc(), map, bigInt, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapHasObjectResult(ObjOperandId mapId,
+                                                   ObjOperandId objId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* obj = getOperand(objId);
+
+  auto* hash = MHashObject::New(alloc(), map, obj);
+  add(hash);
+
+  auto* ins = MMapObjectHasNonBigInt::New(alloc(), map, obj, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapHasResult(ObjOperandId mapId,
+                                             ValOperandId valId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* val = getOperand(valId);
+
+#ifdef JS_PUNBOX64
+  auto* hashValue = MToHashableValue::New(alloc(), val);
+  add(hashValue);
+
+  auto* hash = MHashValue::New(alloc(), map, hashValue);
+  add(hash);
+
+  auto* ins = MMapObjectHasValue::New(alloc(), map, hashValue, hash);
+  add(ins);
+#else
+  auto* ins = MMapObjectHasValueVMCall::New(alloc(), map, val);
+  add(ins);
+#endif
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapGetNonGCThingResult(ObjOperandId mapId,
+                                                       ValOperandId valId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* val = getOperand(valId);
+
+  auto* hashValue = MToHashableNonGCThing::New(alloc(), val);
+  add(hashValue);
+
+  auto* hash = MHashNonGCThing::New(alloc(), hashValue);
+  add(hash);
+
+  auto* ins = MMapObjectGetNonBigInt::New(alloc(), map, hashValue, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapGetStringResult(ObjOperandId mapId,
+                                                   StringOperandId strId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* str = getOperand(strId);
+
+  auto* hashValue = MToHashableString::New(alloc(), str);
+  add(hashValue);
+
+  auto* hash = MHashString::New(alloc(), hashValue);
+  add(hash);
+
+  auto* ins = MMapObjectGetNonBigInt::New(alloc(), map, hashValue, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapGetSymbolResult(ObjOperandId mapId,
+                                                   SymbolOperandId symId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* sym = getOperand(symId);
+
+  auto* hash = MHashSymbol::New(alloc(), sym);
+  add(hash);
+
+  auto* ins = MMapObjectGetNonBigInt::New(alloc(), map, sym, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapGetBigIntResult(ObjOperandId mapId,
+                                                   BigIntOperandId bigIntId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* bigInt = getOperand(bigIntId);
+
+  auto* hash = MHashBigInt::New(alloc(), bigInt);
+  add(hash);
+
+  auto* ins = MMapObjectGetBigInt::New(alloc(), map, bigInt, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapGetObjectResult(ObjOperandId mapId,
+                                                   ObjOperandId objId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* obj = getOperand(objId);
+
+  auto* hash = MHashObject::New(alloc(), map, obj);
+  add(hash);
+
+  auto* ins = MMapObjectGetNonBigInt::New(alloc(), map, obj, hash);
+  add(ins);
+
+  pushResult(ins);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitMapGetResult(ObjOperandId mapId,
+                                             ValOperandId valId) {
+  MDefinition* map = getOperand(mapId);
+  MDefinition* val = getOperand(valId);
+
+#ifdef JS_PUNBOX64
+  auto* hashValue = MToHashableValue::New(alloc(), val);
+  add(hashValue);
+
+  auto* hash = MHashValue::New(alloc(), map, hashValue);
+  add(hash);
+
+  auto* ins = MMapObjectGetValue::New(alloc(), map, hashValue, hash);
+  add(ins);
+#else
+  auto* ins = MMapObjectGetValueVMCall::New(alloc(), map, val);
+  add(ins);
+#endif
 
   pushResult(ins);
   return true;

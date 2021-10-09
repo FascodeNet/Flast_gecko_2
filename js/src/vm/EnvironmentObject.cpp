@@ -27,6 +27,7 @@
 #include "vm/Scope.h"
 #include "vm/Shape.h"
 #include "vm/Xdr.h"
+#include "wasm/WasmDebugFrame.h"
 #include "wasm/WasmInstance.h"
 
 #include "gc/Marking-inl.h"
@@ -91,9 +92,10 @@ static T* CreateEnvironmentObject(JSContext* cx, HandleShape shape,
   MOZ_ASSERT(CanChangeToBackgroundAllocKind(allocKind, &T::class_));
   allocKind = gc::ForegroundToBackgroundAllocKind(allocKind);
 
-  JSObject* obj;
-  JS_TRY_VAR_OR_RETURN_NULL(cx, obj,
-                            NativeObject::create(cx, allocKind, heap, shape));
+  JSObject* obj = NativeObject::create(cx, allocKind, heap, shape);
+  if (!obj) {
+    return nullptr;
+  }
 
   return &obj->as<T>();
 }
@@ -3444,7 +3446,7 @@ bool js::CheckLexicalNameConflict(
   RootedId id(cx, NameToId(name));
   mozilla::Maybe<PropertyInfo> prop;
   if (varObj->is<GlobalObject>() &&
-      varObj->as<GlobalObject>().realm()->isInVarNames(name)) {
+      varObj->as<GlobalObject>().isInVarNames(name)) {
     // ES 15.1.11 step 5.a
     redeclKind = "var";
   } else if ((prop = lexicalEnv->lookup(cx, name))) {
@@ -3577,7 +3579,7 @@ static bool InitGlobalOrEvalDeclarations(
         }
 
         if (varObj->is<GlobalObject>()) {
-          if (!varObj->as<GlobalObject>().realm()->addToVarNames(cx, name)) {
+          if (!varObj->as<GlobalObject>().addToVarNames(cx, name)) {
             return false;
           }
         }
@@ -3655,7 +3657,7 @@ static bool InitHoistedFunctionDeclarations(JSContext* cx, HandleScript script,
       }
 
       if (varObj->is<GlobalObject>()) {
-        if (!varObj->as<GlobalObject>().realm()->addToVarNames(cx, name)) {
+        if (!varObj->as<GlobalObject>().addToVarNames(cx, name)) {
           return false;
         }
       }
@@ -3687,7 +3689,7 @@ static bool InitHoistedFunctionDeclarations(JSContext* cx, HandleScript script,
 
       // Careful: the presence of a shape, even one appearing to derive from
       // a variable declaration, doesn't mean it's in [[VarNames]].
-      if (!varObj->as<GlobalObject>().realm()->addToVarNames(cx, name)) {
+      if (!varObj->as<GlobalObject>().addToVarNames(cx, name)) {
         return false;
       }
     }

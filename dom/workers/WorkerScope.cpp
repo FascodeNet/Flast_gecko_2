@@ -279,6 +279,26 @@ nsISerialEventTarget* WorkerGlobalScopeBase::EventTargetFor(
   return mSerialEventTarget;
 }
 
+// See also AutoJSAPI::ReportException
+void WorkerGlobalScopeBase::ReportError(JSContext* aCx,
+                                        JS::Handle<JS::Value> aError,
+                                        CallerType, ErrorResult& aRv) {
+  JS::ErrorReportBuilder jsReport(aCx);
+  JS::ExceptionStack exnStack(aCx, aError, nullptr);
+  if (!jsReport.init(aCx, exnStack, JS::ErrorReportBuilder::WithSideEffects)) {
+    return aRv.NoteJSContextException(aCx);
+  }
+
+  // Before invoking ReportError, put the exception back on the context,
+  // because it may want to put it in its error events and has no other way
+  // to get hold of it.  After we invoke ReportError, clear the exception on
+  // cx(), just in case ReportError didn't.
+  JS::SetPendingExceptionStack(aCx, exnStack);
+  mWorkerPrivate->ReportError(aCx, jsReport.toStringResult(),
+                              jsReport.report());
+  JS_ClearPendingException(aCx);
+}
+
 void WorkerGlobalScopeBase::Atob(const nsAString& aAtob, nsAString& aOut,
                                  ErrorResult& aRv) const {
   mWorkerPrivate->AssertIsOnWorkerThread();
@@ -632,15 +652,16 @@ already_AddRefed<IDBFactory> WorkerGlobalScope::GetIndexedDB(
 }
 
 already_AddRefed<Promise> WorkerGlobalScope::CreateImageBitmap(
-    const ImageBitmapSource& aImage, ErrorResult& aRv) {
-  return ImageBitmap::Create(this, aImage, Nothing(), aRv);
+    const ImageBitmapSource& aImage, const ImageBitmapOptions& aOptions,
+    ErrorResult& aRv) {
+  return ImageBitmap::Create(this, aImage, Nothing(), aOptions, aRv);
 }
 
 already_AddRefed<Promise> WorkerGlobalScope::CreateImageBitmap(
     const ImageBitmapSource& aImage, int32_t aSx, int32_t aSy, int32_t aSw,
-    int32_t aSh, ErrorResult& aRv) {
-  return ImageBitmap::Create(this, aImage,
-                             Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aRv);
+    int32_t aSh, const ImageBitmapOptions& aOptions, ErrorResult& aRv) {
+  return ImageBitmap::Create(
+      this, aImage, Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aOptions, aRv);
 }
 
 mozilla::dom::DebuggerNotificationManager*

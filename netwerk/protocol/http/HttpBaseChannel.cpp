@@ -100,6 +100,7 @@ static bool IsHeaderBlacklistedForRedirectCopy(nsHttpAtom const& aHeader) {
   static nsHttpAtom const* blackList[] = {&nsHttp::Accept,
                                           &nsHttp::Accept_Encoding,
                                           &nsHttp::Accept_Language,
+                                          &nsHttp::Alternate_Service_Used,
                                           &nsHttp::Authentication,
                                           &nsHttp::Authorization,
                                           &nsHttp::Connection,
@@ -5582,6 +5583,15 @@ void HttpBaseChannel::DoDiagnosticAssertWhenOnStopNotCalledOnDestroy() {}
 NS_IMETHODIMP HttpBaseChannel::SetWaitForHTTPSSVCRecord() {
   mCaps |= NS_HTTP_FORCE_WAIT_HTTP_RR;
   return NS_OK;
+}
+
+bool HttpBaseChannel::Http3Allowed() const {
+  bool isDirectOrNoProxy =
+      mProxyInfo ? static_cast<nsProxyInfo*>(mProxyInfo.get())->IsDirect()
+                 : true;
+  return !mUpgradeProtocolCallback && isDirectOrNoProxy &&
+         !(mCaps & NS_HTTP_BE_CONSERVATIVE) && !LoadBeConservative() &&
+         LoadAllowHttp3();
 }
 
 }  // namespace net

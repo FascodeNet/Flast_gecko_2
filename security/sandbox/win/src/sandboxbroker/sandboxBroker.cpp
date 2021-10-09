@@ -52,7 +52,6 @@ static UniquePtr<nsString> sProfileDir;
 static UniquePtr<nsString> sContentTempDir;
 static UniquePtr<nsString> sRoamingAppDataDir;
 static UniquePtr<nsString> sLocalAppDataDir;
-static UniquePtr<nsString> sUserExtensionsDevDir;
 #ifdef ENABLE_SYSTEM_EXTENSION_DIRS
 static UniquePtr<nsString> sUserExtensionsDir;
 #endif
@@ -159,8 +158,6 @@ void SandboxBroker::GeckoDependentInitialize() {
                          &sContentTempDir);
     CacheDirAndAutoClear(dirSvc, NS_WIN_APPDATA_DIR, &sRoamingAppDataDir);
     CacheDirAndAutoClear(dirSvc, NS_WIN_LOCAL_APPDATA_DIR, &sLocalAppDataDir);
-    CacheDirAndAutoClear(dirSvc, XRE_USER_SYS_EXTENSION_DEV_DIR,
-                         &sUserExtensionsDevDir);
 #ifdef ENABLE_SYSTEM_EXTENSION_DIRS
     CacheDirAndAutoClear(dirSvc, XRE_USER_SYS_EXTENSION_DIR,
                          &sUserExtensionsDir);
@@ -718,10 +715,6 @@ void SandboxBroker::SetSecurityLevelForContentProcess(int32_t aSandboxLevel,
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
                      sProfileDir, u"\\extensions\\*"_ns);
 
-    // Read access to a directory for system extension dev (see bug 1393805)
-    AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
-                     sUserExtensionsDevDir, u"\\*"_ns);
-
 #ifdef ENABLE_SYSTEM_EXTENSION_DIRS
     // Add rule to allow read access to the per-user extensions directory.
     AddCachedDirRule(mPolicy, sandbox::TargetPolicy::FILES_ALLOW_READONLY,
@@ -1070,6 +1063,14 @@ bool SandboxBroker::SetSecurityLevelForRDDProcess() {
                             L"\\??\\pipe\\chrome.*");
   SANDBOX_ENSURE_SUCCESS(
       result,
+      "With these static arguments AddRule should never fail, what happened?");
+
+  // Add rule to allow process to create the server side of our IPC pipes.
+  result = mPolicy->AddRule(sandbox::TargetPolicy::SUBSYS_NAMED_PIPES,
+                            sandbox::TargetPolicy::NAMEDPIPES_ALLOW_ANY,
+                            L"\\\\.\\pipe\\chrome.*");
+  MOZ_RELEASE_ASSERT(
+      sandbox::SBOX_ALL_OK == result,
       "With these static arguments AddRule should never fail, what happened?");
 
   // Add the policy for the client side of the crash server pipe.

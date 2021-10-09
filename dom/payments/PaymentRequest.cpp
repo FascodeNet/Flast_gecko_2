@@ -19,6 +19,7 @@
 #include "mozilla/intl/MozLocale.h"
 #include "mozilla/StaticPrefs_dom.h"
 #include "nsContentUtils.h"
+#include "nsIDUtils.h"
 #include "nsImportModule.h"
 #include "nsIRegion.h"
 #include "nsIScriptError.h"
@@ -650,13 +651,7 @@ already_AddRefed<PaymentRequest> PaymentRequest::CreatePaymentRequest(
     return nullptr;
   }
 
-  // Build a string in {xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx} format
-  char buffer[NSID_LENGTH];
-  uuid.ToProvidedString(buffer);
-
-  // Remove {} and the null terminator
-  nsAutoString id;
-  id.AssignASCII(&buffer[1], NSID_LENGTH - 3);
+  NSID_TrimBracketsUTF16 id(uuid);
 
   // Create payment request with generated id
   RefPtr<PaymentRequest> request = new PaymentRequest(aWindow, id);
@@ -1167,7 +1162,7 @@ bool PaymentRequest::InFullyActiveDocument() {
   }
 
   while (winContext) {
-    if (winContext->IsCached()) {
+    if (!winContext->IsCurrent()) {
       return false;
     }
     winContext = winContext->GetParentWindowContext();

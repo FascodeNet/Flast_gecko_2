@@ -9,7 +9,7 @@
 use crate::fc::{LocalStreamLimits, ReceiverFlowControl, RemoteStreamLimits, SenderFlowControl};
 use crate::frame::Frame;
 use crate::packet::PacketBuilder;
-use crate::recovery::RecoveryToken;
+use crate::recovery::{RecoveryToken, StreamRecoveryToken};
 use crate::recv_stream::{RecvStream, RecvStreams};
 use crate::send_stream::{SendStream, SendStreams, TransmissionPriority};
 use crate::stats::FrameStats;
@@ -86,11 +86,11 @@ impl Streams {
             Frame::ResetStream {
                 stream_id,
                 application_error_code,
-                ..
+                final_size,
             } => {
                 stats.reset_stream += 1;
                 if let (_, Some(rs)) = self.obtain_stream(stream_id)? {
-                    rs.reset(application_error_code);
+                    rs.reset(application_error_code, final_size)?;
                 }
             }
             Frame::StopSending {
@@ -228,14 +228,14 @@ impl Streams {
         self.send.write_frames(priority, builder, tokens, stats);
     }
 
-    pub fn lost(&mut self, token: &RecoveryToken) {
+    pub fn lost(&mut self, token: &StreamRecoveryToken) {
         match token {
-            RecoveryToken::Stream(st) => self.send.lost(&st),
-            RecoveryToken::ResetStream { stream_id } => self.send.reset_lost(*stream_id),
-            RecoveryToken::StreamDataBlocked { stream_id, limit } => {
+            StreamRecoveryToken::Stream(st) => self.send.lost(&st),
+            StreamRecoveryToken::ResetStream { stream_id } => self.send.reset_lost(*stream_id),
+            StreamRecoveryToken::StreamDataBlocked { stream_id, limit } => {
                 self.send.blocked_lost(*stream_id, *limit)
             }
-            RecoveryToken::MaxStreamData {
+            StreamRecoveryToken::MaxStreamData {
                 stream_id,
                 max_data,
             } => {
@@ -243,44 +243,45 @@ impl Streams {
                     rs.max_stream_data_lost(*max_data);
                 }
             }
-            RecoveryToken::StopSending { stream_id } => {
+            StreamRecoveryToken::StopSending { stream_id } => {
                 if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
                     rs.stop_sending_lost();
                 }
             }
-            RecoveryToken::StreamsBlocked { stream_type, limit } => {
+            StreamRecoveryToken::StreamsBlocked { stream_type, limit } => {
                 self.local_stream_limits[*stream_type].frame_lost(*limit);
             }
-            RecoveryToken::MaxStreams {
+            StreamRecoveryToken::MaxStreams {
                 stream_type,
                 max_streams,
             } => {
                 self.remote_stream_limits[*stream_type].frame_lost(*max_streams);
             }
-            RecoveryToken::DataBlocked(limit) => self.sender_fc.borrow_mut().frame_lost(*limit),
-            RecoveryToken::MaxData(maximum_data) => {
+            StreamRecoveryToken::DataBlocked(limit) => {
+                self.sender_fc.borrow_mut().frame_lost(*limit)
+            }
+            StreamRecoveryToken::MaxData(maximum_data) => {
                 self.receiver_fc.borrow_mut().frame_lost(*maximum_data)
             }
-            _ => unreachable!("This is not a stream RecoveryToken"),
         }
     }
 
-    pub fn acked(&mut self, token: &RecoveryToken) {
+    pub fn acked(&mut self, token: &StreamRecoveryToken) {
         match token {
-            RecoveryToken::Stream(st) => self.send.acked(st),
-            RecoveryToken::ResetStream { stream_id } => self.send.reset_acked(*stream_id),
-            RecoveryToken::StopSending { stream_id } => {
+            StreamRecoveryToken::Stream(st) => self.send.acked(st),
+            StreamRecoveryToken::ResetStream { stream_id } => self.send.reset_acked(*stream_id),
+            StreamRecoveryToken::StopSending { stream_id } => {
                 if let Ok((_, Some(rs))) = self.obtain_stream(*stream_id) {
                     rs.stop_sending_acked();
                 }
             }
             // We only worry when these are lost
-            RecoveryToken::DataBlocked(_)
-            | RecoveryToken::StreamDataBlocked { .. }
-            | RecoveryToken::MaxStreamData { .. }
-            | RecoveryToken::StreamsBlocked { .. }
-            | RecoveryToken::MaxStreams { .. } => (),
-            _ => unreachable!("This is not a stream RecoveryToken"),
+            StreamRecoveryToken::DataBlocked(_)
+            | StreamRecoveryToken::StreamDataBlocked { .. }
+            | StreamRecoveryToken::MaxStreamData { .. }
+            | StreamRecoveryToken::StreamsBlocked { .. }
+            | StreamRecoveryToken::MaxStreams { .. }
+            | StreamRecoveryToken::MaxData(_) => (),
         }
     }
 
@@ -329,6 +330,7 @@ impl Streams {
                 RecvStream::new(
                     next_stream_id,
                     recv_initial_max_stream_data,
+                    Rc::clone(&self.receiver_fc),
                     self.events.clone(),
                 ),
             );
@@ -402,7 +404,12 @@ impl Streams {
 
                     self.recv.insert(
                         new_id,
-                        RecvStream::new(new_id, recv_initial_max_stream_data, self.events.clone()),
+                        RecvStream::new(
+                            new_id,
+                            recv_initial_max_stream_data,
+                            Rc::clone(&self.receiver_fc),
+                            self.events.clone(),
+                        ),
                     );
                 }
                 Ok(new_id.as_u64())
@@ -474,5 +481,13 @@ impl Streams {
 
     pub fn get_recv_stream_mut(&mut self, stream_id: StreamId) -> Res<&mut RecvStream> {
         self.recv.get_mut(stream_id)
+    }
+
+    pub fn keep_alive(&mut self, stream_id: StreamId, keep: bool) -> Res<()> {
+        self.recv.keep_alive(stream_id, keep)
+    }
+
+    pub fn need_keep_alive(&mut self) -> bool {
+        self.recv.need_keep_alive()
     }
 }

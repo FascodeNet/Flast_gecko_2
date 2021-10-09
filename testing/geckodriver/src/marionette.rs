@@ -133,7 +133,10 @@ impl MarionetteHandler {
         }
 
         let marionette_host = self.settings.host.to_owned();
-        let marionette_port = self.settings.port.unwrap_or(get_free_port(&marionette_host)?);
+        let marionette_port = self
+            .settings
+            .port
+            .unwrap_or(get_free_port(&marionette_host)?);
 
         let websocket_port = match options.use_websocket {
             true => Some(self.settings.websocket_port),
@@ -151,9 +154,17 @@ impl MarionetteHandler {
                     "Cannot connect to an existing Android App yet",
                 ));
             }
-            Browser::Remote(RemoteBrowser::new(options, marionette_port, websocket_port)?)
+            Browser::Remote(RemoteBrowser::new(
+                options,
+                marionette_port,
+                websocket_port,
+            )?)
         } else if !self.settings.connect_existing {
-            Browser::Local(LocalBrowser::new(options, marionette_port, self.settings.jsdebugger)?)
+            Browser::Local(LocalBrowser::new(
+                options,
+                marionette_port,
+                self.settings.jsdebugger,
+            )?)
         } else {
             Browser::Existing
         };
@@ -1102,6 +1113,7 @@ impl MarionetteConnection {
                 }
                 Err(e) => {
                     if now.elapsed() < timeout {
+                        trace!("{}. Retrying in {:?}", e.to_string(), poll_interval);
                         thread::sleep(poll_interval);
                     } else {
                         return Err(WebDriverError::new(ErrorStatus::Timeout, e.to_string()));
@@ -1121,9 +1133,10 @@ impl MarionetteConnection {
         let resp = (match stream.read_timeout() {
             Ok(timeout) => {
                 // If platform supports changing the read timeout of the stream,
-                // use a short one only for the handshake with Marionette.
+                // use a short one only for the handshake with Marionette. Don't
+                // make it shorter as 1000ms to not fail on slow connections.
                 stream
-                    .set_read_timeout(Some(time::Duration::from_millis(100)))
+                    .set_read_timeout(Some(time::Duration::from_millis(1000)))
                     .ok();
                 let data = MarionetteConnection::read_resp(stream);
                 stream.set_read_timeout(timeout).ok();

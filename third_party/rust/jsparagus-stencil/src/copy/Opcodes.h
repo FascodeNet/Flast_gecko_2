@@ -121,6 +121,7 @@
  * -   `baseobjIndex` (`JOF_OBJECT`): `PlainObject*`
  * -   `funcIndex` (`JOF_OBJECT`): `JSFunction*`
  * -   `regexpIndex` (`JOF_REGEXP`): `RegExpObject*`
+ * -   `shapeIndex` (`JOF_SHAPE`): `Shape*`
  * -   `scopeIndex` (`JOF_SCOPE`): `Scope*`
  * -   `lexicalScopeIndex` (`JOF_SCOPE`): `LexicalScope*`
  * -   `classBodyScopeIndex` (`JOF_SCOPE`): `ClassBodyScope*`
@@ -815,17 +816,16 @@
     /*
      * Create and push a new object of a predetermined shape.
      *
-     * The new object has the shape of the template object
-     * `script->getObject(baseobjIndex)`. Subsequent `InitProp` instructions
-     * must fill in all slots of the new object before it is used in any other
-     * way.
+     * The new object has the shape `script->getShape(shapeIndex)`.
+     * Subsequent `InitProp` instructions must fill in all slots of the new
+     * object before it is used in any other way.
      *
      *   Category: Objects
      *   Type: Creating objects
-     *   Operands: uint32_t baseobjIndex
+     *   Operands: uint32_t shapeIndex
      *   Stack: => obj
      */ \
-    MACRO(NewObject, new_object, NULL, 5, 0, 1, JOF_OBJECT|JOF_IC) \
+    MACRO(NewObject, new_object, NULL, 5, 0, 1, JOF_SHAPE|JOF_IC) \
     /*
      * Push a preconstructed object.
      *
@@ -1162,13 +1162,21 @@
      *     maps to one of the messages in js.msg. Note: It's not possible to
      *     pass arguments to the message at the moment.
      *
-     *   Category: Control flow
      *   Category: Objects
      *   Type: Accessing properties
      *   Operands: ThrowCondition throwCondition, ThrowMsgKind msgKind
      *   Stack: obj, key => obj, key, (obj.hasOwnProperty(id))
      */ \
     MACRO(CheckPrivateField, check_private_field, NULL, 3, 2, 3, JOF_TWO_UINT8|JOF_CHECKSTRICT|JOF_IC) \
+    /*
+     * Push a new private name.
+     *
+     *   Category: Objects
+     *   Type: Accessing properties
+     *   Operands: uint32_t nameIndex
+     *   Stack: => private_name
+     */ \
+    MACRO(NewPrivateName, new_private_name, NULL, 5, 0, 1, JOF_ATOM) \
     /*
      * Push the SuperBase of the method `callee`. The SuperBase is
      * `callee.[[HomeObject]].[[GetPrototypeOf]]()`, the object where `super`
@@ -2426,10 +2434,11 @@
     /*
      * Check the return value in a derived class constructor.
      *
-     * -   If the current stack frame's `returnValue` is an object, do nothing.
+     * -   If the current stack frame's `returnValue` is an object, push
+     *     `returnValue` onto the stack.
      *
      * -   Otherwise, if the `returnValue` is undefined and `thisval` is an
-     *     object, store `thisval` in the `returnValue` slot.
+     *     object, push `thisval` onto the stack.
      *
      * -   Otherwise, throw a TypeError.
      *
@@ -2445,9 +2454,9 @@
      *   Category: Control flow
      *   Type: Return
      *   Operands:
-     *   Stack: thisval =>
+     *   Stack: thisval => rval
      */ \
-    MACRO(CheckReturn, check_return, NULL, 1, 1, 0, JOF_BYTE) \
+    MACRO(CheckReturn, check_return, NULL, 1, 1, 1, JOF_BYTE) \
     /*
      * Throw `exc`. (ノಠ益ಠ)ノ彡┴──┴
      *
@@ -3513,7 +3522,6 @@
  * a power of two.  Use this macro to do so.
  */
 #define FOR_EACH_TRAILING_UNUSED_OPCODE(MACRO) \
-  MACRO(227)                                   \
   MACRO(228)                                   \
   MACRO(229)                                   \
   MACRO(230)                                   \

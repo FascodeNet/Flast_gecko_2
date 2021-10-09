@@ -65,23 +65,11 @@ add_task(async function init() {
   let oldDefaultEngine = await Services.search.getDefault();
   await Services.search.setDefault(Services.search.getEngineByName("Example"));
 
-  await UrlbarQuickSuggest.init();
-  let { _createTree } = UrlbarQuickSuggest;
-  UrlbarQuickSuggest._createTree = () => {};
-  await UrlbarQuickSuggest._processSuggestionsJSON(TEST_DATA);
-
-  await SpecialPowers.pushPrefEnv({
-    set: [
-      [SUGGESTIONS_PREF, true],
-      ["browser.urlbar.quicksuggest.enabled", true],
-      ["browser.urlbar.quicksuggest.shouldShowOnboardingDialog", false],
-    ],
-  });
+  await UrlbarTestUtils.ensureQuickSuggestInit(TEST_DATA);
 
   registerCleanupFunction(async () => {
     await PlacesUtils.history.clear();
     Services.search.setDefault(oldDefaultEngine);
-    UrlbarQuickSuggest._createTree = _createTree;
   });
 });
 
@@ -320,7 +308,12 @@ async function doTest({
     expectedResultCount,
     "Expected result count"
   );
-  await assertIsQuickSuggest({ isSponsored, index: expectedIndex });
+  await assertIsQuickSuggest({
+    isSponsored,
+    index: expectedIndex,
+    sponsoredURL: `${TEST_URL}?q=${SPONSORED_SEARCH_STRING}`,
+    nonsponsoredURL: `${TEST_URL}?q=${NON_SPONSORED_SEARCH_STRING}`,
+  });
 
   await UrlbarTestUtils.promisePopupClose(window);
   await PlacesUtils.history.clear();
@@ -337,60 +330,6 @@ async function addHistory() {
       "http://example.com/" + NON_SPONSORED_SEARCH_STRING + i,
     ]);
   }
-}
-
-/**
- * Asserts that a result is a Quick Suggest result.
- *
- * @param {number} [index]
- *   The expected index of the Quick Suggest result.  Pass -1 to use the index
- *   of the last result.
- * @param {boolean} [isSponsored]
- *   True if the result is expected to be sponsored and false if non-sponsored
- *   (i.e., "Firefox Suggest").
- * @param {object} [win]
- *   The window in which to read the results from.
- * @returns {result}
- *   The result at the given index.
- */
-async function assertIsQuickSuggest({
-  index = -1,
-  isSponsored = true,
-  win = window,
-} = {}) {
-  if (index < 0) {
-    index = UrlbarTestUtils.getResultCount(win) - 1;
-    Assert.greater(index, -1, "Sanity check: Result count should be > 0");
-  }
-
-  let result = await UrlbarTestUtils.getDetailsOfResultAt(win, index);
-  Assert.equal(result.type, UrlbarUtils.RESULT_TYPE.URL);
-
-  // Confusingly, `isSponsored` is set on the result payload for all quick
-  // suggest results, even non-sponsored ones.  It's just a marker of whether
-  // the result is a quick suggest.
-  Assert.ok(result.isSponsored, "Result isSponsored");
-
-  let url;
-  let actionText;
-  if (isSponsored) {
-    url = `${TEST_URL}?q=${SPONSORED_SEARCH_STRING}`;
-    actionText = "Sponsored";
-  } else {
-    url = `${TEST_URL}?q=${NON_SPONSORED_SEARCH_STRING}`;
-    actionText = "Firefox Suggest";
-  }
-  Assert.equal(result.url, url, "Result URL");
-  Assert.equal(
-    result.element.row._elements.get("action").textContent,
-    actionText,
-    "Result action text"
-  );
-
-  let helpButton = result.element.row._elements.get("helpButton");
-  Assert.ok(helpButton, "The help button should be present");
-
-  return result;
 }
 
 /**

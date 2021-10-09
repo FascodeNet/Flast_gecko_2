@@ -54,7 +54,8 @@ ShadowRoot::ShadowRoot(Element* aElement, ShadowRootMode aMode,
       DocumentOrShadowRoot(this),
       mMode(aMode),
       mSlotAssignment(aSlotAssignment),
-      mIsUAWidget(false) {
+      mIsUAWidget(false),
+      mIsAvailableToElementInternals(false) {
   SetHost(aElement);
 
   // Nodes in a shadow tree should never store a value
@@ -107,8 +108,7 @@ void ShadowRoot::CloneInternalDataFrom(ShadowRoot* aOther) {
   for (size_t i = 0; i < sheetCount; ++i) {
     StyleSheet* sheet = aOther->SheetAt(i);
     if (sheet->IsApplicable()) {
-      RefPtr<StyleSheet> clonedSheet =
-          sheet->Clone(nullptr, nullptr, this, nullptr);
+      RefPtr<StyleSheet> clonedSheet = sheet->Clone(nullptr, this);
       if (clonedSheet) {
         AppendStyleSheet(*clonedSheet.get());
       }

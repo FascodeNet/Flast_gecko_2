@@ -155,12 +155,6 @@ Maybe<uint64_t> AnimationInfo::GetGenerationFromFrame(
   MOZ_ASSERT(aFrame->IsPrimaryFrame() ||
              nsLayoutUtils::IsFirstContinuationOrIBSplitSibling(aFrame));
 
-  layers::Layer* layer =
-      FrameLayerBuilder::GetDedicatedLayer(aFrame, aDisplayItemKey);
-  if (layer) {
-    return layer->GetAnimationInfo().GetAnimationGeneration();
-  }
-
   // In case of continuation, KeyframeEffectReadOnly uses its first frame,
   // whereas nsDisplayItem uses its last continuation, so we have to use the
   // last continuation frame here.
@@ -231,8 +225,6 @@ void AnimationInfo::EnumerateGenerationOnFrame(
     }
     return;
   }
-
-  FrameLayerBuilder::EnumerateGenerationForDedicatedLayers(aFrame, aCallback);
 }
 
 static StyleTransformOperation ResolveTranslate(
@@ -598,7 +590,7 @@ bool AnimationInfo::AddAnimationsForProperty(
     nsIFrame* aFrame, const EffectSet* aEffects,
     const nsTArray<RefPtr<dom::Animation>>& aCompositorAnimations,
     const Maybe<TransformData>& aTransformData, nsCSSPropertyID aProperty,
-    Send aSendFlag, LayerManager* aLayerManager) {
+    Send aSendFlag, WebRenderLayerManager* aLayerManager) {
   bool addedAny = false;
   // Add from first to last (since last overrides)
   for (dom::Animation* anim : aCompositorAnimations) {
@@ -916,7 +908,7 @@ void AnimationInfo::AddNonAnimatingTransformLikePropertiesStyles(
 
 void AnimationInfo::AddAnimationsForDisplayItem(
     nsIFrame* aFrame, nsDisplayListBuilder* aBuilder, nsDisplayItem* aItem,
-    DisplayItemType aType, LayerManager* aLayerManager,
+    DisplayItemType aType, WebRenderLayerManager* aLayerManager,
     const Maybe<LayoutDevicePoint>& aPosition) {
   Send sendFlag = !aBuilder ? Send::NextTransaction : Send::Immediate;
   if (sendFlag == Send::NextTransaction) {

@@ -21,6 +21,8 @@ UNIFIED_SOURCES += [
     "AsmJS.cpp",
     "TypedObject.cpp",
     "WasmBaselineCompile.cpp",
+    "WasmBCFrame.cpp",
+    "WasmBCMemory.cpp",
     "WasmBinary.cpp",
     "WasmBuiltins.cpp",
     "WasmCode.cpp",
@@ -28,8 +30,8 @@ UNIFIED_SOURCES += [
     "WasmCompile.cpp",
     "WasmContext.cpp",
     "WasmDebug.cpp",
+    "WasmDebugFrame.cpp",
     "WasmException.cpp",
-    "WasmFrame.cpp",
     "WasmFrameIter.cpp",
     "WasmGC.cpp",
     "WasmGenerator.cpp",
@@ -53,6 +55,13 @@ UNIFIED_SOURCES += [
     "WasmValType.cpp",
     "WasmValue.cpp",
 ]
+
+# Generate wasm/WasmIntrinsicGenerated.h from wasm/WasmIntrinsic.yaml
+GeneratedFile(
+    "WasmIntrinsicGenerated.h",
+    script="GenerateIntrinsics.py",
+    inputs=["WasmIntrinsic.yaml"],
+)
 
 # We don't support signals for wasi yet.
 if CONFIG["OS_ARCH"] != "WASI":

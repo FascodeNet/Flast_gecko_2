@@ -340,14 +340,18 @@ char* DataOffer::GetDataAsync(const char* aMimeType, uint32_t* aContentLength) {
                              }),
       nsIEventTarget::NS_DISPATCH_NORMAL);
 
+  int iteration = 1;
   PRTime entryTime = PR_Now();
   while (!mGetterFinished) {
-    // check the number of iterations
-    LOGCLIP(("doing iteration...\n"));
-    PR_Sleep(20 * PR_TicksPerSecond() / 1000); /* sleep for 20 ms/iteration */
-    if (PR_Now() - entryTime > kClipboardTimeout) {
-      break;
+    if (iteration++ > kClipboardFastIterationNum) {
+      PR_Sleep(PR_MillisecondsToInterval(10)); /* sleep for 10 ms/iteration */
+      if (PR_Now() - entryTime > kClipboardTimeout) {
+        LOGCLIP(("  hit time limit\n"));
+        break;
+      }
     }
+    LOGCLIP(("doing iteration %d msec %ld ...\n", (iteration - 1),
+             (long)((PR_Now() - entryTime) / 1000)));
     gtk_main_iteration();
   }
 
@@ -863,11 +867,12 @@ void nsRetrievalContextWayland::ClearDragAndDropDataOffer(void) {
 }
 
 nsRetrievalContextWayland::nsRetrievalContextWayland(void)
-    : mInitialized(false),
-      mDisplay(WaylandDisplayGet()),
+    : mDisplay(WaylandDisplayGet()),
       mClipboardRequestNumber(0),
       mClipboardData(nullptr),
-      mClipboardDataLength(0) {
+      mClipboardDataLength(0),
+      mAsyncDataGetter(
+          StaticPrefs::widget_wayland_async_data_transfer_enabled_AtStartup()) {
   wl_data_device* dataDevice = wl_data_device_manager_get_data_device(
       mDisplay->GetDataDeviceManager(), mDisplay->GetSeat());
   wl_data_device_add_listener(dataDevice, &data_device_listener, this);
@@ -887,20 +892,18 @@ nsRetrievalContextWayland::nsRetrievalContextWayland(void)
     gtk_primary_selection_device_add_listener(
         primaryDataDevice, &primary_selection_device_listener_gtk, this);
   }
-
-  mInitialized = true;
 }
 
 nsRetrievalContextWayland::~nsRetrievalContextWayland(void) {}
 
 struct FastTrackClipboard {
   FastTrackClipboard(ClipboardDataType aDataType, int aClipboardRequestNumber,
-                     nsRetrievalContextWayland* aRetrievalContex)
+                     RefPtr<nsRetrievalContextWayland> aRetrievalContex)
       : mClipboardRequestNumber(aClipboardRequestNumber),
-        mRetrievalContex(aRetrievalContex),
+        mRetrievalContex(std::move(aRetrievalContex)),
         mDataType(aDataType) {}
   int mClipboardRequestNumber;
-  nsRetrievalContextWayland* mRetrievalContex;
+  RefPtr<nsRetrievalContextWayland> mRetrievalContex;
   ClipboardDataType mDataType;
 };
 
@@ -924,7 +927,7 @@ void nsRetrievalContextWayland::TransferFastTrackClipboard(
 
   if (mClipboardRequestNumber != aClipboardRequestNumber) {
     LOGCLIP(("    request number does not match!\n"));
-    NS_WARNING("Received obsoleted clipboard data!");
+    return;
   }
   LOGCLIP(("    request number matches\n"));
 
@@ -1043,7 +1046,10 @@ const char* nsRetrievalContextWayland::GetClipboardData(
     } else {
       LOGCLIP(
           ("  Getting clipboard data from compositor, MIME %s\n", aMimeType));
-      mClipboardData = dataOffer->GetData(aMimeType, &mClipboardDataLength);
+      mClipboardData =
+          mAsyncDataGetter
+              ? dataOffer->GetDataAsync(aMimeType, &mClipboardDataLength)
+              : dataOffer->GetData(aMimeType, &mClipboardDataLength);
       LOGCLIP(("  Got %d bytes of data, mClipboardData = %p\n",
                mClipboardDataLength, mClipboardData));
     }

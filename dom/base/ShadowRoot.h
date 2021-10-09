@@ -7,6 +7,7 @@
 #ifndef mozilla_dom_shadowroot_h__
 #define mozilla_dom_shadowroot_h__
 
+#include "mozilla/DOMEventTargetHelper.h"
 #include "mozilla/dom/DocumentBinding.h"
 #include "mozilla/dom/DocumentFragment.h"
 #include "mozilla/dom/DocumentOrShadowRoot.h"
@@ -163,6 +164,8 @@ class ShadowRoot final : public DocumentFragment,
   void PartAdded(const Element&);
   void PartRemoved(const Element&);
 
+  IMPL_EVENT_HANDLER(slotchange);
+
   const nsTArray<const Element*>& Parts() const { return mParts; }
 
   const RawServoAuthorStyles* GetServoStyles() const {
@@ -206,6 +209,14 @@ class ShadowRoot final : public DocumentFragment,
     MOZ_ASSERT(!HasChildren());
     SetFlags(NODE_HAS_BEEN_IN_UA_WIDGET);
     mIsUAWidget = true;
+  }
+
+  bool IsAvailableToElementInternals() const {
+    return mIsAvailableToElementInternals;
+  }
+
+  void SetAvailableToElementInternals() {
+    mIsAvailableToElementInternals = true;
   }
 
   void GetEventTargetParent(EventChainPreVisitor& aVisitor) override;
@@ -279,6 +290,9 @@ class ShadowRoot final : public DocumentFragment,
   nsTArray<const Element*> mParts;
 
   bool mIsUAWidget : 1;
+
+  // https://dom.spec.whatwg.org/#shadowroot-available-to-element-internals
+  bool mIsAvailableToElementInternals : 1;
 
   nsresult Clone(dom::NodeInfo*, nsINode** aResult) const override;
 };

@@ -215,6 +215,7 @@ export LIBCLANG_PATH=$(MOZ_LIBCLANG_PATH)
 export CLANG_PATH=$(MOZ_CLANG_PATH)
 export PKG_CONFIG
 export PKG_CONFIG_ALLOW_CROSS=1
+export PKG_CONFIG_PATH
 ifneq (,$(PKG_CONFIG_SYSROOT_DIR))
 export PKG_CONFIG_SYSROOT_DIR
 endif
@@ -443,7 +444,7 @@ rust_test_flag := --no-fail-fast
 force-cargo-test-run:
 	$(call RUN_CARGO,test $(cargo_target_flag) $(rust_test_flag) $(rust_test_options) $(rust_test_features_flag))
 
-endif
+endif # RUST_TESTS
 
 ifdef HOST_RUST_LIBRARY_FILE
 

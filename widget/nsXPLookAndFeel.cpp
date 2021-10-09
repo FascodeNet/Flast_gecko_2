@@ -108,8 +108,9 @@ static EnumeratedCache<FontID, widget::LookAndFeelFont, FontID::End> sFontCache;
 //
 // This needs to be of the same length and in the same order as
 // LookAndFeel::IntID values.
-static const char sIntPrefs[][42] = {
+static const char sIntPrefs[][43] = {
     "ui.caretBlinkTime",
+    "ui.caretBlinkCount",
     "ui.caretWidth",
     "ui.caretVisibleWithSelection",
     "ui.selectTextfieldsOnKeyFocus",
@@ -174,6 +175,7 @@ static const char sIntPrefs[][42] = {
     "ui.allPointerCapabilities",
     "ui.systemVerticalScrollbarWidth",
     "ui.systemHorizontalScrollbarHeight",
+    "ui.touchDeviceSupportPresent",
 };
 
 static_assert(ArrayLength(sIntPrefs) == size_t(LookAndFeel::IntID::End),
@@ -204,8 +206,6 @@ static const char sColorPrefs[][41] = {
     "ui.widget3DShadow",
     "ui.textBackground",
     "ui.textForeground",
-    "ui.textSelectBackground",
-    "ui.textSelectForeground",
     "ui.textSelectBackgroundDisabled",
     "ui.textSelectBackgroundAttention",
     "ui.textHighlightBackground",
@@ -267,8 +267,8 @@ static const char sColorPrefs[][41] = {
     "ui.-moz-dragtargetzone",
     "ui.-moz-cellhighlight",
     "ui.-moz_cellhighlighttext",
-    "ui.-moz-html-cellhighlight",
-    "ui.-moz-html-cellhighlighttext",
+    "ui.selecteditem",
+    "ui.selecteditemtext",
     "ui.-moz-buttonhoverface",
     "ui.-moz_buttonhovertext",
     "ui.-moz_menuhover",
@@ -474,8 +474,11 @@ nsXPLookAndFeel::~nsXPLookAndFeel() {
 static bool IsSpecialColor(LookAndFeel::ColorID aID, nscolor aColor) {
   using ColorID = LookAndFeel::ColorID;
 
+  if (aColor == NS_SAME_AS_FOREGROUND_COLOR) {
+    return true;
+  }
+
   switch (aID) {
-    case ColorID::TextSelectForeground:
     case ColorID::IMESelectedRawTextBackground:
     case ColorID::IMESelectedConvertedTextBackground:
     case ColorID::IMERawInputBackground:
@@ -548,8 +551,8 @@ nscolor nsXPLookAndFeel::GetStandinForNativeColor(ColorID aID) {
     COLOR(MozDragtargetzone, 0xFF, 0xFF, 0xFF)
     COLOR(MozCellhighlight, 0xF0, 0xF0, 0xF0)
     COLOR(MozCellhighlighttext, 0x00, 0x00, 0x00)
-    COLOR(MozHtmlCellhighlight, 0x33, 0x99, 0xFF)
-    COLOR(MozHtmlCellhighlighttext, 0xFF, 0xFF, 0xFF)
+    COLOR(Selecteditem, 0x33, 0x99, 0xFF)
+    COLOR(Selecteditemtext, 0xFF, 0xFF, 0xFF)
     COLOR(MozButtonhoverface, 0xF0, 0xF0, 0xF0)
     COLOR(MozGtkButtonactivetext, 0x00, 0x00, 0x00)
     COLOR(MozButtonhovertext, 0x00, 0x00, 0x00)
@@ -965,25 +968,29 @@ static bool ShouldRespectGlobalToolbarThemeAppearanceForChromeDoc() {
 #endif
 }
 
+LookAndFeel::ColorScheme LookAndFeel::ColorSchemeForChrome() {
+  if (ShouldRespectGlobalToolbarThemeAppearanceForChromeDoc()) {
+    switch (StaticPrefs::browser_theme_toolbar_theme()) {
+      case 0:  // Dark
+        return ColorScheme::Dark;
+      case 1:  // Light
+        return ColorScheme::Light;
+      case 2:  // System
+        return SystemColorScheme();
+      default:
+        break;
+    }
+  }
+  if (ShouldRespectSystemColorSchemeForChromeDoc()) {
+    return SystemColorScheme();
+  }
+  return ColorScheme::Light;
+}
+
 static LookAndFeel::ColorScheme ColorSchemeForDocument(
     const dom::Document& aDoc, bool aContentSupportsDark) {
-  using ColorScheme = LookAndFeel::ColorScheme;
   if (nsContentUtils::IsChromeDoc(&aDoc)) {
-    if (ShouldRespectGlobalToolbarThemeAppearanceForChromeDoc()) {
-      switch (StaticPrefs::browser_theme_toolbar_theme()) {
-        case 0:  // Dark
-          return ColorScheme::Dark;
-        case 1:  // Light
-          return ColorScheme::Light;
-        case 2:  // System
-          return LookAndFeel::SystemColorScheme();
-        default:
-          break;
-      }
-    }
-    if (ShouldRespectSystemColorSchemeForChromeDoc()) {
-      return LookAndFeel::SystemColorScheme();
-    }
+    return LookAndFeel::ColorSchemeForChrome();
   }
 #ifdef MOZ_WIDGET_GTK
   if (StaticPrefs::widget_content_allow_gtk_dark_theme()) {
@@ -993,7 +1000,7 @@ static LookAndFeel::ColorScheme ColorSchemeForDocument(
   }
 #endif
   return aContentSupportsDark ? LookAndFeel::SystemColorScheme()
-                              : ColorScheme::Light;
+                              : LookAndFeel::ColorScheme::Light;
 }
 
 LookAndFeel::ColorScheme LookAndFeel::ColorSchemeForStyle(
@@ -1046,8 +1053,6 @@ static bool ColorIsCSSAccessible(LookAndFeel::ColorID aId) {
     case ColorID::Widget3DShadow:
     case ColorID::TextBackground:
     case ColorID::TextForeground:
-    case ColorID::TextSelectBackground:
-    case ColorID::TextSelectForeground:
     case ColorID::TextSelectBackgroundDisabled:
     case ColorID::TextSelectBackgroundAttention:
     case ColorID::TextHighlightBackground:

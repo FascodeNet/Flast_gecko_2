@@ -125,6 +125,10 @@ gfxPlatformGtk::gfxPlatformGtk() {
     g_signal_connect(gdkScreen, "notify::resolution",
                      G_CALLBACK(screen_resolution_changed), nullptr);
   }
+
+  // Bug 1714483: Force disable FXAA Antialiasing on NV drivers. This is a
+  // temporary workaround for a driver bug.
+  PR_SetEnv("__GL_ALLOW_FXAA_USAGE=0");
 }
 
 gfxPlatformGtk::~gfxPlatformGtk() {
@@ -222,16 +226,6 @@ void gfxPlatformGtk::InitWebRenderConfig() {
     return;
   }
 
-#ifdef MOZ_X11
-  // We only support XRender if the user has disabled both WebRender and
-  // Software WebRender.
-  if (mIsX11Display && mozilla::Preferences::GetBool("gfx.xrender.enabled") &&
-      !(gfxConfig::IsEnabled(Feature::WEBRENDER) ||
-        gfxConfig::IsEnabled(Feature::WEBRENDER_SOFTWARE))) {
-    gfxVars::SetUseXRender(true);
-  }
-#endif
-
   FeatureState& feature = gfxConfig::GetFeature(Feature::WEBRENDER_COMPOSITOR);
   if (feature.IsEnabled()) {
     if (!(gfxConfig::IsEnabled(Feature::WEBRENDER) ||
@@ -287,24 +281,10 @@ already_AddRefed<gfxASurface> gfxPlatformGtk::CreateOffscreenSurface(
   // we should try to match
   GdkScreen* gdkScreen = gdk_screen_get_default();
   if (gdkScreen) {
-    // When forcing PaintedLayers to use image surfaces for content,
-    // force creation of gfxImageSurface surfaces.
-    if (gfxVars::UseXRender() && !UseImageOffscreenSurfaces()) {
-      Screen* screen = gdk_x11_screen_get_xscreen(gdkScreen);
-      XRenderPictFormat* xrenderFormat =
-          gfxXlibSurface::FindRenderFormat(DisplayOfScreen(screen), aFormat);
-
-      if (xrenderFormat) {
-        newSurface = gfxXlibSurface::Create(screen, xrenderFormat, aSize);
-      }
-    } else {
-      // We're not going to use XRender, so we don't need to
-      // search for a render format
-      newSurface = new gfxImageSurface(aSize, aFormat);
-      // The gfxImageSurface ctor zeroes this for us, no need to
-      // waste time clearing again
-      needsClear = false;
-    }
+    newSurface = new gfxImageSurface(aSize, aFormat);
+    // The gfxImageSurface ctor zeroes this for us, no need to
+    // waste time clearing again
+    needsClear = false;
   }
 #endif
 

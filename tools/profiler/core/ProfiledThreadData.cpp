@@ -18,9 +18,11 @@
 #  include <pthread.h>
 #endif
 
-ProfiledThreadData::ProfiledThreadData(ThreadInfo* aThreadInfo,
-                                       nsIEventTarget* aEventTarget)
-    : mThreadInfo(aThreadInfo) {
+ProfiledThreadData::ProfiledThreadData(
+    const mozilla::profiler::ThreadRegistrationInfo& aThreadInfo,
+    nsIEventTarget* aEventTarget)
+    : mThreadInfo(aThreadInfo.Name(), aThreadInfo.ThreadId(),
+                  aThreadInfo.IsMainThread(), aThreadInfo.RegisterTime()) {
   MOZ_COUNT_CTOR(ProfiledThreadData);
 }
 
@@ -48,7 +50,7 @@ void ProfiledThreadData::StreamJSON(
 
   if (aCx && mBufferPositionWhenReceivedJSContext) {
     aBuffer.AddJITInfoForRange(*mBufferPositionWhenReceivedJSContext,
-                               mThreadInfo->ThreadId(), aCx, jitFrameInfo);
+                               mThreadInfo.ThreadId(), aCx, jitFrameInfo);
   }
 
   UniqueStacks uniqueStacks(std::move(jitFrameInfo));
@@ -59,9 +61,9 @@ void ProfiledThreadData::StreamJSON(
 
   aWriter.Start();
   {
-    StreamSamplesAndMarkers(mThreadInfo->Name(), mThreadInfo->ThreadId(),
-                            aBuffer, aWriter, aProcessName, aETLDplus1,
-                            aProcessStartTime, mThreadInfo->RegisterTime(),
+    StreamSamplesAndMarkers(mThreadInfo.Name(), mThreadInfo.ThreadId(), aBuffer,
+                            aWriter, aProcessName, aETLDplus1,
+                            aProcessStartTime, mThreadInfo.RegisterTime(),
                             mUnregisterTime, aSinceTime, uniqueStacks);
 
     aWriter.StartObjectProperty("stackTable");
@@ -288,6 +290,10 @@ ProfilerThreadId StreamSamplesAndMarkers(
   }
   aWriter.EndObject();
 
+  // Tech note: If `ToNumber()` returns a uint64_t, the conversion to int64_t is
+  // "implementation-defined" before C++20. This is acceptable here, because
+  // this is a one-way conversion to a unique identifier that's used to visually
+  // separate data by thread on the front-end.
   aWriter.IntProperty(
       "pid", static_cast<int64_t>(profiler_current_process_id().ToNumber()));
   aWriter.IntProperty("tid",
@@ -319,7 +325,7 @@ void ProfiledThreadData::NotifyAboutToLoseJSContext(
           : mozilla::MakeUnique<JITFrameInfo>();
 
   aBuffer.AddJITInfoForRange(*mBufferPositionWhenReceivedJSContext,
-                             mThreadInfo->ThreadId(), aContext, *jitFrameInfo);
+                             mThreadInfo.ThreadId(), aContext, *jitFrameInfo);
 
   mJITFrameInfoForPreviousJSContexts = std::move(jitFrameInfo);
   mBufferPositionWhenReceivedJSContext = mozilla::Nothing();

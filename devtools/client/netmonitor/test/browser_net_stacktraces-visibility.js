@@ -13,7 +13,7 @@ add_task(async function() {
   const REQUEST =
     "http://example.com/browser/devtools/client/netmonitor/test/request_0";
 
-  const { tab, monitor } = await initNetMonitor(URL, {
+  const { monitor } = await initNetMonitor(URL, {
     requestCount: 1,
   });
 
@@ -24,9 +24,11 @@ add_task(async function() {
 
   info("Starting test... ");
 
-  const wait = waitForNetworkEvents(monitor, 2);
-  tab.linkedBrowser.reload();
-  await wait;
+  const allRequestsVisible = waitUntil(
+    () => document.querySelectorAll(".request-list-item").length == 2
+  );
+  await reloadBrowser();
+  await allRequestsVisible;
 
   const onStackTracesVisible = waitUntil(
     () => document.querySelector("#stack-trace-panel .stack-trace .frame-link"),

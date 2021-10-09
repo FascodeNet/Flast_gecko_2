@@ -4171,7 +4171,9 @@ void Document::LocalizationLinkAdded(Element* aLinkElement) {
 
     bool isSync = elem->HasAttr(nsGkAtoms::datal10nsync);
     mDocumentL10n = DocumentL10n::Create(this, isSync);
-    MOZ_ASSERT(mDocumentL10n);
+    if (NS_WARN_IF(!mDocumentL10n)) {
+      return;
+    }
   }
   mDocumentL10n->AddResourceId(NS_ConvertUTF16toUTF8(href));
 
@@ -6932,7 +6934,7 @@ bool Document::RemoveFromBFCacheSync() {
     removed = true;
   }
 
-  if (XRE_IsContentProcess()) {
+  if (mozilla::SessionHistoryInParent() && XRE_IsContentProcess()) {
     if (BrowsingContext* bc = GetBrowsingContext()) {
       if (bc->IsInBFCache()) {
         ContentChild* cc = ContentChild::GetSingleton();
@@ -9411,7 +9413,7 @@ Document* Document::Open(const Optional<nsAString>& /* unused */,
     return this;
   }
 
-  nsCOMPtr<nsIDocShell> shell(mDocumentContainer);
+  RefPtr<nsDocShell> shell(mDocumentContainer);
   if (shell) {
     bool inUnload;
     shell->GetIsInUnload(&inUnload);
@@ -9441,8 +9443,7 @@ Document* Document::Open(const Optional<nsAString>& /* unused */,
   // navigation.
   if (shell && IsCurrentActiveDocument() &&
       shell->GetIsAttemptingToNavigate()) {
-    nsCOMPtr<nsIWebNavigation> webnav(do_QueryInterface(shell));
-    webnav->Stop(nsIWebNavigation::STOP_NETWORK);
+    shell->Stop(nsIWebNavigation::STOP_NETWORK);
 
     // The Stop call may have cancelled the onload blocker request or
     // prevented it from getting added, so we need to make sure it gets added
@@ -9575,7 +9576,7 @@ Document* Document::Open(const Optional<nsAString>& /* unused */,
   mParserAborted = false;
   RefPtr<nsHtml5Parser> parser = nsHtml5Module::NewHtml5Parser();
   mParser = parser;
-  parser->Initialize(this, GetDocumentURI(), shell, nullptr);
+  parser->Initialize(this, GetDocumentURI(), ToSupports(shell), nullptr);
   nsresult rv = parser->StartExecutor();
   if (NS_WARN_IF(NS_FAILED(rv))) {
     aError.Throw(rv);
@@ -12419,6 +12420,35 @@ void Document::UnsuppressEventHandlingAndFireEvents(bool aFireEvents) {
   nsTArray<nsCOMPtr<Document>> documents;
   GetAndUnsuppressSubDocuments(*this, documents);
 
+  for (nsCOMPtr<Document>& doc : documents) {
+    if (!doc->EventHandlingSuppressed()) {
+      WindowGlobalChild* wgc = doc->GetWindowGlobalChild();
+      if (wgc) {
+        wgc->UnblockBFCacheFor(BFCacheStatus::EVENT_HANDLING_SUPPRESSED);
+      }
+
+      MOZ_ASSERT(NS_IsMainThread());
+      nsTArray<RefPtr<net::ChannelEventQueue>> queues =
+          std::move(doc->mSuspendedQueues);
+      for (net::ChannelEventQueue* queue : queues) {
+        queue->Resume();
+      }
+
+      // If there have been any events driven by the refresh driver which were
+      // delayed due to events being suppressed in this document, make sure
+      // there is a refresh scheduled soon so the events will run.
+      if (doc->mHasDelayedRefreshEvent) {
+        doc->mHasDelayedRefreshEvent = false;
+
+        if (doc->mPresShell) {
+          nsRefreshDriver* rd =
+              doc->mPresShell->GetPresContext()->RefreshDriver();
+          rd->RunDelayedEventsSoon();
+        }
+      }
+    }
+  }
+
   if (aFireEvents) {
     MOZ_RELEASE_ASSERT(NS_IsMainThread());
     nsCOMPtr<nsIRunnable> ded =
@@ -12426,32 +12456,6 @@ void Document::UnsuppressEventHandlingAndFireEvents(bool aFireEvents) {
     Dispatch(TaskCategory::Other, ded.forget());
   } else {
     FireOrClearDelayedEvents(documents, false);
-  }
-
-  if (!EventHandlingSuppressed()) {
-    WindowGlobalChild* wgc = GetWindowGlobalChild();
-    if (wgc) {
-      wgc->UnblockBFCacheFor(BFCacheStatus::EVENT_HANDLING_SUPPRESSED);
-    }
-
-    MOZ_ASSERT(NS_IsMainThread());
-    nsTArray<RefPtr<net::ChannelEventQueue>> queues =
-        std::move(mSuspendedQueues);
-    for (net::ChannelEventQueue* queue : queues) {
-      queue->Resume();
-    }
-
-    // If there have been any events driven by the refresh driver which were
-    // delayed due to events being suppressed in this document, make sure there
-    // is a refresh scheduled soon so the events will run.
-    if (mHasDelayedRefreshEvent) {
-      mHasDelayedRefreshEvent = false;
-
-      if (mPresShell) {
-        nsRefreshDriver* rd = mPresShell->GetPresContext()->RefreshDriver();
-        rd->RunDelayedEventsSoon();
-      }
-    }
   }
 }
 
@@ -12986,8 +12990,7 @@ already_AddRefed<Document> Document::CreateStaticClone(
     RefPtr<StyleSheet> sheet = SheetAt(i);
     if (sheet) {
       if (sheet->IsApplicable()) {
-        RefPtr<StyleSheet> clonedSheet =
-            sheet->Clone(nullptr, nullptr, clonedDoc, nullptr);
+        RefPtr<StyleSheet> clonedSheet = sheet->Clone(nullptr, clonedDoc);
         NS_WARNING_ASSERTION(clonedSheet, "Cloning a stylesheet didn't work!");
         if (clonedSheet) {
           clonedDoc->AddStyleSheet(clonedSheet);
@@ -13001,8 +13004,7 @@ already_AddRefed<Document> Document::CreateStaticClone(
     auto& sheets = mAdditionalSheets[additionalSheetType(t)];
     for (StyleSheet* sheet : sheets) {
       if (sheet->IsApplicable()) {
-        RefPtr<StyleSheet> clonedSheet =
-            sheet->Clone(nullptr, nullptr, clonedDoc, nullptr);
+        RefPtr<StyleSheet> clonedSheet = sheet->Clone(nullptr, clonedDoc);
         NS_WARNING_ASSERTION(clonedSheet, "Cloning a stylesheet didn't work!");
         if (clonedSheet) {
           clonedDoc->AddAdditionalStyleSheet(additionalSheetType(t),
@@ -15922,7 +15924,7 @@ void Document::ClearUserGestureActivation() {
   }
 }
 
-bool Document::HasValidTransientUserGestureActivation() {
+bool Document::HasValidTransientUserGestureActivation() const {
   RefPtr<WindowContext> wc = GetWindowContext();
   return wc && wc->HasValidTransientUserGestureActivation();
 }
@@ -15991,18 +15993,17 @@ void Document::MaybeAllowStorageForOpenerAfterUserInteraction() {
     return;
   }
 
-  // We want to ensure the following check works for both fission mode
-  // and non-fission mode:
-  // "If the opener is not a 3rd party and if this window is not a 3rd
-  // party with respect to the opener, we should not continue."
+  // We want to ensure the following check works for both fission mode and
+  // non-fission mode:
+  // "If the opener is not a 3rd party and if this window is not a 3rd party
+  // with respect to the opener, we should not continue."
   //
   // In non-fission mode, the opener and the opened window are in the same
-  // process, we can use nsContentUtils::IsThirdPartyWindowOrChannel to
-  // do the check.
-  // In fission mode, if this window is not a 3rd party with respect to
-  // the opener, they must be in the same process, so we can still use
-  // IsThirdPartyWindowOrChannel(openerInner) to continue to check if
-  // the opener is a 3rd party.
+  // process, we can use AntiTrackingUtils::IsThirdPartyWindow to do the check.
+  // In fission mode, if this window is not a 3rd party with respect to the
+  // opener, they must be in the same process, so we can still use
+  // IsThirdPartyWindow(openerInner) to continue to check if the opener is a 3rd
+  // party.
   if (openerBC->IsInProcess()) {
     nsCOMPtr<nsPIDOMWindowOuter> outerOpener = openerBC->GetDOMWindow();
     if (NS_WARN_IF(!outerOpener)) {
@@ -16027,10 +16028,8 @@ void Document::MaybeAllowStorageForOpenerAfterUserInteraction() {
 
     // If the opener is not a 3rd party and if this window is not
     // a 3rd party with respect to the opener, we should not continue.
-    if (!nsContentUtils::IsThirdPartyWindowOrChannel(inner, nullptr,
-                                                     openerURI) &&
-        !nsContentUtils::IsThirdPartyWindowOrChannel(openerInner, nullptr,
-                                                     nullptr)) {
+    if (!AntiTrackingUtils::IsThirdPartyWindow(inner, openerURI) &&
+        !AntiTrackingUtils::IsThirdPartyWindow(openerInner, nullptr)) {
       return;
     }
   }
@@ -16774,6 +16773,10 @@ already_AddRefed<mozilla::dom::Promise> Document::RequestStorageAccess(
 
 RefPtr<Document::AutomaticStorageAccessPermissionGrantPromise>
 Document::AutomaticStorageAccessPermissionCanBeGranted() {
+  if (!StaticPrefs::privacy_antitracking_enableWebcompat()) {
+    return AutomaticStorageAccessPermissionGrantPromise::CreateAndResolve(
+        false, __func__);
+  }
   if (XRE_IsContentProcess()) {
     // In the content process, we need to ask the parent process to compute
     // this.  The reason is that nsIPermissionManager::GetAllWithTypePrefix()
@@ -17221,6 +17224,17 @@ StylePrefersColorScheme Document::PrefersColorScheme(
     }
   }
 
+  if (!nsContentUtils::IsChromeDoc(this)) {
+    switch (StaticPrefs::layout_css_prefers_color_scheme_content_override()) {
+      case 0:
+        return StylePrefersColorScheme::Dark;
+      case 1:
+        return StylePrefersColorScheme::Light;
+      default:
+        break;
+    }
+  }
+
   const bool dark =
       !!LookAndFeel::GetInt(LookAndFeel::IntID::SystemUsesDarkTheme, 0);
   return dark ? StylePrefersColorScheme::Dark : StylePrefersColorScheme::Light;
@@ -17378,4 +17392,37 @@ void Document::UnregisterFromMemoryReportingForDataDocument() {
     }
   }
 }
+void Document::OOPChildLoadStarted(BrowserBridgeChild* aChild) {
+  MOZ_DIAGNOSTIC_ASSERT(!mOOPChildrenLoading.Contains(aChild));
+  mOOPChildrenLoading.AppendElement(aChild);
+  if (mOOPChildrenLoading.Length() == 1) {
+    // Let's block unload so that we're blocked from going into the BFCache
+    // until the child has actually notified us that it has done loading.
+    BlockOnload();
+  }
+}
+
+void Document::OOPChildLoadDone(BrowserBridgeChild* aChild) {
+  // aChild will not be in the list if nsDocLoader::Stop() was called, since
+  // that clears mOOPChildrenLoading.  It also dispatches the 'load' event,
+  // so we don't need to call DocLoaderIsEmpty in that case.
+  if (mOOPChildrenLoading.RemoveElement(aChild)) {
+    if (mOOPChildrenLoading.IsEmpty()) {
+      UnblockOnload(false);
+    }
+    RefPtr<nsDocLoader> docLoader(mDocumentContainer);
+    if (docLoader) {
+      docLoader->OOPChildrenLoadingIsEmpty();
+    }
+  }
+}
+
+void Document::ClearOOPChildrenLoading() {
+  nsTArray<const BrowserBridgeChild*> oopChildrenLoading;
+  mOOPChildrenLoading.SwapElements(oopChildrenLoading);
+  if (!oopChildrenLoading.IsEmpty()) {
+    UnblockOnload(false);
+  }
+}
+
 }  // namespace mozilla::dom

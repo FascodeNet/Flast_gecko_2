@@ -138,7 +138,7 @@ bool GlobalObject::initImportEntryProto(JSContext* cx,
     return false;
   }
 
-  global->initReservedSlot(IMPORT_ENTRY_PROTO, ObjectValue(*proto));
+  global->initBuiltinProto(ProtoKind::ImportEntryProto, proto);
   return true;
 }
 
@@ -217,7 +217,7 @@ bool GlobalObject::initExportEntryProto(JSContext* cx,
     return false;
   }
 
-  global->initReservedSlot(EXPORT_ENTRY_PROTO, ObjectValue(*proto));
+  global->initBuiltinProto(ProtoKind::ExportEntryProto, proto);
   return true;
 }
 
@@ -293,7 +293,7 @@ bool GlobalObject::initRequestedModuleProto(JSContext* cx,
     return false;
   }
 
-  global->initReservedSlot(REQUESTED_MODULE_PROTO, ObjectValue(*proto));
+  global->initBuiltinProto(ProtoKind::RequestedModuleProto, proto);
   return true;
 }
 
@@ -351,7 +351,7 @@ bool GlobalObject::initModuleRequestProto(JSContext* cx,
     return false;
   }
 
-  global->initReservedSlot(MODULE_REQUEST_PROTO, ObjectValue(*proto));
+  global->initBuiltinProto(ProtoKind::ModuleRequestProto, proto);
   return true;
 }
 
@@ -1401,7 +1401,7 @@ bool GlobalObject::initModuleProto(JSContext* cx,
     return false;
   }
 
-  global->setReservedSlot(MODULE_PROTO, ObjectValue(*proto));
+  global->initBuiltinProto(ProtoKind::ModuleProto, proto);
   return true;
 }
 
@@ -2040,8 +2040,7 @@ JSObject* js::GetOrCreateModuleMetaObject(JSContext* cx,
     return obj;
   }
 
-  RootedObject metaObject(cx,
-                          NewObjectWithGivenProto<PlainObject>(cx, nullptr));
+  RootedObject metaObject(cx, NewPlainObjectWithProto(cx, nullptr));
   if (!metaObject) {
     return nullptr;
   }
@@ -2490,45 +2489,6 @@ bool js::FinishDynamicModuleImport(JSContext* cx,
 
   releasePrivate.release();
   return true;
-}
-
-bool js::FinishDynamicModuleImport_NoTLA(JSContext* cx,
-                                         JS::DynamicImportStatus status,
-                                         HandleValue referencingPrivate,
-                                         HandleObject moduleRequest,
-                                         HandleObject promiseArg) {
-  MOZ_ASSERT_IF(cx->isExceptionPending(),
-                status == JS::DynamicImportStatus::Failed);
-
-  Handle<PromiseObject*> promise = promiseArg.as<PromiseObject>();
-
-  auto releasePrivate = mozilla::MakeScopeExit(
-      [&] { cx->runtime()->releaseScriptPrivate(referencingPrivate); });
-
-  if (status == JS::DynamicImportStatus::Failed) {
-    return RejectPromiseWithPendingError(cx, promise);
-  }
-
-  RootedObject result(
-      cx, CallModuleResolveHook(cx, referencingPrivate, moduleRequest));
-  if (!result) {
-    return RejectPromiseWithPendingError(cx, promise);
-  }
-
-  RootedModuleObject module(cx, &result->as<ModuleObject>());
-  if (module->status() != MODULE_STATUS_EVALUATED) {
-    JS_ReportErrorASCII(
-        cx, "Unevaluated or errored module returned by module resolve hook");
-    return RejectPromiseWithPendingError(cx, promise);
-  }
-
-  RootedObject ns(cx, ModuleObject::GetOrCreateModuleNamespace(cx, module));
-  if (!ns) {
-    return RejectPromiseWithPendingError(cx, promise);
-  }
-
-  RootedValue value(cx, ObjectValue(*ns));
-  return PromiseObject::resolve(cx, promise, value);
 }
 
 template <XDRMode mode>

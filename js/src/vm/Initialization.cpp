@@ -18,9 +18,9 @@
 #include "ds/MemoryProtectionExceptionHandler.h"
 #include "gc/Statistics.h"
 #include "jit/AtomicOperations.h"
-#include "jit/ExecutableAllocator.h"
 #include "jit/Ion.h"
 #include "jit/JitCommon.h"
+#include "jit/ProcessExecutableMemory.h"
 #include "js/Utility.h"
 
 #if JS_HAS_INTL_API
@@ -218,6 +218,11 @@ JS_PUBLIC_API const char* JS::detail::InitWithFailureDiagnostic(
 
 #ifdef JS_TRACE_LOGGING
   RETURN_IF_FAIL(JS::InitTraceLogger());
+#endif
+
+#ifndef JS_CODEGEN_NONE
+  // Normally this is forced by the compilation of atomic operations.
+  MOZ_ASSERT(js::jit::CPUFlagsHaveBeenComputed());
 #endif
 
   libraryInitState = InitState::Running;

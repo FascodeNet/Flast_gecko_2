@@ -2894,12 +2894,12 @@ installation:
       silent: '(optional, present if object is "full") Whether this was a silent install'
       from_msi: '(optional, present if object is "full") Whether this was an MSI install'
       default_path: '(optional, present if object is "full") Whether the default path was used'
-    bug_numbers: [1660198]
+    bug_numbers: [1660198, 1725295]
     notification_emails:
       - application-update-telemetry-alerts@mozilla.com
       - agashlin@mozilla.com
       - rtestard@mozilla.com
-    expiry_version: "94"
+    expiry_version: "100"
 
 contextservices.quicksuggest:
   enable_toggled:
@@ -2914,6 +2914,40 @@ contextservices.quicksuggest:
     bug_numbers: [1693126]
     notification_emails:
       - fx-search@mozilla.com
+      - adw@mozilla.com
+    expiry_version: never
+  sponsored_toggled:
+    objects: ["enabled", "disabled"]
+    release_channel_collection: opt-out
+    products:
+      - "firefox"
+    record_in_processes: ["main"]
+    description: >
+      This is recorded when the `browser.urlbar.suggest.quicksuggest.sponsored`
+      boolean pref is toggled.
+    bug_numbers: [1728430]
+    notification_emails:
+      - fx-search@mozilla.com
+      - adw@mozilla.com
+    expiry_version: never
+  opt_in_dialog:
+    objects: ["accept", "not_now", "settings", "learn_more"]
+    release_channel_collection: opt-out
+    products:
+      - "firefox"
+    record_in_processes: ["main"]
+    description: >
+      This is recorded when the user responds to the Firefox Suggest opt-in
+      onboarding dialog. 'accept' is recorded when the user accepts the dialog
+      and opts in, 'settings' is recorded when the user clicks in the
+      "Customize" button (the user remains opted out in this case), 'learn_more'
+      is recorded when the user clicks "Learn more" (the user remains opted
+      out), 'not_now' is recorded when the user clicks "Not now" (the user
+      remains opted out)
+    bug_numbers: [1723860]
+    notification_emails:
+      - fx-search@mozilla.com
+      - adw@mozilla.com
     expiry_version: never
 
 close_tab_warning:
@@ -2923,10 +2957,10 @@ close_tab_warning:
       the reason it is shown and what choices the user makes (close or not).
     objects: ["window", "application", "tabs"]
     release_channel_collection: opt-out
-    expiry_version: "94"
+    expiry_version: "99"
     record_in_processes: ["main"]
     products: ["firefox"]
-    bug_numbers: [1712306]
+    bug_numbers: [1712306, 1725296]
     notification_emails:
       - gkruitbosch@mozilla.com
       - rtestard@mozilla.com

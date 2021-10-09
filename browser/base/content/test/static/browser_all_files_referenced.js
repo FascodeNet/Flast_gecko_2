@@ -15,7 +15,6 @@ var isDevtools = SimpleTest.harnessParameters.subsuite == "devtools";
 // find any reference because the URIs are constructed programatically.
 // If you need to whitelist specific files, please use the 'whitelist' object.
 var gExceptionPaths = [
-  "chrome://browser/content/defaultthemes/",
   "resource://app/defaults/settings/blocklists/",
   "resource://app/defaults/settings/security-state/",
   "resource://app/defaults/settings/main/",
@@ -268,6 +267,9 @@ var whitelist = [
   { file: "chrome://browser/content/screenshots/menu-visible.svg" },
 
   { file: "resource://app/modules/SnapshotSelector.jsm" },
+
+  // toolkit/xre/MacRunFromDmgUtils.mm
+  { file: "resource://gre/localization/en-US/toolkit/global/run-from-dmg.ftl" },
 ];
 
 if (AppConstants.NIGHTLY_BUILD && AppConstants.platform != "win") {

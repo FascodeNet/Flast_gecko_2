@@ -1289,8 +1289,7 @@ class CGNamespace(CGThing):
         """
         if not namespaces:
             return CGWrapper(child)
-        inner = CGNamespace.build(namespaces[1:], child)
-        return CGNamespace(namespaces[0], inner)
+        return CGNamespace("::".join(namespaces), child)
 
 
 class CGIncludeGuard(CGWrapper):
@@ -9618,7 +9617,7 @@ class CGPerSignatureCall(CGThing):
             // passed to the webextensions stub method.
             //
             // NOTE: The stub method will receive the original non-normalized js values,
-            // but those arguments will still be normalized on the main thread by the 
+            // but those arguments will still be normalized on the main thread by the
             // WebExtensions API request handler using the same JSONSchema defnition
             // used by the non-webIDL webextensions API bindings.
             AutoSequence<JS::Value> args_sequence;
@@ -18121,6 +18120,9 @@ class CGBindingRoot(CGThing):
         bindingDeclareHeaders["js/TypeDecls.h"] = not bindingDeclareHeaders["jsapi.h"]
         bindingDeclareHeaders["js/RootingAPI.h"] = not bindingDeclareHeaders["jsapi.h"]
 
+        # JS::IsCallable
+        bindingDeclareHeaders["js/CallAndConstruct.h"] = True
+
         def descriptorHasIteratorAlias(desc):
             def hasIteratorAlias(m):
                 return m.isMethod() and "@@iterator" in m.aliases
@@ -18147,6 +18149,12 @@ class CGBindingRoot(CGThing):
 
         # JS::IsCallable, JS::Call, JS::Construct
         bindingHeaders["js/CallAndConstruct.h"] = True
+
+        # JS_IsExceptionPending
+        bindingHeaders["js/Exception.h"] = True
+
+        # JS::Map{Clear, Delete, Has, Get, Set}
+        bindingHeaders["js/MapAndSet.h"] = True
 
         # JS_DefineElement, JS_DefineProperty, JS_DefinePropertyById,
         # JS_DefineUCProperty, JS_ForwardGetPropertyTo, JS_GetProperty,

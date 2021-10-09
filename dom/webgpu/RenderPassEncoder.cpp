@@ -40,8 +40,8 @@ ffi::WGPUStoreOp ConvertStoreOp(const dom::GPUStoreOp& aOp) {
   switch (aOp) {
     case dom::GPUStoreOp::Store:
       return ffi::WGPUStoreOp_Store;
-    case dom::GPUStoreOp::Clear:
-      return ffi::WGPUStoreOp_Clear;
+    case dom::GPUStoreOp::Discard:
+      return ffi::WGPUStoreOp_Discard;
     default:
       MOZ_CRASH("Unexpected load op");
   }

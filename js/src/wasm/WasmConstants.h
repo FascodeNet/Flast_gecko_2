@@ -21,6 +21,8 @@
 
 #include <stdint.h>
 
+#include "wasm/WasmIntrinsicGenerated.h"
+
 namespace js {
 namespace wasm {
 
@@ -676,8 +678,8 @@ enum class SimdOp {
   I32x4ShrS = 0xac,
   I32x4ShrU = 0xad,
   I32x4Add = 0xae,
-  // AddSatS = 0xaf
-  // AddSatU = 0xb0
+  F32x4RelaxedFma = 0xaf,
+  F32x4RelaxedFms = 0xb0,
   I32x4Sub = 0xb1,
   // SubSatS = 0xb2
   // SubSatU = 0xb3
@@ -708,8 +710,8 @@ enum class SimdOp {
   I64x2ShrS = 0xcc,
   I64x2ShrU = 0xcd,
   I64x2Add = 0xce,
-  // Unused = 0xcf
-  // Unused = 0xd0
+  F64x2RelaxedFma = 0xcf,
+  F64x2RelaxedFms = 0xd0,
   I64x2Sub = 0xd1,
   // Unused = 0xd2
   // Unused = 0xd3
@@ -939,17 +941,16 @@ enum class ThreadOp {
 };
 
 enum class IntrinsicOp {
-  // ------------------------------------------------------------------------
-  // These operators are emitted internally when compiling intrinsic modules
-  // and are rejected by wasm validation.  They are prefixed by
-  // IntrinsicPrefix.
+// ------------------------------------------------------------------------
+// These operators are emitted internally when compiling intrinsic modules
+// and are rejected by wasm validation.  They are prefixed by
+// IntrinsicPrefix. See wasm/WasmIntrinsic.yaml for the list.
+#define DECL_INTRINSIC_OP(op, export, sa_name, abitype, entry, idx) \
+  op = idx,  // NOLINT
+  FOR_EACH_INTRINSIC(DECL_INTRINSIC_OP)
+#undef DECL_INTRINSIC_OP
 
-  // i8vecmul(dest: i32, src1: i32, src2: i32, len: i32)
-  //  Performs pairwise multiplication of two i8 vectors of 'len' specified at
-  //  'src1' and 'src2'. Output is written to 'dest'. This is used as a
-  //  basic self-test for intrinsics.
-  I8VecMul = 0x0,
-
+  // Op limit.
   Limit
 };
 

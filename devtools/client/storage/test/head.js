@@ -28,7 +28,11 @@ registerCleanupFunction(async () => {
       }
 
       if (win.clear) {
-        await win.clear();
+        // Do not get hung into win.clear() forever
+        await Promise.race([
+          new Promise(r => win.setTimeout(r, 10000)),
+          win.clear(),
+        ]);
       }
     });
   }
@@ -1120,6 +1124,12 @@ function checkStorageData(name, value) {
     hasStorageData(name, value),
     `Table row has an entry for: ${name} with value: ${value}`
   );
+}
+
+async function waitForStorageData(name, value) {
+  info("Waiting for data to appear in the table");
+  await waitFor(() => hasStorageData(name, value));
+  ok(true, `Table row has an entry for: ${name} with value: ${value}`);
 }
 
 /**

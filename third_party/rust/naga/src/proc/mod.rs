@@ -1,13 +1,25 @@
 //! Module processing functionality.
 
+mod index;
 mod interpolator;
+mod layouter;
 mod namer;
 mod terminator;
 mod typifier;
 
+pub use index::IndexableLength;
+pub use layouter::{Alignment, InvalidBaseType, Layouter, TypeLayout};
 pub use namer::{EntryPointIndex, NameKey, Namer};
 pub use terminator::ensure_block_returns;
 pub use typifier::{ResolveContext, ResolveError, TypeResolution};
+
+#[derive(Clone, Debug, thiserror::Error, PartialEq)]
+pub enum ProcError {
+    #[error("type is not indexable, and has no length (validation error)")]
+    TypeNotIndexable,
+    #[error("array length is wrong kind of constant (validation error)")]
+    InvalidArraySizeConstant(crate::Handle<crate::Constant>),
+}
 
 impl From<super::StorageFormat> for super::ScalarKind {
     fn from(format: super::StorageFormat) -> Self {
@@ -73,19 +85,31 @@ impl super::TypeInner {
         }
     }
 
+    pub fn pointer_class(&self) -> Option<crate::StorageClass> {
+        match *self {
+            Self::Pointer { class, .. } => Some(class),
+            Self::ValuePointer { class, .. } => Some(class),
+            _ => None,
+        }
+    }
+
     pub fn span(&self, constants: &super::Arena<super::Constant>) -> u32 {
         match *self {
-            Self::Scalar { kind: _, width } => width as u32,
+            Self::Scalar { kind: _, width } | Self::Atomic { kind: _, width } => width as u32,
             Self::Vector {
                 size,
                 kind: _,
                 width,
             } => (size as u8 * width) as u32,
+            // matrices are treated as arrays of aligned columns
             Self::Matrix {
                 columns,
                 rows,
                 width,
-            } => (columns as u8 * rows as u8 * width) as u32,
+            } => {
+                let aligned_rows = if rows > crate::VectorSize::Bi { 4 } else { 2 };
+                columns as u32 * aligned_rows * width as u32
+            }
             Self::Pointer { .. } | Self::ValuePointer { .. } => POINTER_SPAN,
             Self::Array {
                 base: _,
@@ -127,6 +151,9 @@ impl super::MathFunction {
             Self::Asin => 1,
             Self::Atan => 1,
             Self::Atan2 => 2,
+            Self::Asinh => 1,
+            Self::Acosh => 1,
+            Self::Atanh => 1,
             // decomposition
             Self::Ceil => 1,
             Self::Floor => 1,
@@ -181,6 +208,28 @@ impl crate::Expression {
             _ => false,
         }
     }
+
+    /// Return true if this expression is a dynamic array index, for [`Access`].
+    ///
+    /// This method returns true if this expression is a dynamically computed
+    /// index, and as such can only be used to index matrices and arrays when
+    /// they appear behind a pointer. See the documentation for [`Access`] for
+    /// details.
+    ///
+    /// Note, this does not check the _type_ of the given expression. It's up to
+    /// the caller to establish that the `Access` expression is well-typed
+    /// through other means, like [`ResolveContext`].
+    ///
+    /// [`Access`]: crate::Expression::Access
+    /// [`ResolveContext`]: crate::proc::ResolveContext
+    pub fn is_dynamic_index(&self, module: &crate::Module) -> bool {
+        if let Self::Constant(handle) = *self {
+            let constant = &module.constants[handle];
+            constant.specialization.is_some()
+        } else {
+            true
+        }
+    }
 }
 
 impl crate::SampleLevel {
@@ -193,7 +242,19 @@ impl crate::SampleLevel {
 }
 
 impl crate::Constant {
-    pub fn to_array_length(&self) -> Option<u32> {
+    /// Interpret this constant as an array length, and return it as a `u32`.
+    ///
+    /// Ignore any specialization available for this constant; return its
+    /// unspecialized value.
+    ///
+    /// If the constant has an inappropriate kind (non-scalar or non-integer) or
+    /// value (negative, out of range for u32), return `None`. This usually
+    /// indicates an error, but only the caller has enough information to report
+    /// the error helpfully: in back ends, it's a validation error, but in front
+    /// ends, it may indicate ill-formed input (for example, a SPIR-V
+    /// `OpArrayType` referring to an inappropriate `OpConstant`). So we return
+    /// `Option` and let the caller sort things out.
+    pub(crate) fn to_array_length(&self) -> Option<u32> {
         use std::convert::TryInto;
         match self.inner {
             crate::ConstantInner::Scalar { value, width: _ } => match value {
@@ -242,4 +303,39 @@ impl std::hash::Hash for crate::ScalarValue {
             Self::Bool(v) => v.hash(hasher),
         }
     }
+}
+
+impl super::SwizzleComponent {
+    pub const XYZW: [Self; 4] = [Self::X, Self::Y, Self::Z, Self::W];
+
+    pub fn index(&self) -> u32 {
+        match *self {
+            Self::X => 0,
+            Self::Y => 1,
+            Self::Z => 2,
+            Self::W => 3,
+        }
+    }
+    pub fn from_index(idx: u32) -> Self {
+        match idx {
+            0 => Self::X,
+            1 => Self::Y,
+            2 => Self::Z,
+            _ => Self::W,
+        }
+    }
+}
+
+#[test]
+fn test_matrix_size() {
+    let constants = crate::Arena::new();
+    assert_eq!(
+        crate::TypeInner::Matrix {
+            columns: crate::VectorSize::Tri,
+            rows: crate::VectorSize::Tri,
+            width: 4
+        }
+        .span(&constants),
+        48
+    );
 }

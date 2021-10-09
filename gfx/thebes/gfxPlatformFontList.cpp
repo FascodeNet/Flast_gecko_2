@@ -170,7 +170,7 @@ static void FontListPrefChanged(const char* aPref, void* aData = nullptr) {
                 !strcmp(aPref, "privacy.resistFingerprinting"))) {
     gfxPlatformFontList::PlatformFontList()->SetVisibilityLevel();
     if (XRE_IsParentProcess()) {
-      gfxPlatform::ForceGlobalReflow();
+      gfxPlatform::ForceGlobalReflow(gfxPlatform::NeedsReframe::No);
     }
   }
 }
@@ -188,7 +188,7 @@ gfxFontListPrefObserver::Observe(nsISupports* aSubject, const char* aTopic,
   FontListPrefChanged(nullptr);
 
   if (XRE_IsParentProcess()) {
-    gfxPlatform::ForceGlobalReflow();
+    gfxPlatform::ForceGlobalReflow(gfxPlatform::NeedsReframe::No);
   }
   return NS_OK;
 }
@@ -335,9 +335,6 @@ void gfxPlatformFontList::FontWhitelistPrefChanged(const char* aPref,
   pfl->UpdateFontList(true);
   dom::ContentParent::NotifyUpdatedFonts(true);
 }
-
-// number of CSS generic font families
-const uint32_t kNumGenerics = 5;
 
 void gfxPlatformFontList::ApplyWhitelist() {
   uint32_t numFonts = mEnabledFontsList.Length();
@@ -637,7 +634,7 @@ void gfxPlatformFontList::FontListChanged() {
     // safe to use: ensure they all get flushed.
     RebuildLocalFonts(/*aForgetLocalFaces*/ true);
   }
-  ForceGlobalReflow();
+  gfxPlatform::ForceGlobalReflow(gfxPlatform::NeedsReframe::Yes);
 }
 
 void gfxPlatformFontList::GenerateFontListKey(const nsACString& aKeyName,
@@ -857,7 +854,7 @@ void gfxPlatformFontList::UpdateFontList(bool aFullRebuild) {
     if (mStartedLoadingCmapsFrom != 0xffffffffu) {
       InitializeCodepointsWithNoFonts();
       mStartedLoadingCmapsFrom = 0xffffffffu;
-      gfxPlatform::ForceGlobalReflow();
+      gfxPlatform::ForceGlobalReflow(gfxPlatform::NeedsReframe::No);
     }
   }
 }
@@ -923,7 +920,7 @@ void gfxPlatformFontList::GetFontFamilyList(
 gfxFont* gfxPlatformFontList::SystemFindFontForChar(
     uint32_t aCh, uint32_t aNextCh, Script aRunScript,
     eFontPresentation aPresentation, const gfxFontStyle* aStyle,
-    FontVisibility* aVisibility, FontMatchingStats* aFontMatchingStats) {
+    FontVisibility* aVisibility) {
   MOZ_ASSERT(!mCodepointsWithNoFonts.test(aCh),
              "don't call for codepoints already known to be unsupported");
 
@@ -982,7 +979,7 @@ gfxFont* gfxPlatformFontList::SystemFindFontForChar(
   if (!font) {
     common = false;
     font = GlobalFontFallback(aCh, aNextCh, aRunScript, aPresentation, aStyle,
-                              cmapCount, fallbackFamily, aFontMatchingStats);
+                              cmapCount, fallbackFamily);
     // If the font we found doesn't match the requested type, and we also found
     // a candidate above, prefer that one.
     if (font && aPresentation != eFontPresentation::Any && candidate) {
@@ -1083,8 +1080,7 @@ gfxFont* gfxPlatformFontList::CommonFontFallback(
 gfxFont* gfxPlatformFontList::GlobalFontFallback(
     uint32_t aCh, uint32_t aNextCh, Script aRunScript,
     eFontPresentation aPresentation, const gfxFontStyle* aMatchStyle,
-    uint32_t& aCmapCount, FontFamily& aMatchedFamily,
-    FontMatchingStats* aFontMatchingStats) {
+    uint32_t& aCmapCount, FontFamily& aMatchedFamily) {
   bool useCmaps = IsFontFamilyWhitelistActive() ||
                   gfxPlatform::GetPlatform()->UseCmapsDuringSystemFallback();
   FontVisibility rejectedFallbackVisibility = FontVisibility::Unknown;
@@ -1177,14 +1173,6 @@ gfxFont* gfxPlatformFontList::GlobalFontFallback(
     if (data.mBestMatch) {
       aMatchedFamily = FontFamily(data.mMatchedFamily);
       return data.mBestMatch->FindOrMakeFont(aMatchStyle);
-    }
-  }
-
-  if (aFontMatchingStats) {
-    if (rejectedFallbackVisibility == FontVisibility::LangPack) {
-      aFontMatchingStats->mFallbacks |= FallbackTypes::MissingFontLangPack;
-    } else if (rejectedFallbackVisibility == FontVisibility::User) {
-      aFontMatchingStats->mFallbacks |= FallbackTypes::MissingFontUser;
     }
   }
 
@@ -2491,7 +2479,7 @@ void gfxPlatformFontList::CleanupLoader() {
                     FindFamiliesFlags::eNoAddToNamesMissedWhenSearching));
         });
     if (forceReflow) {
-      ForceGlobalReflow();
+      gfxPlatform::ForceGlobalReflow(gfxPlatform::NeedsReframe::No);
     }
 
     mOtherNamesMissed = nullptr;
@@ -2521,10 +2509,6 @@ void gfxPlatformFontList::GetPrefsAndStartLoader() {
         "StartLoader callback",
         [delay, fontList = this] { fontList->StartLoader(delay); }));
   }
-}
-
-void gfxPlatformFontList::ForceGlobalReflow() {
-  gfxPlatform::ForceGlobalReflow();
 }
 
 void gfxPlatformFontList::RebuildLocalFonts(bool aForgetLocalFaces) {

@@ -5,9 +5,7 @@
 Transform the beetmover task into an actual task description.
 """
 
-from __future__ import absolute_import, print_function, unicode_literals
-
-import six.moves.urllib.parse as urlparse
+from urllib.parse import urlsplit
 
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.schema import resolve_keyed_by
@@ -36,12 +34,29 @@ INCLUDE_VERSION_REGEXES = {
     # Previous esr versions, for update testing before we update users to esr91
     "esr91-next": r"'^(52|60|68|78)+\.\d+(\.\d+)?esr$'",
     # Previous Thunderbird major versions. Same idea as esrXX-next, no esr suffix
-    "thunderbird91-next": r"'^78\.\d+(\.\d+)?$",
+    "thunderbird91-next": r"'^78\.\d+(\.\d+)?$'",
 }
 
 MAR_CHANNEL_ID_OVERRIDE_REGEXES = {
     "beta": r"'^\d+\.\d+(\.\d+)?$$,firefox-mozilla-beta,firefox-mozilla-release'",
 }
+
+
+def ensure_wrapped_singlequote(regexes):
+    """Ensure that a regex (from INCLUDE_VERSION_REGEXES or MAR_CHANNEL_ID_OVERRIDE_REGEXES)
+    is wrapper in single quotes.
+    """
+    for name, regex in regexes.items():
+        if regex[0] != "'" or regex[-1] != "'":
+            raise Exception(
+                "Regex {} is invalid: not wrapped with single quotes.\n{}".format(
+                    name, regex
+                )
+            )
+
+
+ensure_wrapped_singlequote(INCLUDE_VERSION_REGEXES)
+ensure_wrapped_singlequote(MAR_CHANNEL_ID_OVERRIDE_REGEXES)
 
 
 @transforms.add
@@ -94,7 +109,7 @@ def add_command(config, tasks):
             "update-verify.cfg",
         ]
 
-        repo_path = urlparse.urlsplit(get_branch_repo(config)).path.lstrip("/")
+        repo_path = urlsplit(get_branch_repo(config)).path.lstrip("/")
         command.extend(["--repo-path", repo_path])
 
         if release_config.get("partial_versions"):
@@ -103,11 +118,11 @@ def add_command(config, tasks):
 
         for arg in optional_args:
             if task["extra"].get(arg):
-                command.append("--{}".format(arg))
+                command.append(f"--{arg}")
                 command.append(task["extra"][arg])
 
         for arg in keyed_by_args:
-            thing = "extra.{}".format(arg)
+            thing = f"extra.{arg}"
             resolve_keyed_by(
                 task,
                 thing,
@@ -116,7 +131,7 @@ def add_command(config, tasks):
                 **{
                     "release-type": config.params["release_type"],
                     "release-level": config.params.release_level(),
-                }
+                },
             )
             # ignore things that resolved to null
             if not task["extra"].get(arg):
@@ -126,7 +141,7 @@ def add_command(config, tasks):
             if arg == "mar-channel-id-override":
                 task["extra"][arg] = MAR_CHANNEL_ID_OVERRIDE_REGEXES[task["extra"][arg]]
 
-            command.append("--{}".format(arg))
+            command.append(f"--{arg}")
             command.append(task["extra"][arg])
 
         task["run"].update(

@@ -29,6 +29,7 @@
 #include "WindowNamedPropertiesHandler.h"
 #include "js/ComparisonOperators.h"
 #include "js/CompileOptions.h"
+#include "js/friend/PerformanceHint.h"
 #include "js/Id.h"
 #include "js/PropertyAndElement.h"  // JS_DefineProperty, JS_GetProperty
 #include "js/PropertyDescriptor.h"
@@ -271,6 +272,7 @@
 #include "nsIWebProgressListener.h"
 #include "nsIWidget.h"
 #include "nsIWidgetListener.h"
+#include "nsIXULRuntime.h"
 #include "nsJSPrincipals.h"
 #include "nsJSUtils.h"
 #include "nsLayoutStatics.h"
@@ -919,6 +921,7 @@ nsGlobalWindowInner::nsGlobalWindowInner(nsGlobalWindowOuter* aOuterWindow,
       mHasSeenGamepadInput(false),
       mHintedWasLoading(false),
       mHasOpenedExternalProtocolFrame(false),
+      mStorageAllowedReasonCache(0),
       mSuspendDepth(0),
       mFreezeDepth(0),
 #ifdef DEBUG
@@ -2737,7 +2740,8 @@ bool nsPIDOMWindowInner::HasOpenWebSockets() const {
 }
 
 bool nsPIDOMWindowInner::IsCurrentInnerWindow() const {
-  if (mBrowsingContext && mBrowsingContext->IsInBFCache()) {
+  if (mozilla::SessionHistoryInParent() && mBrowsingContext &&
+      mBrowsingContext->IsInBFCache()) {
     return false;
   }
 
@@ -2753,7 +2757,7 @@ bool nsPIDOMWindowInner::IsCurrentInnerWindow() const {
 
 bool nsPIDOMWindowInner::IsFullyActive() const {
   WindowContext* wc = GetWindowContext();
-  if (!wc || wc->IsDiscarded() || wc->IsCached()) {
+  if (!wc || wc->IsDiscarded() || !wc->IsCurrent()) {
     return false;
   }
   return GetBrowsingContext()->AncestorsAreCurrent();
@@ -4132,6 +4136,31 @@ bool nsGlobalWindowInner::Find(const nsAString& aString, bool aCaseSensitive,
 
 void nsGlobalWindowInner::GetOrigin(nsAString& aOrigin) {
   nsContentUtils::GetUTFOrigin(GetPrincipal(), aOrigin);
+}
+
+// See also AutoJSAPI::ReportException
+void nsGlobalWindowInner::ReportError(JSContext* aCx,
+                                      JS::Handle<JS::Value> aError,
+                                      CallerType aCallerType,
+                                      ErrorResult& aRv) {
+  if (MOZ_UNLIKELY(!HasActiveDocument())) {
+    return aRv.Throw(NS_ERROR_XPC_SECURITY_MANAGER_VETO);
+  }
+
+  JS::ErrorReportBuilder jsReport(aCx);
+  JS::ExceptionStack exnStack(aCx, aError, nullptr);
+  if (!jsReport.init(aCx, exnStack, JS::ErrorReportBuilder::WithSideEffects)) {
+    return aRv.NoteJSContextException(aCx);
+  }
+
+  RefPtr<xpc::ErrorReport> xpcReport = new xpc::ErrorReport();
+  bool isChrome = aCallerType == CallerType::System;
+  xpcReport->Init(jsReport.report(), jsReport.toStringResult().c_str(),
+                  isChrome, WindowID());
+
+  JS::RootingContext* rcx = JS::RootingContext::get(aCx);
+  DispatchScriptErrorEvent(this, rcx, xpcReport, exnStack.exception(),
+                           exnStack.stack());
 }
 
 void nsGlobalWindowInner::Atob(const nsAString& aAsciiBase64String,
@@ -5958,37 +5987,6 @@ nsIPrincipal* nsGlobalWindowInner::GetTopLevelAntiTrackingPrincipal() {
   return topLevelPrincipal;
 }
 
-nsIPrincipal* nsGlobalWindowInner::GetTopLevelStorageAreaPrincipal() {
-  if (mDoc && (mDoc->StorageAccessSandboxed())) {
-    // Storage access is disabled
-    return nullptr;
-  }
-
-  BrowsingContext* parent = GetBrowsingContext()->GetParent();
-  nsPIDOMWindowOuter* outerWindow = parent ? parent->GetDOMWindow() : nullptr;
-  if (!outerWindow) {
-    // No outer window available!
-    return nullptr;
-  }
-
-  if (!outerWindow->GetBrowsingContext()->IsTop()) {
-    return nullptr;
-  }
-
-  nsPIDOMWindowInner* innerWindow = outerWindow->GetCurrentInnerWindow();
-  if (NS_WARN_IF(!innerWindow)) {
-    return nullptr;
-  }
-
-  nsIPrincipal* parentPrincipal =
-      nsGlobalWindowInner::Cast(innerWindow)->GetPrincipal();
-  if (NS_WARN_IF(!parentPrincipal)) {
-    return nullptr;
-  }
-
-  return parentPrincipal;
-}
-
 //*****************************************************************************
 // nsGlobalWindowInner: Timeout Functions
 //*****************************************************************************
@@ -7306,7 +7304,7 @@ void nsGlobalWindowInner::SetReplaceableWindowCoord(
    */
   nsGlobalWindowOuter* outer = GetOuterWindowInternal();
   if (!outer || !outer->CanMoveResizeWindows(aCallerType) ||
-      mBrowsingContext->IsFrame()) {
+      mBrowsingContext->IsSubframe()) {
     RedefineProperty(aCx, aPropName, aValue, aError);
     return;
   }
@@ -7422,15 +7420,16 @@ void nsGlobalWindowInner::FireOnNewGlobalObject() {
 #endif
 
 already_AddRefed<Promise> nsGlobalWindowInner::CreateImageBitmap(
-    const ImageBitmapSource& aImage, ErrorResult& aRv) {
-  return ImageBitmap::Create(this, aImage, Nothing(), aRv);
+    const ImageBitmapSource& aImage, const ImageBitmapOptions& aOptions,
+    ErrorResult& aRv) {
+  return ImageBitmap::Create(this, aImage, Nothing(), aOptions, aRv);
 }
 
 already_AddRefed<Promise> nsGlobalWindowInner::CreateImageBitmap(
     const ImageBitmapSource& aImage, int32_t aSx, int32_t aSy, int32_t aSw,
-    int32_t aSh, ErrorResult& aRv) {
-  return ImageBitmap::Create(this, aImage,
-                             Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aRv);
+    int32_t aSh, const ImageBitmapOptions& aOptions, ErrorResult& aRv) {
+  return ImageBitmap::Create(
+      this, aImage, Some(gfx::IntRect(aSx, aSy, aSw, aSh)), aOptions, aRv);
 }
 
 nsresult nsGlobalWindowInner::Dispatch(
@@ -7521,6 +7520,10 @@ void nsGlobalWindowInner::ForgetSharedWorker(SharedWorker* aSharedWorker) {
 }
 
 void nsGlobalWindowInner::StorageAccessPermissionGranted() {
+  // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
+  // give us the updated localStorage object.
+  ClearStorageAllowedCache();
+
   PropagateStorageAccessPermissionGrantedToWorkers(*this);
 
   // If we have a partitioned localStorage, it's time to replace it with a real

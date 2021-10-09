@@ -245,7 +245,7 @@ class nsWindow final : public nsBaseWidget {
   void OnDPIChanged(void);
   void OnCheckResize(void);
   void OnCompositedChanged(void);
-  void OnScaleChanged(GtkAllocation* aAllocation);
+  void OnScaleChanged();
   void DispatchResized();
 
   static guint32 sLastButtonPressTime;
@@ -382,10 +382,11 @@ class nsWindow final : public nsBaseWidget {
                                             bool aFlippedX, bool aFlippedY);
   static bool IsToplevelWindowTransparent();
 
+  static nsWindow* GetFocusedWindow();
+
 #ifdef MOZ_WAYLAND
   bool GetCSDDecorationOffset(int* aDx, int* aDy);
   void SetEGLNativeWindowSize(const LayoutDeviceIntSize& aEGLWindowSize);
-  static nsWindow* GetFocusedWindow();
   void WaylandDragWorkaround(GdkEventButton* aEvent);
 
   wl_display* GetWaylandDisplay();
@@ -398,7 +399,6 @@ class nsWindow final : public nsBaseWidget {
       const LayoutDeviceIntPoint& aLockCenter) override;
   virtual void LockNativePointer() override;
   virtual void UnlockNativePointer() override;
-  virtual nsresult GetScreenRect(LayoutDeviceIntRect* aRect) override;
   virtual nsRect GetPreferredPopupRect() override {
     return mPreferredPopupRect;
   };
@@ -407,6 +407,25 @@ class nsWindow final : public nsBaseWidget {
     mPreferredPopupRectFlushed = true;
   };
 #endif
+
+  typedef enum {
+    // WebRender compositor is enabled
+    COMPOSITOR_ENABLED,
+    // WebRender compositor is paused after window creation.
+    COMPOSITOR_PAUSED_INITIALLY,
+    // WebRender compositor is paused because GtkWindow is hidden,
+    // we can't draw into EGLSurface.
+    COMPOSITOR_PAUSED_MISSING_EGL_WINDOW,
+    // WebRender compositor is paused as we're repainting whole window and
+    // we're waiting for content process to update page content.
+    COMPOSITOR_PAUSED_FLICKERING
+  } WindowCompositorState;
+
+  // Pause compositor to avoid rendering artifacts from content process.
+  void ResumeCompositor();
+  void ResumeCompositorFromCompositorThread();
+  void PauseCompositor();
+  bool IsWaitingForCompositorResume();
 
  protected:
   virtual ~nsWindow();
@@ -419,7 +438,7 @@ class nsWindow final : public nsBaseWidget {
   virtual void RegisterTouchWindow() override;
   virtual bool CompositorInitiallyPaused() override {
 #ifdef MOZ_WAYLAND
-    return mCompositorInitiallyPaused;
+    return mCompositorState == COMPOSITOR_PAUSED_INITIALLY;
 #else
     return false;
 #endif
@@ -472,9 +491,8 @@ class nsWindow final : public nsBaseWidget {
 
   void DispatchContextMenuEventFromMouseEvent(uint16_t domButton,
                                               GdkEventButton* aEvent);
-
-  void MaybeResumeCompositor();
-  void PauseCompositor();
+  void ResumeCompositorHiddenWindow();
+  void PauseCompositorHiddenWindow();
 
   void WaylandStartVsync();
   void WaylandStopVsync();
@@ -492,7 +510,6 @@ class nsWindow final : public nsBaseWidget {
 
   bool GetDragInfo(mozilla::WidgetMouseEvent* aMouseEvent, GdkWindow** aWindow,
                    gint* aButton, gint* aRootX, gint* aRootY);
-  void ClearCachedResources();
   nsIWidgetListener* GetListener();
 
   nsWindow* GetTransientForWindowIfPopup();
@@ -519,9 +536,10 @@ class nsWindow final : public nsBaseWidget {
   GdkWindow* mGdkWindow;
   bool mWindowShouldStartDragging;
   PlatformCompositorWidgetDelegate* mCompositorWidgetDelegate;
-
-  bool mNeedsCompositorResume;
-  bool mCompositorInitiallyPaused;
+  WindowCompositorState mCompositorState;
+  // This is used in COMPOSITOR_PAUSED_FLICKERING mode only to resume compositor
+  // in some reasonable time when page content is not updated.
+  int mCompositorPauseTimeoutID;
 
   uint32_t mHasMappedToplevel : 1, mRetryPointerGrab : 1;
   nsSizeMode mSizeState;
@@ -626,6 +644,7 @@ class nsWindow final : public nsBaseWidget {
   bool WaylandPopupIsPermanent();
   bool IsWidgetOverflowWindow();
   void RemovePopupFromHierarchyList();
+  void ShowWaylandWindow();
   void HideWaylandWindow();
   void HideWaylandPopupWindow(bool aTemporaryHidden, bool aRemoveFromPopupList);
   void HideWaylandToplevelWindow();
@@ -634,7 +653,6 @@ class nsWindow final : public nsBaseWidget {
   void WaylandPopupHierarchyHideTemporary();
   void WaylandPopupHierarchyShowTemporaryHidden();
   void WaylandPopupHierarchyCalculatePositions();
-  bool IsTooltipWithNegativeRelativePositionRemoved();
   bool IsInPopupHierarchy();
   void AddWindowToPopupHierarchy();
   void UpdateWaylandPopupHierarchy();
@@ -644,7 +662,8 @@ class nsWindow final : public nsBaseWidget {
       nsTArray<nsIWidget*>* aLayoutWidgetHierarchy);
   void CloseAllPopupsBeforeRemotePopup();
   void WaylandPopupHideClosedPopups();
-  void WaylandPopupMove(bool aUseMoveToRect);
+  void WaylandPopupMove();
+  bool WaylandPopupRemoveNegativePosition(int* aX = nullptr, int* aY = nullptr);
   nsWindow* WaylandPopupGetTopmostWindow();
   bool IsPopupInLayoutPopupChain(nsTArray<nsIWidget*>* aLayoutWidgetHierarchy,
                                  bool aMustMatchParent);
@@ -737,6 +756,10 @@ class nsWindow final : public nsBaseWidget {
   /*  Popup is going to be closed and removed.
    */
   bool mPopupClosed;
+
+  /* Popup is positioned by gdk_window_move_to_rect()
+   */
+  bool mPopupUseMoveToRect;
 
   /* Last used anchor for move-to-rect.
    */

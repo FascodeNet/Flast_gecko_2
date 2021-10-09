@@ -49,6 +49,8 @@
 #include "mozilla/PresShell.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/ScrollbarPreferences.h"
+#include "mozilla/ScrollingMetrics.h"
+#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/SVGOuterSVGFrame.h"
 #include "mozilla/ViewportUtils.h"
 #include "mozilla/LookAndFeel.h"
@@ -58,7 +60,6 @@
 #include <stdint.h>
 #include "mozilla/MathAlgorithms.h"
 #include "mozilla/Telemetry.h"
-#include "FrameLayerBuilder.h"
 #include "nsSubDocumentFrame.h"
 #include "mozilla/Attributes.h"
 #include "ScrollbarActivity.h"
@@ -86,7 +87,7 @@
 #include "mozilla/layers/APZPublicUtils.h"
 #include "mozilla/layers/AxisPhysicsModel.h"
 #include "mozilla/layers/AxisPhysicsMSDModel.h"
-#include "mozilla/layers/LayerTransactionChild.h"
+#include "mozilla/layers/ScrollingInteractionContext.h"
 #include "mozilla/layers/ScrollLinkedEffectDetector.h"
 #include "mozilla/Unused.h"
 #include "MobileViewportManager.h"
@@ -734,6 +735,8 @@ void nsHTMLScrollFrame::ReflowScrolledFrame(ScrollReflowInput* aState,
                       Some(padding.ConvertTo(kidWM, wm)));
   kidReflowInput.mFlags.mAssumingHScrollbar = aAssumeHScroll;
   kidReflowInput.mFlags.mAssumingVScrollbar = aAssumeVScroll;
+  kidReflowInput.mFlags.mTreatBSizeAsIndefinite =
+      aState->mReflowInput.mFlags.mTreatBSizeAsIndefinite;
   kidReflowInput.SetComputedBSize(computedBSize);
   kidReflowInput.ComputedMinBSize() = computedMinBSize;
   kidReflowInput.ComputedMaxBSize() = computedMaxBSize;
@@ -2196,7 +2199,6 @@ ScrollFrameHelper::ScrollFrameHelper(nsContainerFrame* aOuter, bool aIsRoot)
       mRestorePos(-1, -1),
       mLastPos(-1, -1),
       mApzScrollPos(0, 0),
-      mScrollPosForLayerPixelAlignment(-1, -1),
       mLastUpdateFramesPos(-1, -1),
       mDisplayPortAtLastFrameUpdate(),
       mScrollParentID(mozilla::layers::ScrollableLayerGuid::NULL_SCROLL_ID),
@@ -2863,6 +2865,38 @@ bool ScrollFrameHelper::GetDisplayPortAtLastApproximateFrameVisibilityUpdate(
   return mHadDisplayPortAtLastFrameUpdate;
 }
 
+gfxSize GetPaintedLayerScaleForFrame(nsIFrame* aFrame) {
+  MOZ_ASSERT(aFrame, "need a frame");
+
+  nsPresContext* presCtx = aFrame->PresContext()->GetRootPresContext();
+
+  if (!presCtx) {
+    presCtx = aFrame->PresContext();
+    MOZ_ASSERT(presCtx);
+  }
+
+  nsIFrame* root = presCtx->PresShell()->GetRootFrame();
+
+  MOZ_ASSERT(root);
+
+  float resolution = presCtx->PresShell()->GetResolution();
+
+  Matrix4x4Flagged transform = Matrix4x4::Scaling(resolution, resolution, 1.0);
+  if (aFrame != root) {
+    // aTransform is applied first, then the scale is applied to the result
+    transform = nsLayoutUtils::GetTransformToAncestor(RelativeTo{aFrame},
+                                                      RelativeTo{root}) *
+                transform;
+  }
+
+  Matrix transform2d;
+  if (transform.CanDraw2D(&transform2d)) {
+    return ThebesMatrix(transform2d).ScaleFactors();
+  }
+
+  return gfxSize(1.0, 1.0);
+}
+
 void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
                                      ScrollOrigin aOrigin) {
   // None is never a valid scroll origin to be passed in.
@@ -2912,13 +2946,9 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
   nscoord appUnitsPerDevPixel = presContext->AppUnitsPerDevPixel();
   // 'scale' is our estimate of the scale factor that will be applied
   // when rendering the scrolled content to its own PaintedLayer.
-  gfxSize scale =
-      FrameLayerBuilder::GetPaintedLayerScaleForFrame(mScrolledFrame);
+  gfxSize scale = GetPaintedLayerScaleForFrame(mScrolledFrame);
   nsPoint curPos = GetScrollPosition();
 
-  nsPoint alignWithPos = mScrollPosForLayerPixelAlignment == nsPoint(-1, -1)
-                             ? curPos
-                             : mScrollPosForLayerPixelAlignment;
   // Try to align aPt with curPos so they have an integer number of layer
   // pixels between them. This gives us the best chance of scrolling without
   // having to invalidate due to changes in subpixel rendering.
@@ -2929,9 +2959,8 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
   // and are relative to the scrollport top-left. This difference doesn't
   // actually matter since all we are about is that there be an integer number
   // of layer pixels between pt and curPos.
-  nsPoint pt =
-      ClampAndAlignWithLayerPixels(aPt, GetLayoutScrollRange(), aRange,
-                                   alignWithPos, appUnitsPerDevPixel, scale);
+  nsPoint pt = ClampAndAlignWithLayerPixels(aPt, GetLayoutScrollRange(), aRange,
+                                            curPos, appUnitsPerDevPixel, scale);
   if (pt == curPos) {
     // Even if we are bailing out due to no-op main-thread scroll position
     // change, we might need to cancel an APZ smooth scroll that we already
@@ -2956,7 +2985,8 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
 
   // If we are scrolling the RCD-RSF, and a visual scroll update is pending,
   // cancel it; otherwise, it will clobber this scroll.
-  if (IsRootScrollFrameOfDocument() && presContext->IsRootContentDocument()) {
+  if (IsRootScrollFrameOfDocument() &&
+      presContext->IsRootContentDocumentCrossProcess()) {
     PresShell* ps = presContext->GetPresShell();
     if (const auto& visualScrollUpdate = ps->GetPendingVisualScrollUpdate()) {
       if (visualScrollUpdate->mVisualScrollOffset != aPt) {
@@ -3040,6 +3070,16 @@ void ScrollFrameHelper::ScrollToImpl(nsPoint aPt, const nsRect& aRange,
 
   ScrollVisual();
   mAnchor.UserScrolled();
+
+  // Only report user-triggered scrolling interactions
+  bool jsOnStack = nsContentUtils::GetCurrentJSContext() != nullptr;
+  bool scrollingToAnchor = ScrollingInteractionContext::IsScrollingToAnchor();
+  if (!jsOnStack && !scrollingToAnchor) {
+    nsPoint distanceScrolled(std::abs(pt.x - curPos.x),
+                             std::abs(pt.y - curPos.y));
+    ScrollingMetrics::OnScrollingInteraction(
+        CSSPoint::FromAppUnits(distanceScrolled).Length());
+  }
 
   bool schedulePaint = true;
   if (nsLayoutUtils::AsyncPanZoomEnabled(mOuter) &&
@@ -3363,14 +3403,14 @@ void ScrollFrameHelper::AppendScrollPartsTo(nsDisplayListBuilder* aBuilder,
     // this for the root scrollframe of the root content document, which is
     // zoomable, and where the scrollbar sizes are bounded by the widget.
     const nsRect visible =
-        mIsRoot && mOuter->PresContext()->IsRootContentDocument()
+        mIsRoot && mOuter->PresContext()->IsRootContentDocumentCrossProcess()
             ? scrollParts[i]->InkOverflowRectRelativeToParent()
             : aBuilder->GetVisibleRect();
     if (visible.IsEmpty()) {
       continue;
     }
     const nsRect dirty =
-        mIsRoot && mOuter->PresContext()->IsRootContentDocument()
+        mIsRoot && mOuter->PresContext()->IsRootContentDocumentCrossProcess()
             ? scrollParts[i]->InkOverflowRectRelativeToParent()
             : aBuilder->GetDirtyRect();
 
@@ -3595,16 +3635,6 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
 
   mOuter->DisplayBorderBackgroundOutline(aBuilder, aLists);
 
-  if (aBuilder->IsPaintingToWindow()) {
-    if (IsScrollingActive() && !gfxVars::UseWebRender()) {
-      if (mScrollPosForLayerPixelAlignment == nsPoint(-1, -1)) {
-        mScrollPosForLayerPixelAlignment = GetScrollPosition();
-      }
-    } else {
-      mScrollPosForLayerPixelAlignment = nsPoint(-1, -1);
-    }
-  }
-
   bool isRootContent =
       mIsRoot && mOuter->PresContext()->IsRootContentDocumentCrossProcess();
 
@@ -3663,8 +3693,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   // of the viewport, so most layer implementations would create a layer buffer
   // that's much larger than necessary. Creating independent layers for each
   // scrollbar works around the problem.
-  bool createLayersForScrollbars =
-      mIsRoot && mOuter->PresContext()->IsRootContentDocument();
+  bool createLayersForScrollbars = isRootContent;
 
   nsIScrollableFrame* sf = do_QueryFrame(mOuter);
   MOZ_ASSERT(sf);
@@ -3822,8 +3851,7 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
     // The composition size is essentially in visual coordinates.
     // If we are hit-testing in layout coordinates, transform the clip rect
     // to layout coordinates to match.
-    if (aBuilder->IsRelativeToLayoutViewport() &&
-        mOuter->PresContext()->IsRootContentDocument()) {
+    if (aBuilder->IsRelativeToLayoutViewport() && isRootContent) {
       clipRect = ViewportUtils::VisualToLayout(clipRect, mOuter->PresShell());
     }
   }
@@ -4016,13 +4044,15 @@ void ScrollFrameHelper::BuildDisplayList(nsDisplayListBuilder* aBuilder,
   bool topLayerIsOpaque = false;
   if (nsDisplayWrapList* topLayerWrapList =
           MaybeCreateTopLayerItems(aBuilder, &topLayerIsOpaque)) {
-    // If the top layer content is opaque, and we're the root content document,
-    // we can drop the display items behind it. We only support doing this for
-    // the root document, since the top layer content might have fixed position
-    // items that have a scrolltarget referencing the APZ data for the document.
-    // APZ builds this data implicitly for the root document, but subdocuments
-    // need their display items to generate it, so we can't cull those.
-    if (topLayerIsOpaque && mOuter->PresContext()->IsRootContentDocument()) {
+    // If the top layer content is opaque, and we're the root content document
+    // in the process, we can drop the display items behind it. We only support
+    // doing this for the root content document in the process, since the top
+    // layer content might have fixed position items that have a scrolltarget
+    // referencing the APZ data for the document. APZ builds this data
+    // implicitly for the root content document in the process, but subdocuments
+    // etc need their display items to generate it, so we can't cull those.
+    if (topLayerIsOpaque &&
+        mOuter->PresContext()->IsRootContentDocumentInProcess()) {
       set.DeleteAll(aBuilder);
     }
     set.PositionedDescendants()->AppendToTop(topLayerWrapList);
@@ -4229,7 +4259,7 @@ nsRect ScrollFrameHelper::RestrictToRootDisplayPort(
     // If rootFrame is the RCD-RSF then
     // CalculateCompositionSizeForFrame did not take the document's
     // resolution into account, so we must.
-    if (rootPresContext->IsRootContentDocument() &&
+    if (rootPresContext->IsRootContentDocumentCrossProcess() &&
         rootFrame == rootPresShell->GetRootScrollFrame()) {
       MOZ_LOG(
           sDisplayportLog, LogLevel::Verbose,
@@ -4468,8 +4498,8 @@ void ScrollFrameHelper::NotifyApzTransaction() {
 }
 
 Maybe<ScrollMetadata> ScrollFrameHelper::ComputeScrollMetadata(
-    LayerManager* aLayerManager, const nsIFrame* aContainerReferenceFrame,
-    const Maybe<ContainerLayerParameters>& aParameters,
+    WebRenderLayerManager* aLayerManager,
+    const nsIFrame* aContainerReferenceFrame,
     const DisplayItemClip* aClip) const {
   if (!mWillBuildScrollableLayer) {
     return Nothing();
@@ -4488,36 +4518,7 @@ Maybe<ScrollMetadata> ScrollFrameHelper::ComputeScrollMetadata(
   return Some(nsLayoutUtils::ComputeScrollMetadata(
       mScrolledFrame, mOuter, mOuter->GetContent(), aContainerReferenceFrame,
       aLayerManager, mScrollParentID, mScrollPort.Size(), parentLayerClip,
-      isRootContent, aParameters));
-}
-
-void ScrollFrameHelper::ClipLayerToDisplayPort(
-    Layer* aLayer, const DisplayItemClip* aClip,
-    const ContainerLayerParameters& aParameters) const {
-  // If APZ is not enabled, we still need the displayport to be clipped
-  // in the compositor.
-  if (!nsLayoutUtils::UsesAsyncScrolling(mOuter)) {
-    Maybe<nsRect> parentLayerClip;
-    if (aClip) {
-      parentLayerClip = Some(aClip->GetClipRect());
-    }
-
-    if (parentLayerClip) {
-      ParentLayerIntRect displayportClip =
-          ViewAs<ParentLayerPixel>(parentLayerClip->ScaleToNearestPixels(
-              aParameters.mXScale, aParameters.mYScale,
-              mScrolledFrame->PresContext()->AppUnitsPerDevPixel()));
-
-      ParentLayerIntRect layerClip;
-      if (const ParentLayerIntRect* origClip =
-              aLayer->GetClipRect().ptrOr(nullptr)) {
-        layerClip = displayportClip.Intersect(*origClip);
-      } else {
-        layerClip = displayportClip;
-      }
-      aLayer->SetClipRect(Some(layerClip));
-    }
-  }
+      isRootContent));
 }
 
 bool ScrollFrameHelper::IsRectNearlyVisible(const nsRect& aRect) const {
@@ -6335,9 +6336,8 @@ nsSize ScrollFrameHelper::TrueOuterSize(nsDisplayListBuilder* aBuilder) const {
   // toolbar area here.
   // In case of non WebRender, we expand the size dynamically in
   // MoveScrollbarForLayerMargin in AsyncCompositionManager.cpp.
-  LayerManager* layerManager = aBuilder->GetWidgetLayerManager();
-  if (layerManager &&
-      layerManager->GetBackendType() == layers::LayersBackend::LAYERS_WR) {
+  WebRenderLayerManager* layerManager = aBuilder->GetWidgetLayerManager();
+  if (layerManager) {
     displaySize.height += ViewAs<LayoutDevicePixel>(
         mOuter->PresContext()->GetDynamicToolbarMaxHeight(),
         PixelCastJustification::LayoutDeviceIsScreenForBounds);
@@ -7099,8 +7099,7 @@ nsRect ScrollFrameHelper::GetScrolledRect() const {
   // We snap to layer pixels, so we need to respect the layer's scale.
   nscoord appUnitsPerDevPixel =
       mScrolledFrame->PresContext()->AppUnitsPerDevPixel();
-  gfxSize scale =
-      FrameLayerBuilder::GetPaintedLayerScaleForFrame(mScrolledFrame);
+  gfxSize scale = GetPaintedLayerScaleForFrame(mScrolledFrame);
   if (scale.IsEmpty()) {
     scale = gfxSize(1.0f, 1.0f);
   }

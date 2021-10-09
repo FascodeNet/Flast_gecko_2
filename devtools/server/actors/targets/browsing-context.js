@@ -302,24 +302,6 @@ const browsingContextTargetPrototype = {
     // Used by the ParentProcessTargetActor to list all frames in the Browser Toolbox
     this.watchNewDocShells = false;
 
-    this.traits = {
-      // Supports frame listing via `listFrames` request and `frameUpdate` events
-      // as well as frame switching via `switchToFrame` request
-      frames: true,
-      // Supports the logInPage request.
-      logInPage: true,
-      // Supports watchpoints in the server. We need to keep this trait because target
-      // actors that don't extend BrowsingContextTargetActor (Worker, ContentProcess, …)
-      // might not support watchpoints.
-      watchpoints: true,
-      // Supports back and forward navigation
-      navigation: true,
-      // @backward-compat { version 91 } Starting with Firefox 91,
-      // javascriptEnabled is only read from the parent process and is not set
-      // in the BrowsingContextTargetActor form.
-      javascriptEnabledHandledInParent: true,
-    };
-
     this._workerDescriptorActorList = null;
     this._workerDescriptorActorPool = null;
     this._onWorkerDescriptorActorListChanged = this._onWorkerDescriptorActorListChanged.bind(
@@ -328,8 +310,6 @@ const browsingContextTargetPrototype = {
 
     TargetActorRegistry.registerTargetActor(this);
   },
-
-  traits: null,
 
   // Optional console API listener options (e.g. used by the WebExtensionActor to
   // filter console messages by addonID), set to an empty (no options) object by default.
@@ -364,6 +344,14 @@ const browsingContextTargetPrototype = {
     }
     const form = this.form();
     return this.conn._getOrCreateActor(form.consoleActor);
+  },
+
+  get _memoryActor() {
+    if (this.isDestroyed()) {
+      return null;
+    }
+    const form = this.form();
+    return this.conn._getOrCreateActor(form.memoryActor);
   },
 
   _targetScopedActorPool: null,
@@ -564,6 +552,17 @@ const browsingContextTargetPrototype = {
         // Browsing context targets can compute the isTopLevelTarget flag on the
         // server. But other target actors don't support this yet. See Bug 1709314.
         supportsTopLevelTargetFlag: true,
+        // Supports frame listing via `listFrames` request and `frameUpdate` events
+        // as well as frame switching via `switchToFrame` request
+        frames: true,
+        // Supports the logInPage request.
+        logInPage: true,
+        // Supports watchpoints in the server. We need to keep this trait because target
+        // actors that don't extend BrowsingContextTargetActor (Worker, ContentProcess, …)
+        // might not support watchpoints.
+        watchpoints: true,
+        // Supports back and forward navigation
+        navigation: true,
       },
     };
 
@@ -996,18 +995,6 @@ const browsingContextTargetPrototype = {
     });
   },
 
-  _notifyDocShellDestroyAll() {
-    // Only top level target uses frameUpdate in order to update the iframe dropdown.
-    // This may eventually be replaced by Target listening and target switching.
-    if (!this.isTopLevelTarget) {
-      return;
-    }
-
-    this.emit("frameUpdate", {
-      destroyAll: true,
-    });
-  },
-
   /**
    * Creates and manages the thread actor as part of the Browsing Context Target pool.
    * This sets up the content window for being debugged
@@ -1108,7 +1095,6 @@ const browsingContextTargetPrototype = {
 
     return {
       threadActor: this.threadActor.actorID,
-      traits: this.traits,
     };
   },
 
@@ -1313,6 +1299,15 @@ const browsingContextTargetPrototype = {
     if (typeof options.restoreFocus == "boolean") {
       this._restoreFocus = options.restoreFocus;
     }
+    if (typeof options.recordAllocations == "object") {
+      const actor = this._memoryActor;
+      if (options.recordAllocations == null) {
+        actor.stopRecordingAllocations();
+      } else {
+        actor.attach();
+        actor.startRecordingAllocations(options.recordAllocations);
+      }
+    }
 
     if (reload) {
       this.webNavigation.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE);
@@ -1475,9 +1470,6 @@ const browsingContextTargetPrototype = {
     let reset = false;
 
     if (window == this._originalWindow && !isFrameSwitching) {
-      // Clear the iframe list if the original top-level document changes.
-      this._notifyDocShellDestroyAll();
-
       // If the top level document changes and we are targeting an iframe, we
       // need to reset to the upcoming new top level document. But for this
       // will-navigate event, we will dispatch on the old window. (The inspector

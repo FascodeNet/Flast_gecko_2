@@ -36,6 +36,7 @@ class AccAttributes;
 class AccEvent;
 class AccGroupInfo;
 class ApplicationAccessible;
+class CacheData;
 class DocAccessible;
 class EmbeddedObjCollector;
 class EventTree;
@@ -55,6 +56,8 @@ class TextLeafAccessible;
 class XULLabelAccessible;
 class XULTreeAccessible;
 
+enum class CacheUpdateType;
+
 #ifdef A11Y_LOG
 namespace logging {
 typedef const char* (*GetTreePrefix)(void* aData, LocalAccessible*);
@@ -63,34 +66,6 @@ void Tree(const char* aTitle, const char* aMsgText, LocalAccessible* aRoot,
 void TreeSize(const char* aTitle, const char* aMsgText, LocalAccessible* aRoot);
 };  // namespace logging
 #endif
-
-/**
- * Name type flags.
- */
-enum ENameValueFlag {
-  /**
-   * Name either
-   *  a) present (not empty): !name.IsEmpty()
-   *  b) no name (was missed): name.IsVoid()
-   */
-  eNameOK,
-
-  /**
-   * Name was left empty by the author on purpose:
-   * name.IsEmpty() && !name.IsVoid().
-   */
-  eNoNameOnPurpose,
-
-  /**
-   * Name was computed from the subtree.
-   */
-  eNameFromSubtree,
-
-  /**
-   * Tooltip was used as a name.
-   */
-  eNameFromTooltip
-};
 
 /**
  * Group position (level, position in set and set size).
@@ -186,7 +161,7 @@ class LocalAccessible : public nsISupports, public Accessible {
   /**
    * Get the description of this accessible.
    */
-  virtual void Description(nsString& aDescription);
+  virtual void Description(nsString& aDescription) const override;
 
   /**
    * Get the value of this accessible.
@@ -204,7 +179,7 @@ class LocalAccessible : public nsISupports, public Accessible {
    * Note: aName.IsVoid() when name was left empty by the author on purpose.
    * aName.IsEmpty() when the author missed name, AT can try to repair a name.
    */
-  virtual ENameValueFlag Name(nsString& aName) const;
+  virtual ENameValueFlag Name(nsString& aName) const override;
 
   /**
    * Maps ARIA state attributes to state of accessible. Note the given state
@@ -729,10 +704,10 @@ class LocalAccessible : public nsISupports, public Accessible {
   //////////////////////////////////////////////////////////////////////////////
   // Value (numeric value interface)
 
-  virtual double MaxValue() const;
-  virtual double MinValue() const;
-  virtual double CurValue() const;
-  virtual double Step() const;
+  virtual double MaxValue() const override;
+  virtual double MinValue() const override;
+  virtual double CurValue() const override;
+  virtual double Step() const override;
   virtual bool SetCurValue(double aValue);
 
   //////////////////////////////////////////////////////////////////////////////
@@ -910,6 +885,9 @@ class LocalAccessible : public nsISupports, public Accessible {
 
   virtual bool IsRemote() const override { return false; }
 
+  already_AddRefed<AccAttributes> BundleFieldsForCache(
+      uint64_t aCacheDomain, CacheUpdateType aUpdateType);
+
  protected:
   virtual ~LocalAccessible();
 
@@ -923,7 +901,7 @@ class LocalAccessible : public nsISupports, public Accessible {
    * Return the accessible description provided by native markup. It doesn't
    * take into account ARIA markup used to specify the description.
    */
-  virtual void NativeDescription(nsString& aDescription);
+  void NativeDescription(nsString& aDescription) const;
 
   /**
    * Return object attributes provided by native markup. It doesn't take into
@@ -1092,6 +1070,11 @@ class LocalAccessible : public nsISupports, public Accessible {
    * Return group info.
    */
   AccGroupInfo* GetGroupInfo() const;
+
+  /**
+   * Push fields to cache.
+   */
+  void SendCacheUpdate(uint64_t aCacheDomain);
 
   // Data Members
   nsCOMPtr<nsIContent> mContent;

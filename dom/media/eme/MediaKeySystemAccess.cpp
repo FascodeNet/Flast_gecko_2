@@ -13,6 +13,7 @@
 #include "GMPUtils.h"
 #include "MediaContainerType.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/dom/KeySystemNames.h"
 #include "mozilla/dom/MediaKeySystemAccessBinding.h"
 #include "mozilla/dom/MediaKeySession.h"
 #include "mozilla/dom/MediaSource.h"
@@ -26,7 +27,6 @@
 #include "nsReadableUtils.h"
 #include "nsServiceManagerUtils.h"
 #include "nsUnicharUtils.h"
-#include "VideoUtils.h"
 #include "WebMDecoder.h"
 
 #ifdef XP_WIN
@@ -181,6 +181,24 @@ EMECodecString ToEMEAPICodecString(const nsString& aCodec) {
 // A codec can be decrypted-and-decoded by the CDM, or only decrypted
 // by the CDM and decoded by Gecko. Not both.
 struct KeySystemContainerSupport {
+  KeySystemContainerSupport() = default;
+  ~KeySystemContainerSupport() = default;
+  KeySystemContainerSupport(const KeySystemContainerSupport& aOther) {
+    mCodecsDecoded = aOther.mCodecsDecoded.Clone();
+    mCodecsDecrypted = aOther.mCodecsDecrypted.Clone();
+  }
+  KeySystemContainerSupport& operator=(
+      const KeySystemContainerSupport& aOther) {
+    if (this == &aOther) {
+      return *this;
+    }
+    mCodecsDecoded = aOther.mCodecsDecoded.Clone();
+    mCodecsDecrypted = aOther.mCodecsDecrypted.Clone();
+    return *this;
+  }
+  KeySystemContainerSupport(KeySystemContainerSupport&& aOther) = default;
+  KeySystemContainerSupport& operator=(KeySystemContainerSupport&&) = default;
+
   bool IsSupported() const {
     return !mCodecsDecoded.IsEmpty() || !mCodecsDecrypted.IsEmpty();
   }
@@ -224,6 +242,39 @@ enum class KeySystemFeatureSupport {
 };
 
 struct KeySystemConfig {
+  KeySystemConfig() = default;
+  ~KeySystemConfig() = default;
+  KeySystemConfig(const KeySystemConfig& aOther) {
+    mKeySystem = aOther.mKeySystem;
+    mInitDataTypes = aOther.mInitDataTypes.Clone();
+    mPersistentState = aOther.mPersistentState;
+    mDistinctiveIdentifier = aOther.mDistinctiveIdentifier;
+    mSessionTypes = aOther.mSessionTypes.Clone();
+    mVideoRobustness = aOther.mVideoRobustness.Clone();
+    mAudioRobustness = aOther.mAudioRobustness.Clone();
+    mEncryptionSchemes = aOther.mEncryptionSchemes.Clone();
+    mMP4 = aOther.mMP4;
+    mWebM = aOther.mWebM;
+  }
+  KeySystemConfig& operator=(const KeySystemConfig& aOther) {
+    if (this == &aOther) {
+      return *this;
+    }
+    mKeySystem = aOther.mKeySystem;
+    mInitDataTypes = aOther.mInitDataTypes.Clone();
+    mPersistentState = aOther.mPersistentState;
+    mDistinctiveIdentifier = aOther.mDistinctiveIdentifier;
+    mSessionTypes = aOther.mSessionTypes.Clone();
+    mVideoRobustness = aOther.mVideoRobustness.Clone();
+    mAudioRobustness = aOther.mAudioRobustness.Clone();
+    mEncryptionSchemes = aOther.mEncryptionSchemes.Clone();
+    mMP4 = aOther.mMP4;
+    mWebM = aOther.mWebM;
+    return *this;
+  }
+  KeySystemConfig(KeySystemConfig&&) = default;
+  KeySystemConfig& operator=(KeySystemConfig&&) = default;
+
   nsString mKeySystem;
   nsTArray<nsString> mInitDataTypes;
   KeySystemFeatureSupport mPersistentState =
@@ -242,10 +293,10 @@ static nsTArray<KeySystemConfig> GetSupportedKeySystems() {
   nsTArray<KeySystemConfig> keySystemConfigs;
 
   {
-    const nsCString keySystem = nsLiteralCString(EME_KEY_SYSTEM_CLEARKEY);
+    const nsCString keySystem = nsLiteralCString(kClearKeyKeySystemName);
     if (HavePluginForKeySystem(keySystem)) {
       KeySystemConfig clearkey;
-      clearkey.mKeySystem.AssignLiteral(EME_KEY_SYSTEM_CLEARKEY);
+      clearkey.mKeySystem.AssignLiteral(kClearKeyKeySystemName);
       clearkey.mInitDataTypes.AppendElement(u"cenc"_ns);
       clearkey.mInitDataTypes.AppendElement(u"keyids"_ns);
       clearkey.mInitDataTypes.AppendElement(u"webm"_ns);
@@ -277,14 +328,24 @@ static nsTArray<KeySystemConfig> GetSupportedKeySystems() {
       clearkey.mWebM.SetCanDecrypt(EME_CODEC_OPUS);
       clearkey.mWebM.SetCanDecrypt(EME_CODEC_VP8);
       clearkey.mWebM.SetCanDecrypt(EME_CODEC_VP9);
+
+      if (StaticPrefs::media_clearkey_test_key_systems_enabled()) {
+        // Add testing key systems. These offer the same capabilities as the
+        // base clearkey system, so just clone clearkey and change the name.
+        KeySystemConfig clearkeyWithProtectionQuery{clearkey};
+        clearkeyWithProtectionQuery.mKeySystem.AssignLiteral(
+            kClearKeyWithProtectionQueryKeySystemName);
+        keySystemConfigs.AppendElement(std::move(clearkeyWithProtectionQuery));
+      }
+
       keySystemConfigs.AppendElement(std::move(clearkey));
     }
   }
   {
-    const nsCString keySystem = nsLiteralCString(EME_KEY_SYSTEM_WIDEVINE);
+    const nsCString keySystem = nsLiteralCString(kWidevineKeySystemName);
     if (HavePluginForKeySystem(keySystem)) {
       KeySystemConfig widevine;
-      widevine.mKeySystem.AssignLiteral(EME_KEY_SYSTEM_WIDEVINE);
+      widevine.mKeySystem.AssignLiteral(kWidevineKeySystemName);
       widevine.mInitDataTypes.AppendElement(u"cenc"_ns);
       widevine.mInitDataTypes.AppendElement(u"keyids"_ns);
       widevine.mInitDataTypes.AppendElement(u"webm"_ns);
@@ -337,8 +398,8 @@ static nsTArray<KeySystemConfig> GetSupportedKeySystems() {
       };
 
       for (const auto& data : validationList) {
-        if (java::MediaDrmProxy::IsCryptoSchemeSupported(
-                EME_KEY_SYSTEM_WIDEVINE, data.mMimeType)) {
+        if (java::MediaDrmProxy::IsCryptoSchemeSupported(kWidevineKeySystemName,
+                                                         data.mMimeType)) {
           if (AndroidDecoderModule::SupportsMimeType(data.mMimeType)) {
             data.mSupportType->SetCanDecryptAndDecode(data.mEMECodecType);
           } else {

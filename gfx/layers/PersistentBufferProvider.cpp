@@ -7,8 +7,8 @@
 #include "PersistentBufferProvider.h"
 
 #include "Layers.h"
-#include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/TextureClient.h"
+#include "mozilla/layers/TextureForwarder.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/Maybe.h"
@@ -445,12 +445,18 @@ TextureClient* PersistentBufferProviderShared::GetTextureClient() {
   if (texture->IsReadLocked()) {
     RefPtr<DrawTarget> dt =
         BorrowDrawTarget(IntRect(0, 0, mSize.width, mSize.height));
-    ReturnDrawTarget(dt.forget());
-    texture = GetTexture(mFront);
-    if (!texture) {
-      gfxCriticalNote
-          << "PersistentBufferProviderShared: front buffer unavailable";
-      return nullptr;
+
+    // If we failed to borrow a DrawTarget then all our textures must be read
+    // locked or we failed to create one, so we'll just return the current front
+    // buffer even though that might lead to contention.
+    if (dt) {
+      ReturnDrawTarget(dt.forget());
+      texture = GetTexture(mFront);
+      if (!texture) {
+        gfxCriticalNote
+            << "PersistentBufferProviderShared: front buffer unavailable";
+        return nullptr;
+      }
     }
   } else {
     // If it isn't read locked then make sure it is set as updated, so that we

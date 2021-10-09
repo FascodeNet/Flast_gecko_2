@@ -13,6 +13,8 @@
 
 #include <algorithm>
 
+#include "jsapi.h"
+
 #include "builtin/BigInt.h"
 #include "builtin/Eval.h"
 #include "builtin/SelfHostingDefines.h"
@@ -565,7 +567,7 @@ static MOZ_ALWAYS_INLINE JSString* GetBuiltinTagFast(JSObject* obj,
     return cx->names().objectArray;
   }
 
-  if (clasp == &JSFunction::class_) {
+  if (clasp->isJSFunction()) {
     return cx->names().objectFunction;
   }
 
@@ -1158,9 +1160,8 @@ PlainObject* js::ObjectCreateImpl(JSContext* cx, HandleObject proto,
                                   NewObjectKind newKind) {
   // Give the new object a small number of fixed slots, like we do for empty
   // object literals ({}).
-  gc::AllocKind allocKind = GuessObjectGCKind(0);
-  return NewObjectWithGivenProtoAndKinds<PlainObject>(cx, proto, allocKind,
-                                                      newKind);
+  gc::AllocKind allocKind = NewObjectGCKind();
+  return NewPlainObjectWithProtoAndAllocKind(cx, proto, allocKind, newKind);
 }
 
 PlainObject* js::ObjectCreateWithTemplate(JSContext* cx,
@@ -2139,7 +2140,7 @@ static JSObject* CreateObjectPrototype(JSContext* cx, JSProtoKey key) {
    * prototype of the created object.
    */
   RootedPlainObject objectProto(
-      cx, NewTenuredObjectWithGivenProto<PlainObject>(cx, nullptr));
+      cx, NewPlainObjectWithProto(cx, nullptr, TenuredObject));
   if (!objectProto) {
     return nullptr;
   }
@@ -2161,7 +2162,7 @@ static bool FinishObjectClassInit(JSContext* cx, JS::HandleObject ctor,
 
   /* ES5 15.1.2.1. */
   RootedId evalId(cx, NameToId(cx->names().eval));
-  JSObject* evalobj =
+  JSFunction* evalobj =
       DefineFunction(cx, global, evalId, IndirectEval, 1, JSPROP_RESOLVING);
   if (!evalobj) {
     return false;

@@ -279,7 +279,7 @@ void CanonicalBrowsingContext::MaybeAddAsProgressListener(
 
 void CanonicalBrowsingContext::ReplacedBy(
     CanonicalBrowsingContext* aNewContext,
-    const RemotenessChangeOptions& aRemotenessOptions) {
+    const NavigationIsolationOptions& aRemotenessOptions) {
   MOZ_ASSERT(!aNewContext->mWebProgress);
   MOZ_ASSERT(!aNewContext->mSessionHistory);
   MOZ_ASSERT(IsTop() && aNewContext->IsTop());
@@ -1708,7 +1708,7 @@ void CanonicalBrowsingContext::PendingRemotenessChange::Clear() {
 
 CanonicalBrowsingContext::PendingRemotenessChange::PendingRemotenessChange(
     CanonicalBrowsingContext* aTarget, RemotenessPromise::Private* aPromise,
-    uint64_t aPendingSwitchId, const RemotenessChangeOptions& aOptions)
+    uint64_t aPendingSwitchId, const NavigationIsolationOptions& aOptions)
     : mTarget(aTarget),
       mPromise(aPromise),
       mPendingSwitchId(aPendingSwitchId),
@@ -1744,7 +1744,7 @@ void CanonicalBrowsingContext::SetCurrentBrowserParent(
 
 RefPtr<CanonicalBrowsingContext::RemotenessPromise>
 CanonicalBrowsingContext::ChangeRemoteness(
-    const RemotenessChangeOptions& aOptions, uint64_t aPendingSwitchId) {
+    const NavigationIsolationOptions& aOptions, uint64_t aPendingSwitchId) {
   MOZ_DIAGNOSTIC_ASSERT(IsContent(),
                         "cannot change the process of chrome contexts");
   MOZ_DIAGNOSTIC_ASSERT(
@@ -1858,11 +1858,14 @@ CanonicalBrowsingContext::ChangeRemoteness(
   BrowsingContextGroup* finalGroup =
       aOptions.mReplaceBrowsingContext ? change->mSpecificGroup.get() : Group();
 
+  bool preferUsed =
+      StaticPrefs::browser_tabs_remote_subframesPreferUsed() && !IsTop();
+
   change->mContentParent = ContentParent::GetNewOrUsedLaunchingBrowserProcess(
       /* aRemoteType = */ aOptions.mRemoteType,
       /* aGroup = */ finalGroup,
       /* aPriority = */ hal::PROCESS_PRIORITY_FOREGROUND,
-      /* aPreferUsed = */ false);
+      /* aPreferUsed = */ preferUsed);
   if (!change->mContentParent) {
     change->Cancel(NS_ERROR_FAILURE);
     return promise.forget();
@@ -2551,7 +2554,7 @@ void CanonicalBrowsingContext::RemovePageAwakeRequest() {
 void CanonicalBrowsingContext::CloneDocumentTreeInto(
     CanonicalBrowsingContext* aSource, const nsACString& aRemoteType,
     embedding::PrintData&& aPrintData) {
-  RemotenessChangeOptions options;
+  NavigationIsolationOptions options;
   options.mRemoteType = aRemoteType;
 
   mClonePromise =
@@ -2561,11 +2564,25 @@ void CanonicalBrowsingContext::CloneDocumentTreeInto(
               [source = MaybeDiscardedBrowsingContext{aSource},
                data = std::move(aPrintData)](
                   BrowserParent* aBp) -> RefPtr<GenericNonExclusivePromise> {
+                RefPtr<BrowserBridgeParent> bridge =
+                    aBp->GetBrowserBridgeParent();
                 return aBp->SendCloneDocumentTreeIntoSelf(source, data)
                     ->Then(
                         GetMainThreadSerialEventTarget(), __func__,
-                        [](BrowserParent::CloneDocumentTreeIntoSelfPromise::
-                               ResolveOrRejectValue&& aValue) {
+                        [bridge](
+                            BrowserParent::CloneDocumentTreeIntoSelfPromise::
+                                ResolveOrRejectValue&& aValue) {
+                          // We're cloning a remote iframe, so we created a
+                          // BrowserBridge which makes us register an OOP load
+                          // (see Document::OOPChildLoadStarted), even though
+                          // this isn't a real load. We call
+                          // SendMaybeFireEmbedderLoadEvents here so that we do
+                          // register the end of the load (see
+                          // Document::OOPChildLoadDone).
+                          if (bridge) {
+                            Unused << bridge->SendMaybeFireEmbedderLoadEvents(
+                                EmbedderElementEventType::NoEvent);
+                          }
                           if (aValue.IsResolve() && aValue.ResolveValue()) {
                             return GenericNonExclusivePromise::CreateAndResolve(
                                 true, __func__);

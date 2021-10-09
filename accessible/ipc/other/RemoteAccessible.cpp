@@ -7,6 +7,7 @@
 #include "RemoteAccessible.h"
 #include "mozilla/a11y/DocAccessibleParent.h"
 #include "DocAccessible.h"
+#include "AccAttributes.h"
 #include "mozilla/a11y/DocManager.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/BrowserParent.h"
@@ -30,10 +31,14 @@ uint64_t RemoteAccessible::NativeState() const {
   return state;
 }
 
-uint32_t RemoteAccessible::Name(nsString& aName) const {
-  uint32_t flag;
+ENameValueFlag RemoteAccessible::Name(nsString& aName) const {
+  if (mCachedFields) {
+    return RemoteAccessibleBase<RemoteAccessible>::Name(aName);
+  }
+
+  uint32_t flag = 0;
   Unused << mDoc->SendName(mID, &aName, &flag);
-  return flag;
+  return static_cast<ENameValueFlag>(flag);
 }
 
 void RemoteAccessible::Value(nsString& aValue) const {
@@ -45,6 +50,11 @@ void RemoteAccessible::Help(nsString& aHelp) const {
 }
 
 void RemoteAccessible::Description(nsString& aDesc) const {
+  if (mCachedFields) {
+    RemoteAccessibleBase<RemoteAccessible>::Description(aDesc);
+    return;
+  }
+
   Unused << mDoc->SendDescription(mID, &aDesc);
 }
 
@@ -739,7 +749,11 @@ void RemoteAccessible::AtkKeyBinding(nsString& aBinding) {
   Unused << mDoc->SendAtkKeyBinding(mID, &aBinding);
 }
 
-double RemoteAccessible::CurValue() {
+double RemoteAccessible::CurValue() const {
+  if (mCachedFields) {
+    return RemoteAccessibleBase<RemoteAccessible>::CurValue();
+  }
+
   double val = UnspecifiedNaN<double>();
   Unused << mDoc->SendCurValue(mID, &val);
   return val;
@@ -751,19 +765,31 @@ bool RemoteAccessible::SetCurValue(double aValue) {
   return success;
 }
 
-double RemoteAccessible::MinValue() {
+double RemoteAccessible::MinValue() const {
+  if (mCachedFields) {
+    return RemoteAccessibleBase<RemoteAccessible>::MinValue();
+  }
+
   double val = UnspecifiedNaN<double>();
   Unused << mDoc->SendMinValue(mID, &val);
   return val;
 }
 
-double RemoteAccessible::MaxValue() {
+double RemoteAccessible::MaxValue() const {
+  if (mCachedFields) {
+    return RemoteAccessibleBase<RemoteAccessible>::MaxValue();
+  }
+
   double val = UnspecifiedNaN<double>();
   Unused << mDoc->SendMaxValue(mID, &val);
   return val;
 }
 
-double RemoteAccessible::Step() {
+double RemoteAccessible::Step() const {
+  if (mCachedFields) {
+    return RemoteAccessibleBase<RemoteAccessible>::Step();
+  }
+
   double step = UnspecifiedNaN<double>();
   Unused << mDoc->SendStep(mID, &step);
   return step;

@@ -34,9 +34,9 @@ class WindowProxyHolder;
 
 class nsHTMLDocument : public mozilla::dom::Document {
  protected:
-  typedef mozilla::dom::ReferrerPolicy ReferrerPolicy;
-  typedef mozilla::dom::Document Document;
-  typedef mozilla::Encoding Encoding;
+  using ReferrerPolicy = mozilla::dom::ReferrerPolicy;
+  using Document = mozilla::dom::Document;
+  using Encoding = mozilla::Encoding;
   template <typename T>
   using NotNull = mozilla::NotNull<T>;
 
@@ -175,9 +175,11 @@ class nsHTMLDocument : public mozilla::dom::Document {
                                NotNull<const Encoding*>& aEncoding);
   void TryUserForcedCharset(nsIContentViewer* aCv, nsIDocShell* aDocShell,
                             int32_t& aCharsetSource,
-                            NotNull<const Encoding*>& aEncoding);
+                            NotNull<const Encoding*>& aEncoding,
+                            bool& aForceAutoDetection);
   void TryParentCharset(nsIDocShell* aDocShell, int32_t& charsetSource,
-                        NotNull<const Encoding*>& aEncoding);
+                        NotNull<const Encoding*>& aEncoding,
+                        bool& aForceAutoDetection);
 
   // Load flags of the document's channel
   uint32_t mLoadFlags;

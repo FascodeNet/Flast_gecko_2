@@ -39,7 +39,6 @@ class nsAtom;
 class nsIObserver;
 class SRGBOverrideObserver;
 class gfxTextPerfMetrics;
-struct FontMatchingStats;
 typedef struct FT_LibraryRec_* FT_Library;
 
 namespace mozilla {
@@ -53,7 +52,6 @@ class DrawTarget;
 class SourceSurface;
 class DataSourceSurface;
 class ScaledFont;
-class DrawEventRecorder;
 class VsyncSource;
 class ContentDeviceData;
 class GPUDeviceData;
@@ -137,8 +135,6 @@ inline const char* GetBackendName(mozilla::gfx::BackendType aBackend) {
       return "direct2d 1.1";
     case mozilla::gfx::BackendType::WEBRENDER_TEXT:
       return "webrender text";
-    case mozilla::gfx::BackendType::CAPTURE:
-      return "capture";
     case mozilla::gfx::BackendType::NONE:
       return "none";
     case mozilla::gfx::BackendType::BACKEND_LAST:
@@ -231,8 +227,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   static bool UseWebRender();
 
-  static bool DoesFissionForceWebRender();
-
   static bool UseRemoteCanvas();
 
   static bool IsBackendAccelerated(
@@ -314,7 +308,7 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   const char* GetAzureCanvasBackend() const;
   const char* GetAzureContentBackend() const;
 
-  virtual void GetAzureBackendInfo(mozilla::widget::InfoObject& aObj);
+  void GetAzureBackendInfo(mozilla::widget::InfoObject& aObj);
   void GetApzSupportInfo(mozilla::widget::InfoObject& aObj);
   void GetTilesSupportInfo(mozilla::widget::InfoObject& aObj);
   void GetFrameStats(mozilla::widget::InfoObject& aObj);
@@ -403,8 +397,8 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   gfxFontGroup* CreateFontGroup(
       const mozilla::StyleFontFamilyList& aFontFamilyList,
       const gfxFontStyle* aStyle, nsAtom* aLanguage, bool aExplicitLanguage,
-      gfxTextPerfMetrics* aTextPerf, FontMatchingStats* aFontMatchingStats,
-      gfxUserFontSet* aUserFontSet, gfxFloat aDevToCssSize) const;
+      gfxTextPerfMetrics* aTextPerf, gfxUserFontSet* aUserFontSet,
+      gfxFloat aDevToCssSize) const;
 
   /**
    * Look up a local platform font using the full font face name.
@@ -628,15 +622,10 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    * something about platform settings changes that might have an effect
    * on layout, such as font rendering settings that influence metrics.
    */
-  static void ForceGlobalReflow();
+  enum class NeedsReframe : bool { No, Yes };
+  static void ForceGlobalReflow(NeedsReframe);
 
   static void FlushFontAndWordCaches();
-
-  /**
-   * Returns a 1x1 surface that can be used to create graphics contexts
-   * for measuring text etc as if they will be rendered to the screen
-   */
-  gfxASurface* ScreenReferenceSurface() { return mScreenReferenceSurface; }
 
   /**
    * Returns a 1x1 DrawTarget that can be used for measuring text etc. as
@@ -658,12 +647,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
    * Returns whether the current process should use tiling for layers.
    */
   virtual bool UsesTiling() const;
-
-  /**
-   * Returns whether the content process will use tiling for layers. This is
-   * only used by about:support.
-   */
-  virtual bool ContentUsesTiling() const;
 
   /**
    * Returns a logger if one is available and logging is enabled
@@ -807,8 +790,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   static bool WebRenderPrefEnabled();
   // you probably want to use gfxVars::UseWebRender() instead of this
   static bool WebRenderEnvvarEnabled();
-  // you probably want to use gfxVars::UseWebRender() instead of this
-  static bool WebRenderEnvvarDisabled();
 
   static const char* WebRenderResourcePathOverride();
 
@@ -958,9 +939,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   // max number of entries in word cache
   int32_t mWordCacheMaxEntries;
 
-  uint64_t mTotalPhysicalMemory;
-  uint64_t mTotalVirtualMemory;
-
   // Hardware vsync source. Only valid on parent process
   RefPtr<mozilla::gfx::VsyncSource> mVsyncSource;
 
@@ -996,8 +974,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   static void InitializeCMS();
   static void ShutdownCMS();
 
-  friend void RecordingPrefChanged(const char* aPrefName, void* aClosure);
-
   /**
    * Calling this function will compute and set the ideal tile size for the
    * platform. This will only have an effect in the parent process; child
@@ -1014,7 +990,6 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
   void InitCompositorAccelerationPrefs();
   void InitGPUProcessPrefs();
   virtual void InitPlatformGPUProcessPrefs() {}
-  void InitOMTPConfig();
 
   // Gather telemetry data about the Gfx Platform and send it
   static void ReportTelemetry();
@@ -1048,17 +1023,12 @@ class gfxPlatform : public mozilla::layers::MemoryPressureListener {
 
   nsTArray<mozilla::layers::FrameStats> mFrameStats;
 
-  RefPtr<mozilla::gfx::DrawEventRecorder> mRecorder;
-
   // Backend that we are compositing with. NONE, if no compositor has been
   // created yet.
   mozilla::layers::LayersBackend mCompositorBackend;
 
   int32_t mScreenDepth;
   mozilla::gfx::IntSize mScreenSize;
-
-  // Total number of screen pixels across all monitors.
-  int64_t mScreenPixels;
 
   // An instance of gfxSkipChars which is empty. It is used as the
   // basis for error-case iterators.

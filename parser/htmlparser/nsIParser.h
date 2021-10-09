@@ -101,12 +101,13 @@ class nsIParser : public nsParserBase {
    *  @update  ftang 4/23/99
    *  @param   aCharset- the charest of a document
    *  @param   aCharsetSource- the soure of the chares
-   *  @param   aChannelHadCharset- whether the channel had charset
+   *  @param   aForceAutoDetection- whether Repair Text Encoding menu item was
+   * invoked
    *  @return	 nada
    */
   virtual void SetDocumentCharset(NotNull<const Encoding*> aCharset,
                                   int32_t aSource,
-                                  bool aChannelHadCharset = false) = 0;
+                                  bool aForceAutoDetection = false) = 0;
 
   /**
    * Get the channel associated with this parser
@@ -160,8 +161,7 @@ class nsIParser : public nsParserBase {
   NS_IMETHOD_(bool) IsParserEnabled() override = 0;
   NS_IMETHOD_(bool) IsComplete() = 0;
 
-  NS_IMETHOD Parse(nsIURI* aURL, nsIRequestObserver* aListener = nullptr,
-                   void* aKey = 0, nsDTDMode aMode = eDTDMode_autodetect) = 0;
+  NS_IMETHOD Parse(nsIURI* aURL, void* aKey = nullptr) = 0;
 
   NS_IMETHOD Terminate(void) = 0;
 

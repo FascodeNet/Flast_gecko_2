@@ -10,6 +10,7 @@
 #include "mozilla/dom/FormData.h"
 #include "mozilla/dom/HTMLButtonElementBinding.h"
 #include "nsAttrValueInlines.h"
+#include "nsIContentInlines.h"
 #include "nsGkAtoms.h"
 #include "nsStyleConsts.h"
 #include "nsPresContext.h"
@@ -370,10 +371,9 @@ nsresult HTMLButtonElement::AfterSetAttr(int32_t aNameSpaceID, nsAtom* aName,
       aNameSpaceID, aName, aValue, aOldValue, aSubjectPrincipal, aNotify);
 }
 
-NS_IMETHODIMP
-HTMLButtonElement::SaveState() {
+void HTMLButtonElement::SaveState() {
   if (!mDisabledChanged) {
-    return NS_OK;
+    return;
   }
 
   PresState* state = GetPrimaryPresState();
@@ -383,8 +383,6 @@ HTMLButtonElement::SaveState() {
     state->disabled() = HasAttr(kNameSpaceID_None, nsGkAtoms::disabled);
     state->disabledSet() = true;
   }
-
-  return NS_OK;
 }
 
 bool HTMLButtonElement::RestoreState(PresState* aState) {

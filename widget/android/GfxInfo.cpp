@@ -16,8 +16,6 @@
 
 #include "mozilla/Preferences.h"
 
-#define NS_CRASHREPORTER_CONTRACTID "@mozilla.org/toolkit/crash-reporter;1"
-
 namespace mozilla {
 namespace widget {
 
@@ -652,11 +650,6 @@ nsresult GfxInfo::GetFeatureStatusImpl(
       } else {
         *aStatus = nsIGfxInfo::FEATURE_STATUS_OK;
       }
-      return NS_OK;
-    }
-
-    if (aFeature == FEATURE_WEBRENDER_SOFTWARE) {
-      *aStatus = nsIGfxInfo::FEATURE_ALLOW_ALWAYS;
       return NS_OK;
     }
   }

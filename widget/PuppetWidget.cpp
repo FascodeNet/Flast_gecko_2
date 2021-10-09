@@ -7,7 +7,6 @@
 
 #include "base/basictypes.h"
 
-#include "ClientLayerManager.h"
 #include "gfxPlatform.h"
 #include "nsRefreshDriver.h"
 #include "mozilla/dom/BrowserChild.h"
@@ -15,7 +14,6 @@
 #include "mozilla/Hal.h"
 #include "mozilla/IMEStateManager.h"
 #include "mozilla/layers/APZChild.h"
-#include "mozilla/layers/PLayerTransactionChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/PresShell.h"
@@ -26,7 +24,6 @@
 #include "mozilla/TextEventDispatcher.h"
 #include "mozilla/TextEvents.h"
 #include "mozilla/Unused.h"
-#include "BasicLayers.h"
 #include "PuppetWidget.h"
 #include "nsContentUtils.h"
 #include "nsIWidgetListener.h"
@@ -602,13 +599,7 @@ WindowRenderer* PuppetWidget::GetWindowRenderer() {
     if (XRE_IsParentProcess()) {
       // On the parent process there is no CompositorBridgeChild which confuses
       // some layers code, so we use basic layers instead. Note that we create
-      // a non-retaining layer manager since we don't care about performance.
-      if (StaticPrefs::gfx_basic_layer_manager_force_enabled()) {
-        mWindowRenderer =
-            new BasicLayerManager(BasicLayerManager::BLM_OFFSCREEN);
-      } else {
-        mWindowRenderer = new FallbackRenderer;
-      }
+      mWindowRenderer = new FallbackRenderer;
       return mWindowRenderer;
     }
 
@@ -625,14 +616,9 @@ WindowRenderer* PuppetWidget::GetWindowRenderer() {
 }
 
 bool PuppetWidget::CreateRemoteLayerManager(
-    const std::function<bool(LayerManager*)>& aInitializeFunc) {
-  RefPtr<LayerManager> lm;
+    const std::function<bool(WebRenderLayerManager*)>& aInitializeFunc) {
+  RefPtr<WebRenderLayerManager> lm = new WebRenderLayerManager(this);
   MOZ_ASSERT(mBrowserChild);
-  if (mBrowserChild->GetCompositorOptions().UseWebRender()) {
-    lm = new WebRenderLayerManager(this);
-  } else {
-    lm = new ClientLayerManager(this);
-  }
 
   if (!aInitializeFunc(lm)) {
     return false;
@@ -1023,9 +1009,9 @@ void PuppetWidget::PaintNowIfNeeded() {
 
 void PuppetWidget::OnMemoryPressure(layers::MemoryPressureReason aWhy) {
   if (aWhy != MemoryPressureReason::LOW_MEMORY_ONGOING && !mVisible &&
-      mWindowRenderer && mWindowRenderer->AsLayerManager() &&
+      mWindowRenderer && mWindowRenderer->AsWebRender() &&
       XRE_IsContentProcess()) {
-    mWindowRenderer->AsLayerManager()->ClearCachedResources();
+    mWindowRenderer->AsWebRender()->ClearCachedResources();
   }
 }
 

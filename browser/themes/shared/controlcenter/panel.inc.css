@@ -649,7 +649,7 @@ description#identity-popup-content-verifier,
 
 .permission-popup-permission-item,
 #permission-popup-storage-access-permission-list-header {
-  margin-top: 0.25em;
+  margin-block: 0.25em;
 }
 
 #permission-popup-permission-reload-hint,
@@ -668,8 +668,8 @@ description#identity-popup-content-verifier,
 
 #permission-popup-storage-access-permission-list-hint,
 #permission-popup-storage-access-permission-learn-more {
-  /* Matches offset for items - 3px margin + 16px icon + 10px margin */
-  margin-inline-start: calc(3px + 16px + 10px);
+  /* Matches offset for items - 16px icon + 8px margin */
+  margin-inline-start: calc(16px + 8px);
 }
 
 .protections-popup-category-icon,
@@ -852,7 +852,8 @@ description#identity-popup-content-verifier,
 /* Protection popup footer categories */
 
 #protections-popup-trackers-blocked-counter-box {
-  margin-inline-end: var(--horizontal-padding);
+  margin: var(--arrowpanel-menuitem-margin);
+  padding: var(--arrowpanel-menuitem-padding);
   visibility: hidden;
   opacity: 0;
   transition: opacity 200ms linear;
@@ -1002,11 +1003,6 @@ description#identity-popup-content-verifier,
 
 #protections-popup-footer-protection-type-label {
   margin-inline-end: 0;
-}
-
-#protections-popup-trackers-blocked-counter-box {
-  margin-inline-end: 8px;
-  padding-inline-end: var(--arrowpanel-menuitem-padding-block);
 }
 
 .protections-popup-category:hover,

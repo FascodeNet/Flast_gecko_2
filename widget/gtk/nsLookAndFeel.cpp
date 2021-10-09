@@ -29,6 +29,7 @@
 #include "mozilla/AutoRestore.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/ScopeExit.h"
+#include "mozilla/WidgetUtilsGtk.h"
 #include "ScreenHelperGTK.h"
 #include "nsNativeBasicThemeGTK.h"
 
@@ -90,8 +91,10 @@ nsLookAndFeel::nsLookAndFeel() {
       "notify::gtk-decoration-layout"_ns,
       // Text resolution affects system font and widget sizes.
       "notify::resolution"_ns,
-      // Affects mCaretBlinkTime
+      // These three Affect mCaretBlinkTime
+      "notify::gtk-cursor-blink"_ns,
       "notify::gtk-cursor-blink-time"_ns,
+      "notify::gtk-cursor-blink-timeout"_ns,
       // Affects SelectTextfieldsOnKeyFocus
       "notify::gtk-entry-select-on-focus"_ns,
       // Affects ScrollToClick
@@ -390,7 +393,6 @@ nsresult nsLookAndFeel::PerThemeData::GetColor(ColorID aID,
 
   switch (aID) {
       // These colors don't seem to be used for anything anymore in Mozilla
-      // (except here at least TextSelectBackground and TextSelectForeground)
       // The CSS2 colors below are used.
     case ColorID::WindowBackground:
     case ColorID::WidgetBackground:
@@ -414,14 +416,13 @@ nsresult nsLookAndFeel::PerThemeData::GetColor(ColorID aID,
       aColor = mMozWindowText;
       break;
     case ColorID::WidgetSelectBackground:
-    case ColorID::TextSelectBackground:
     case ColorID::IMESelectedRawTextBackground:
     case ColorID::IMESelectedConvertedTextBackground:
     case ColorID::MozDragtargetzone:
     case ColorID::Highlight:  // preference selected item,
       aColor = mTextSelectedBackground;
       break;
-    case ColorID::TextSelectForeground:
+    case ColorID::Highlighttext:
       if (NS_GET_A(mTextSelectedBackground) < 155) {
         aColor = NS_SAME_AS_FOREGROUND_COLOR;
         break;
@@ -430,14 +431,13 @@ nsresult nsLookAndFeel::PerThemeData::GetColor(ColorID aID,
     case ColorID::WidgetSelectForeground:
     case ColorID::IMESelectedRawTextForeground:
     case ColorID::IMESelectedConvertedTextForeground:
-    case ColorID::Highlighttext:
       aColor = mTextSelectedText;
       break;
-    case ColorID::MozHtmlCellhighlight:
+    case ColorID::Selecteditem:
     case ColorID::MozAccentColor:
       aColor = mAccentColor;
       break;
-    case ColorID::MozHtmlCellhighlighttext:
+    case ColorID::Selecteditemtext:
     case ColorID::MozAccentColorForeground:
       aColor = mAccentColorForeground;
       break;
@@ -667,6 +667,10 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
       EnsureInit();
       aResult = mCaretBlinkTime;
       break;
+    case IntID::CaretBlinkCount:
+      EnsureInit();
+      aResult = mCaretBlinkCount;
+      break;
     case IntID::CaretWidth:
       aResult = 1;
       break;
@@ -866,6 +870,9 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
       aResult = 1;
       break;
     }
+    case IntID::TouchDeviceSupportPresent:
+      aResult = widget::WidgetUtilsGTK::IsTouchDeviceSupportPresent() ? 1 : 0;
+      break;
     default:
       aResult = 0;
       res = NS_ERROR_FAILURE;
@@ -1231,11 +1238,28 @@ void nsLookAndFeel::EnsureInit() {
   g_object_get(settings, "gtk-enable-animations", &enableAnimations, nullptr);
   mPrefersReducedMotion = !enableAnimations;
 
-  gint blink_time;
+  gint blink_time = 0;     // In milliseconds
+  gint blink_timeout = 0;  // in seconds
   gboolean blink;
   g_object_get(settings, "gtk-cursor-blink-time", &blink_time,
-               "gtk-cursor-blink", &blink, nullptr);
-  mCaretBlinkTime = blink ? (int32_t)blink_time : 0;
+               "gtk-cursor-blink-timeout", &blink_timeout, "gtk-cursor-blink",
+               &blink, nullptr);
+  // From
+  // https://docs.gtk.org/gtk3/property.Settings.gtk-cursor-blink-timeout.html:
+  //
+  //     Setting this to zero has the same effect as setting
+  //     GtkSettings:gtk-cursor-blink to FALSE.
+  //
+  mCaretBlinkTime = blink && blink_timeout ? (int32_t)blink_time : 0;
+
+  if (mCaretBlinkTime) {
+    // blink_time * 2 because blink count is a full blink cycle.
+    mCaretBlinkCount =
+        std::max(1, int32_t(std::ceil(float(blink_timeout * 1000) /
+                                      (float(blink_time) * 2.0f))));
+  } else {
+    mCaretBlinkCount = -1;
+  }
 
   mCSDAvailable =
       nsWindow::GtkWindowDecoration() != nsWindow::GTK_DECORATION_NONE;
@@ -1311,17 +1335,8 @@ bool nsLookAndFeel::MatchFirefoxThemeIfNeeded() {
     return false;
   }
 
-  const bool matchesSystem = [&] {
-    switch (StaticPrefs::browser_theme_toolbar_theme()) {
-      case 0:
-        return mSystemTheme.mIsDark;
-      case 1:
-        return !mSystemTheme.mIsDark;
-      default:
-        return true;
-    }
-  }();
-
+  const bool matchesSystem =
+      (ColorSchemeForChrome() == ColorScheme::Dark) == mSystemTheme.mIsDark;
   const bool usingSystem = !mSystemThemeOverridden;
 
   LOGLNF("MatchFirefoxThemeIfNeeded(matchesSystem=%d, usingSystem=%d)\n",

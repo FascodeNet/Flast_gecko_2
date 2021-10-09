@@ -203,13 +203,6 @@ const PREFS_CONFIG = new Map([
     },
   ],
   [
-    "filterAdult",
-    {
-      title: "Remove adult pages from sites, highlights, etc.",
-      value: true,
-    },
-  ],
-  [
     "showSearch",
     {
       title: "Show the Search bar",
@@ -364,19 +357,6 @@ const PREFS_CONFIG = new Map([
         enabled: true,
         // Block specific messages from this local provider
         exclude: [],
-      }),
-    },
-  ],
-  [
-    "asrouter.providers.cfr-fxa",
-    {
-      title: "Configuration for CFR FxA Messages provider",
-      value: JSON.stringify({
-        id: "cfr-fxa",
-        enabled: true,
-        type: "remote-settings",
-        bucket: "cfr-fxa",
-        updateCycleInMs: 3600000,
       }),
     },
   ],

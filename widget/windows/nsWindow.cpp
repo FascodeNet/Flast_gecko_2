@@ -136,6 +136,7 @@
 #include "mozilla/gfx/2D.h"
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/intl/LocaleService.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/WindowsVersion.h"
 #include "mozilla/TextEvents.h"  // For WidgetKeyboardEvent
 #include "mozilla/TextEventDispatcherListener.h"
@@ -581,6 +582,13 @@ namespace mozilla {
 class InitializeVirtualDesktopManagerTask : public Task {
  public:
   InitializeVirtualDesktopManagerTask() : Task(false, kDefaultPriorityValue) {}
+
+#ifdef MOZ_COLLECTING_RUNNABLE_TELEMETRY
+  bool GetName(nsACString& aName) override {
+    aName.AssignLiteral("InitializeVirtualDesktopManagerTask");
+    return true;
+  }
+#endif
 
   virtual bool Run() override {
 #ifndef __MINGW32__
@@ -1140,10 +1148,6 @@ void nsWindow::Destroy() {
    */
   DestroyLayerManager();
 
-  /* We should clear our cached resources now and not wait for the GC to
-   * delete the nsWindow. */
-  ClearCachedResources();
-
   InputDeviceUtils::UnregisterNotification(mDeviceNotifyHandle);
   mDeviceNotifyHandle = nullptr;
 
@@ -1698,10 +1702,6 @@ void nsWindow::Show(bool bState) {
     mOldStyle |= WS_VISIBLE;
   else
     mOldStyle &= ~WS_VISIBLE;
-
-  if (!mIsVisible && wasVisible) {
-    ClearCachedResources();
-  }
 
   if (mWnd) {
     if (bState) {
@@ -4106,7 +4106,7 @@ WindowRenderer* nsWindow::GetWindowRenderer() {
         reinterpret_cast<uintptr_t>(static_cast<nsIWidget*>(this)),
         mTransparencyMode, mSizeMode);
     // If we're not using the compositor, the options don't actually matter.
-    CompositorOptions options(false, false, false);
+    CompositorOptions options(false, false);
     mBasicLayersSurface =
         new InProcessWinCompositorWidget(initData, options, this);
     mCompositorWidgetDelegate = mBasicLayersSurface;
@@ -4202,30 +4202,15 @@ nsresult nsWindow::OnDefaultButtonLoaded(
 
 void nsWindow::UpdateThemeGeometries(
     const nsTArray<ThemeGeometry>& aThemeGeometries) {
-  RefPtr<LayerManager> layerManager =
-      GetWindowRenderer() ? GetWindowRenderer()->AsLayerManager() : nullptr;
+  RefPtr<WebRenderLayerManager> layerManager =
+      GetWindowRenderer() ? GetWindowRenderer()->AsWebRender() : nullptr;
   if (!layerManager) {
     return;
   }
 
-  nsIntRegion clearRegion;
   if (!HasGlass() ||
       !gfxWindowsPlatform::GetPlatform()->DwmCompositionEnabled()) {
-    // Make sure and clear old regions we've set previously. Note HasGlass can
-    // be false for glass desktops if the window we are rendering to doesn't
-    // make use of glass (e.g. fullscreen browsing).
-    layerManager->SetRegionToClear(clearRegion);
     return;
-  }
-
-  // On Win10, force show the top border:
-  if (IsWin10OrLater() && mCustomNonClient && mSizeMode == nsSizeMode_Normal) {
-    RECT rect;
-    ::GetWindowRect(mWnd, &rect);
-    // We want 1 pixel of border for every whole 100% of scaling
-    double borderSize = std::min(1, RoundDown(GetDesktopToDeviceScale().scale));
-    clearRegion.Or(clearRegion, gfx::IntRect::Truncate(
-                                    0, 0, rect.right - rect.left, borderSize));
   }
 
   mWindowButtonsRect = Nothing();
@@ -4242,20 +4227,9 @@ void nsWindow::UpdateThemeGeometries(
         if (!mWindowButtonsRect) {
           mWindowButtonsRect = Some(bounds);
         }
-        clearRegion.Or(clearRegion, gfx::IntRect::Truncate(
-                                        bounds.X(), bounds.Y(), bounds.Width(),
-                                        bounds.Height() - 2.0));
-        clearRegion.Or(clearRegion, gfx::IntRect::Truncate(
-                                        bounds.X() + 1.0, bounds.YMost() - 2.0,
-                                        bounds.Width() - 2.0, 1.0));
-        clearRegion.Or(clearRegion, gfx::IntRect::Truncate(
-                                        bounds.X() + 2.0, bounds.YMost() - 1.0,
-                                        bounds.Width() - 4.0, 1.0));
       }
     }
   }
-
-  layerManager->SetRegionToClear(clearRegion);
 }
 
 void nsWindow::AddWindowOverlayWebRenderCommands(
@@ -5048,17 +5022,6 @@ const char16_t* GetQuitType() {
   return nullptr;
 }
 
-static void ForceFontUpdate() {
-  // update device context font cache
-  // Dirty but easiest way:
-  // Changing nsIPrefBranch entry which triggers callbacks
-  // and flows into calling mDeviceContext->FlushFontCache()
-  // to update the font cache in all the instance of Browsers
-  static const char kPrefName[] = "font.internaluseonly.changed";
-  bool fontInternalChange = Preferences::GetBool(kPrefName, false);
-  Preferences::SetBool(kPrefName, !fontInternalChange);
-}
-
 bool nsWindow::ExternalHandlerProcessMessage(UINT aMessage, WPARAM& aWParam,
                                              LPARAM& aLParam,
                                              MSGResult& aResult) {
@@ -5231,7 +5194,9 @@ bool nsWindow::ProcessMessage(UINT msg, WPARAM& wParam, LPARAM& lParam,
           do_GetService("@mozilla.org/gfx/fontenumerator;1", &rv);
       if (NS_SUCCEEDED(rv)) {
         fontEnum->UpdateFontList(&didChange);
-        ForceFontUpdate();
+        if (didChange) {
+          gfxPlatform::ForceGlobalReflow(gfxPlatform::NeedsReframe::Yes);
+        }
       }  // if (NS_SUCCEEDED(rv))
     } break;
 
@@ -8031,22 +7996,6 @@ VOID CALLBACK nsWindow::HookTimerForPopups(HWND hwnd, UINT uMsg, UINT idEvent,
   }
 }
 
-BOOL CALLBACK nsWindow::ClearResourcesCallback(HWND aWnd, LPARAM aMsg) {
-  nsWindow* window = WinUtils::GetNSWindowPtr(aWnd);
-  if (window) {
-    window->ClearCachedResources();
-  }
-  return TRUE;
-}
-
-void nsWindow::ClearCachedResources() {
-  if (mWindowRenderer &&
-      mWindowRenderer->GetBackendType() == LayersBackend::LAYERS_BASIC) {
-    mWindowRenderer->AsLayerManager()->ClearCachedResources();
-  }
-  ::EnumChildWindows(mWnd, nsWindow::ClearResourcesCallback, 0);
-}
-
 static bool IsDifferentThreadWindow(HWND aWnd) {
   return ::GetCurrentThreadId() != ::GetWindowThreadProcessId(aWnd, nullptr);
 }
@@ -8633,6 +8582,11 @@ static MouseButton PenFlagsToMouseButton(PEN_FLAGS aPenFlags) {
 }
 
 bool nsWindow::OnPointerEvents(UINT msg, WPARAM aWParam, LPARAM aLParam) {
+  if (!mAPZC) {
+    // APZ is not available on context menu. Follow the behavior of touch input
+    // which fallbacks to WM_LBUTTON* and WM_GESTURE, to keep consistency.
+    return false;
+  }
   if (!mPointerEvents.ShouldHandleWinPointerMessages(msg, aWParam)) {
     return false;
   }

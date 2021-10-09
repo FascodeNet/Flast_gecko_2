@@ -26,6 +26,7 @@
 #include "nsCompatibility.h"
 #include "nsCoord.h"
 #include "nsCOMPtr.h"
+#include "nsFontMetrics.h"
 #include "nsHashKeys.h"
 #include "nsRect.h"
 #include "nsStringFwd.h"
@@ -58,13 +59,13 @@ class gfxUserFontSet;
 class gfxTextPerfMetrics;
 class nsCSSFontFeatureValuesRule;
 class nsCSSFrameConstructor;
+class nsFontCache;
 class nsTransitionManager;
 class nsAnimationManager;
 class nsRefreshDriver;
 class nsIWidget;
 class nsDeviceContext;
 class gfxMissingFontRecorder;
-struct FontMatchingStats;
 
 namespace mozilla {
 class AnimationEventDispatcher;
@@ -153,6 +154,35 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
    * Initialize the presentation context from a particular device.
    */
   nsresult Init(nsDeviceContext* aDeviceContext);
+
+  /*
+   * Initialize the font cache if it hasn't been initialized yet.
+   * (Needed for stylo)
+   */
+  void InitFontCache();
+
+  void UpdateFontCacheUserFonts(gfxUserFontSet* aUserFontSet);
+
+  /**
+   * Get the nsFontMetrics that describe the properties of
+   * an nsFont.
+   * @param aFont font description to obtain metrics for
+   */
+  already_AddRefed<nsFontMetrics> GetMetricsFor(
+      const nsFont& aFont, const nsFontMetrics::Params& aParams);
+
+  /**
+   * Notification when a font metrics instance created for this context is
+   * about to be deleted
+   */
+  nsresult FontMetricsDeleted(const nsFontMetrics* aFontMetrics);
+
+  /**
+   * Attempt to free up resources by flushing out any fonts no longer
+   * referenced by anything other than the font cache itself.
+   * @return error status
+   */
+  nsresult FlushFontCache();
 
   /**
    * Set and detach presentation shell that this context is bound to.
@@ -839,7 +869,6 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   }
 
   gfxTextPerfMetrics* GetTextPerfMetrics() { return mTextPerf.get(); }
-  FontMatchingStats* GetFontMatchingStats() { return mFontStats.get(); }
 
   bool IsDynamic() {
     return (mType == eContext_PageLayout || mType == eContext_Galley);
@@ -907,14 +936,6 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   void FireDOMPaintEvent(nsTArray<nsRect>* aList, TransactionId aTransactionId,
                          mozilla::TimeStamp aTimeStamp = mozilla::TimeStamp());
 
-  // Callback for catching invalidations in ContainerLayers
-  // Passed to LayerProperties::ComputeDifference
-  static void NotifySubDocInvalidation(
-      mozilla::layers::ContainerLayer* aContainer, const nsIntRegion* aRegion);
-  void SetNotifySubDocInvalidationData(
-      mozilla::layers::ContainerLayer* aContainer);
-  static void ClearNotifySubDocInvalidationData(
-      mozilla::layers::ContainerLayer* aContainer);
   bool IsDOMPaintEventPending();
 
   /**
@@ -1076,9 +1097,6 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   static void PreferenceChanged(const char* aPrefName, void* aSelf);
   void PreferenceChanged(const char* aPrefName);
 
-  void UpdateAfterPreferencesChanged();
-  void DispatchPrefChangedRunnableIfNeeded();
-
   void GetUserPreferences();
 
   void UpdateCharSet(NotNull<const Encoding*> aCharSet);
@@ -1086,19 +1104,12 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
  public:
   // Used by the PresShell to force a reflow when some aspect of font info
   // has been updated, potentially affecting font selection and layout.
-  void ForceReflowForFontInfoUpdate();
+  void ForceReflowForFontInfoUpdate(bool aNeedsReframe);
 
   /**
    * Checks for MozAfterPaint listeners on the document
    */
   bool MayHavePaintEventListener();
-
-  /**
-   * Checks for MozAfterPaint listeners on the document and
-   * any subdocuments, except for subdocuments that are non-top-level
-   * content documents.
-   */
-  bool MayHavePaintEventListenerInSubDocument();
 
   void InvalidatePaintedLayers();
 
@@ -1151,6 +1162,7 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
                                            // Cannot reintroduce cycles
                                            // since there is no dependency
                                            // from gfx back to layout.
+  RefPtr<nsFontCache> mFontCache;
   RefPtr<mozilla::EventStateManager> mEventManager;
   RefPtr<nsRefreshDriver> mRefreshDriver;
   RefPtr<mozilla::AnimationEventDispatcher> mAnimationEventDispatcher;
@@ -1184,8 +1196,6 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
 
   // text performance metrics
   mozilla::UniquePtr<gfxTextPerfMetrics> mTextPerf;
-
-  mozilla::UniquePtr<FontMatchingStats> mFontStats;
 
   mozilla::UniquePtr<gfxMissingFontRecorder> mMissingFonts;
 
@@ -1246,8 +1256,6 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   // last time we did a full style flush
   mozilla::TimeStamp mLastStyleUpdateForAllAnimations;
 
-  nsChangeHint mChangeHintForPrefChange;
-
   uint32_t mInterruptChecksToSkip;
 
   // During page load we use slower frame rate.
@@ -1296,7 +1304,6 @@ class nsPresContext : public nsISupports, public mozilla::SupportsWeakPtr {
   // widget::ThemeChangeKind
   unsigned mPendingThemeChangeKind : kThemeChangeKindBits;
   unsigned mPendingUIResolutionChanged : 1;
-  unsigned mPostedPrefChangedRunnable : 1;
 
   // Are we currently drawing an SVG glyph?
   unsigned mIsGlyph : 1;

@@ -14,7 +14,6 @@
 #include "mozilla/ipc/ProtocolUtils.h"
 #include "mozilla/layers/PCompositorBridgeChild.h"
 #include "mozilla/layers/TextureForwarder.h"  // for TextureForwarder
-#include "mozilla/layers/PaintThread.h"       // for PaintThread
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "nsClassHashtable.h"  // for nsClassHashtable
 #include "nsCOMPtr.h"          // for nsCOMPtr
@@ -46,11 +45,10 @@ using mozilla::dom::BrowserChild;
 class IAPZCTreeManager;
 class APZCTreeManagerChild;
 class CanvasChild;
-class ClientLayerManager;
 class CompositorBridgeParent;
 class CompositorManagerChild;
 class CompositorOptions;
-class LayerManager;
+class WebRenderLayerManager;
 class TextureClient;
 class TextureClientPool;
 struct FrameMetrics;
@@ -71,18 +69,10 @@ class CompositorBridgeChild final : public PCompositorBridgeChild,
    */
   void InitForContent(uint32_t aNamespace);
 
-  void InitForWidget(uint64_t aProcessToken, LayerManager* aLayerManager,
-                     uint32_t aNamespace);
+  void InitForWidget(uint64_t aProcessToken,
+                     WebRenderLayerManager* aLayerManager, uint32_t aNamespace);
 
   void Destroy();
-
-  /**
-   * Lookup the FrameMetrics shared by the compositor process with the
-   * associated ScrollableLayerGuid::ViewID. The returned FrameMetrics is used
-   * in progressive paint calculations.
-   */
-  bool LookupCompositorFrameMetrics(const ScrollableLayerGuid::ViewID aId,
-                                    FrameMetrics&);
 
   static CompositorBridgeChild* Get();
 
@@ -217,19 +207,6 @@ class CompositorBridgeChild final : public PCompositorBridgeChild,
 
   wr::PipelineId GetNextPipelineId();
 
-  // Must only be called from the main thread. Ensures that any paints from
-  // previous frames have been flushed. The main thread blocks until the
-  // operation completes.
-  void FlushAsyncPaints();
-
-  // Must only be called from the main thread. Notifies the CompositorBridge
-  // that the paint thread is going to begin painting asynchronously.
-  void NotifyBeginAsyncPaint(PaintTask* aTask);
-
-  // Must only be called from the paint thread. Notifies the CompositorBridge
-  // that the paint thread has finished an asynchronous paint request.
-  bool NotifyFinishedAsyncWorkerPaint(PaintTask* aTask);
-
   // Must only be called from the main thread. Notifies the CompositorBridge
   // that all work has been submitted to the paint thread or paint worker
   // threads, and returns whether all paints are completed. If this returns
@@ -243,11 +220,6 @@ class CompositorBridgeChild final : public PCompositorBridgeChild,
   // requested texture sync and resume sending messages.
   void NotifyFinishedAsyncEndLayerTransaction();
 
-  // Must only be called from the main thread. Notifies the CompoistorBridge
-  // that a transaction is about to be sent, and if the paint thread is
-  // currently painting, to begin delaying IPC messages.
-  void PostponeMessagesIfAsyncPainting();
-
  private:
   // Private destructor, to discourage deletion outside of Release():
   virtual ~CompositorBridgeChild();
@@ -260,20 +232,7 @@ class CompositorBridgeChild final : public PCompositorBridgeChild,
   void PrepareFinalDestroy();
   void AfterDestroy();
 
-  PLayerTransactionChild* AllocPLayerTransactionChild(
-      const nsTArray<LayersBackend>& aBackendHints, const LayersId& aId);
-
-  bool DeallocPLayerTransactionChild(PLayerTransactionChild* aChild);
-
   void ActorDestroy(ActorDestroyReason aWhy) override;
-
-  mozilla::ipc::IPCResult RecvSharedCompositorFrameMetrics(
-      const mozilla::ipc::SharedMemoryBasic::Handle& metrics,
-      const CrossProcessMutexHandle& handle, const LayersId& aLayersId,
-      const uint32_t& aAPZCId);
-
-  mozilla::ipc::IPCResult RecvReleaseSharedCompositorFrameMetrics(
-      const ViewID& aId, const uint32_t& aAPZCId);
 
   mozilla::ipc::IPCResult RecvObserveLayersUpdate(
       const LayersId& aLayersId, const LayersObserverEpoch& aEpoch,
@@ -284,37 +243,9 @@ class CompositorBridgeChild final : public PCompositorBridgeChild,
 
   uint64_t GetNextResourceId();
 
-  void ClearSharedFrameMetricsData(LayersId aLayersId);
-
-  // Class used to store the shared FrameMetrics, mutex, and APZCId  in a hash
-  // table
-  class SharedFrameMetricsData final {
-   public:
-    SharedFrameMetricsData(
-        const mozilla::ipc::SharedMemoryBasic::Handle& metrics,
-        const CrossProcessMutexHandle& handle, const LayersId& aLayersId,
-        const uint32_t& aAPZCId);
-
-    ~SharedFrameMetricsData();
-
-    void CopyFrameMetrics(FrameMetrics* aFrame);
-    ScrollableLayerGuid::ViewID GetViewID();
-    LayersId GetLayersId() const;
-    uint32_t GetAPZCId();
-
-   private:
-    // Pointer to the class that allows access to the shared memory that
-    // contains the shared FrameMetrics
-    RefPtr<mozilla::ipc::SharedMemoryBasic> mBuffer;
-    CrossProcessMutex* mMutex;
-    LayersId mLayersId;
-    // Unique ID of the APZC that is sharing the FrameMetrics
-    uint32_t mAPZCId;
-  };
-
   RefPtr<CompositorManagerChild> mCompositorManager;
 
-  RefPtr<LayerManager> mLayerManager;
+  RefPtr<WebRenderLayerManager> mLayerManager;
 
   uint32_t mIdNamespace;
   uint32_t mResourceId;
@@ -322,10 +253,6 @@ class CompositorBridgeChild final : public PCompositorBridgeChild,
   // When not multi-process, hold a reference to the CompositorBridgeParent to
   // keep it alive. This reference should be null in multi-process.
   RefPtr<CompositorBridgeParent> mCompositorBridgeParent;
-
-  // The ViewID of the FrameMetrics is used as the key for this hash table.
-  // While this should be safe to use since the ViewID is unique
-  nsClassHashtable<nsUint64HashKey, SharedFrameMetricsData> mFrameMetricsTable;
 
   DISALLOW_EVIL_CONSTRUCTORS(CompositorBridgeChild);
 

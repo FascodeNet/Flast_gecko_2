@@ -282,141 +282,130 @@ static bool GetFilenameAndExtensionFromChannel(nsIChannel* aChannel,
  */
 static nsresult GetDownloadDirectory(nsIFile** _directory,
                                      bool aSkipChecks = false) {
-  nsCOMPtr<nsIFile> dir;
-#ifdef XP_MACOSX
-  // On OS X, we first try to get the users download location, if it's set.
-  switch (Preferences::GetInt(NS_PREF_DOWNLOAD_FOLDERLIST, -1)) {
-    case NS_FOLDER_VALUE_DESKTOP:
-      (void)NS_GetSpecialDirectory(NS_OS_DESKTOP_DIR, getter_AddRefs(dir));
-      break;
-    case NS_FOLDER_VALUE_CUSTOM: {
-      Preferences::GetComplex(NS_PREF_DOWNLOAD_DIR, NS_GET_IID(nsIFile),
-                              getter_AddRefs(dir));
-      if (!dir) break;
-
-      // If we're not checking for availability we're done.
-      if (aSkipChecks) {
-        dir.forget(_directory);
-        return NS_OK;
-      }
-
-      // We have the directory, and now we need to make sure it exists
-      bool dirExists = false;
-      (void)dir->Exists(&dirExists);
-      if (dirExists) break;
-
-      nsresult rv = dir->Create(nsIFile::DIRECTORY_TYPE, 0755);
-      if (NS_FAILED(rv)) {
-        dir = nullptr;
-        break;
-      }
-    } break;
-    case NS_FOLDER_VALUE_DOWNLOADS:
-      // This is just the OS default location, so fall out
-      break;
-  }
-
-  if (!dir) {
-    // If not, we default to the OS X default download location.
-    nsresult rv = NS_GetSpecialDirectory(NS_OSX_DEFAULT_DOWNLOAD_DIR,
-                                         getter_AddRefs(dir));
-    NS_ENSURE_SUCCESS(rv, rv);
-  }
-#elif defined(ANDROID)
+#if defined(ANDROID)
   return NS_ERROR_FAILURE;
-#elif defined(XP_WIN)
-  // On windows, use default downloads directory if pref is set
-  const char* directory_to_save_file =
-      StaticPrefs::browser_download_improvements_to_download_panel()
-          ? NS_WIN_DEFAULT_DOWNLOAD_DIR
-          : NS_OS_TEMP_DIR;
-  nsresult rv =
-      NS_GetSpecialDirectory(directory_to_save_file, getter_AddRefs(dir));
-  NS_ENSURE_SUCCESS(rv, rv);
-#elif defined(XP_UNIX)
-  // On unix, use default downloads directory if pref is set
-  const char* directory_to_save_file =
-      StaticPrefs::browser_download_improvements_to_download_panel()
-          ? NS_UNIX_DEFAULT_DOWNLOAD_DIR
-          : NS_OS_TEMP_DIR;
-  nsresult rv =
-      NS_GetSpecialDirectory(directory_to_save_file, getter_AddRefs(dir));
-  NS_ENSURE_SUCCESS(rv, rv);
-#else
-  // On all other platforms, we default to the systems temporary directory.
-  nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(dir));
-  NS_ENSURE_SUCCESS(rv, rv);
+#endif
 
-#  if defined(XP_UNIX)
-  // Ensuring that only the current user can read the file names we end up
-  // creating. Note that Creating directories with specified permission only
-  // supported on Unix platform right now. That's why above if exists.
+  bool usePrefDir =
+      StaticPrefs::browser_download_improvements_to_download_panel();
+#ifdef XP_MACOSX
+  usePrefDir = true;
+#endif
 
-  uint32_t permissions;
-  rv = dir->GetPermissions(&permissions);
-  NS_ENSURE_SUCCESS(rv, rv);
+  nsCOMPtr<nsIFile> dir;
+  nsresult rv;
+  if (usePrefDir) {
+    // Try to get the users download location, if it's set.
+    switch (Preferences::GetInt(NS_PREF_DOWNLOAD_FOLDERLIST, -1)) {
+      case NS_FOLDER_VALUE_DESKTOP:
+        (void)NS_GetSpecialDirectory(NS_OS_DESKTOP_DIR, getter_AddRefs(dir));
+        break;
+      case NS_FOLDER_VALUE_CUSTOM: {
+        Preferences::GetComplex(NS_PREF_DOWNLOAD_DIR, NS_GET_IID(nsIFile),
+                                getter_AddRefs(dir));
+        if (!dir) break;
 
-  if (permissions != PR_IRWXU) {
-    const char* userName = PR_GetEnv("USERNAME");
-    if (!userName || !*userName) {
-      userName = PR_GetEnv("USER");
+        // If we're not checking for availability we're done.
+        if (aSkipChecks) {
+          dir.forget(_directory);
+          return NS_OK;
+        }
+
+        // We have the directory, and now we need to make sure it exists
+        bool dirExists = false;
+        (void)dir->Exists(&dirExists);
+        if (dirExists) break;
+
+        nsresult rv = dir->Create(nsIFile::DIRECTORY_TYPE, 0755);
+        if (NS_FAILED(rv)) {
+          dir = nullptr;
+          break;
+        }
+      } break;
+      case NS_FOLDER_VALUE_DOWNLOADS:
+        // This is just the OS default location, so fall out
+        break;
     }
-    if (!userName || !*userName) {
-      userName = PR_GetEnv("LOGNAME");
-    }
-    if (!userName || !*userName) {
-      userName = "mozillaUser";
-    }
-
-    nsAutoString userDir;
-    userDir.AssignLiteral("mozilla_");
-    userDir.AppendASCII(userName);
-    userDir.ReplaceChar(FILE_PATH_SEPARATOR FILE_ILLEGAL_CHARACTERS, '_');
-
-    int counter = 0;
-    bool pathExists;
-    nsCOMPtr<nsIFile> finalPath;
-
-    while (true) {
-      nsAutoString countedUserDir(userDir);
-      countedUserDir.AppendInt(counter, 10);
-      dir->Clone(getter_AddRefs(finalPath));
-      finalPath->Append(countedUserDir);
-
-      rv = finalPath->Exists(&pathExists);
+    if (!dir) {
+      rv = NS_GetSpecialDirectory(NS_OS_DEFAULT_DOWNLOAD_DIR,
+                                  getter_AddRefs(dir));
       NS_ENSURE_SUCCESS(rv, rv);
+    }
+  } else {
+    rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(dir));
+    NS_ENSURE_SUCCESS(rv, rv);
 
-      if (pathExists) {
-        // If this path has the right permissions, use it.
-        rv = finalPath->GetPermissions(&permissions);
+#if !defined(XP_MACOSX) && defined(XP_UNIX)
+    // Ensuring that only the current user can read the file names we end up
+    // creating. Note that creating directories with a specified permission is
+    // only supported on Unix platform right now. That's why the above check
+    // exists.
+
+    uint32_t permissions;
+    rv = dir->GetPermissions(&permissions);
+    NS_ENSURE_SUCCESS(rv, rv);
+
+    if (permissions != PR_IRWXU) {
+      const char* userName = PR_GetEnv("USERNAME");
+      if (!userName || !*userName) {
+        userName = PR_GetEnv("USER");
+      }
+      if (!userName || !*userName) {
+        userName = PR_GetEnv("LOGNAME");
+      }
+      if (!userName || !*userName) {
+        userName = "mozillaUser";
+      }
+
+      nsAutoString userDir;
+      userDir.AssignLiteral("mozilla_");
+      userDir.AppendASCII(userName);
+      userDir.ReplaceChar(FILE_PATH_SEPARATOR FILE_ILLEGAL_CHARACTERS, '_');
+
+      int counter = 0;
+      bool pathExists;
+      nsCOMPtr<nsIFile> finalPath;
+
+      while (true) {
+        nsAutoString countedUserDir(userDir);
+        countedUserDir.AppendInt(counter, 10);
+        dir->Clone(getter_AddRefs(finalPath));
+        finalPath->Append(countedUserDir);
+
+        rv = finalPath->Exists(&pathExists);
         NS_ENSURE_SUCCESS(rv, rv);
 
-        // Ensuring the path is writable by the current user.
-        bool isWritable;
-        rv = finalPath->IsWritable(&isWritable);
-        NS_ENSURE_SUCCESS(rv, rv);
+        if (pathExists) {
+          // If this path has the right permissions, use it.
+          rv = finalPath->GetPermissions(&permissions);
+          NS_ENSURE_SUCCESS(rv, rv);
 
-        if (permissions == PR_IRWXU && isWritable) {
+          // Ensuring the path is writable by the current user.
+          bool isWritable;
+          rv = finalPath->IsWritable(&isWritable);
+          NS_ENSURE_SUCCESS(rv, rv);
+
+          if (permissions == PR_IRWXU && isWritable) {
+            dir = finalPath;
+            break;
+          }
+        }
+
+        rv = finalPath->Create(nsIFile::DIRECTORY_TYPE, PR_IRWXU);
+        if (NS_SUCCEEDED(rv)) {
           dir = finalPath;
           break;
         }
+        if (rv != NS_ERROR_FILE_ALREADY_EXISTS) {
+          // Unexpected error.
+          return rv;
+        }
+        counter++;
       }
-
-      rv = finalPath->Create(nsIFile::DIRECTORY_TYPE, PR_IRWXU);
-      if (NS_SUCCEEDED(rv)) {
-        dir = finalPath;
-        break;
-      } else if (rv != NS_ERROR_FILE_ALREADY_EXISTS) {
-        // Unexpected error.
-        return rv;
-      }
-
-      counter++;
     }
-  }
 
-#  endif
 #endif
+  }
 
   NS_ASSERTION(dir, "Somehow we didn't get a download directory!");
   dir.forget(_directory);
@@ -1694,6 +1683,11 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
     aChannel->GetURI(getter_AddRefs(mSourceUrl));
   }
 
+  if (StaticPrefs::browser_download_improvements_to_download_panel() &&
+      IsDownloadSpam(aChannel)) {
+    return NS_OK;
+  }
+
   mDownloadClassification =
       nsContentSecurityUtils::ClassifyDownload(aChannel, MIMEType);
 
@@ -1967,6 +1961,62 @@ NS_IMETHODIMP nsExternalAppHandler::OnStartRequest(nsIRequest* request) {
     }
   }
   return NS_OK;
+}
+
+bool nsExternalAppHandler::IsDownloadSpam(nsIChannel* aChannel) {
+  nsCOMPtr<nsILoadInfo> loadInfo = aChannel->LoadInfo();
+
+  if (loadInfo->GetHasValidUserGestureActivation()) {
+    return false;
+  }
+
+  nsCOMPtr<nsIPermissionManager> permissionManager =
+      mozilla::services::GetPermissionManager();
+  nsCOMPtr<nsIPrincipal> principal = loadInfo->TriggeringPrincipal();
+  bool exactHostMatch = false;
+  constexpr auto type = "automatic-download"_ns;
+  nsCOMPtr<nsIPermission> permission;
+
+  permissionManager->GetPermissionObject(principal, type, exactHostMatch,
+                                         getter_AddRefs(permission));
+
+  if (permission) {
+    uint32_t capability;
+    permission->GetCapability(&capability);
+    if (capability == nsIPermissionManager::DENY_ACTION) {
+      mCanceled = true;
+      aChannel->Cancel(NS_ERROR_ABORT);
+      return true;
+    }
+    if (capability == nsIPermissionManager::ALLOW_ACTION) {
+      return false;
+    }
+    // If no action is set (i.e: null), we set PROMPT_ACTION by default,
+    // which will notify the Downloads UI to open the panel on the next request.
+    if (capability == nsIPermissionManager::PROMPT_ACTION) {
+      nsCOMPtr<nsIObserverService> observerService =
+          mozilla::services::GetObserverService();
+
+      nsAutoCString cStringURI;
+      loadInfo->TriggeringPrincipal()->GetPrePath(cStringURI);
+      observerService->NotifyObservers(
+          nullptr, "blocked-automatic-download",
+          NS_ConvertASCIItoUTF16(cStringURI.get()).get());
+      // FIXME: In order to escape memory leaks, currently we cancel blocked
+      // downloads. This is temporary solution, because download data should be
+      // kept in order to restart the blocked download.
+      mCanceled = true;
+      aChannel->Cancel(NS_ERROR_ABORT);
+      // End cancel
+      return true;
+    }
+  } else {
+    permissionManager->AddFromPrincipal(
+        principal, type, nsIPermissionManager::PROMPT_ACTION,
+        nsIPermissionManager::EXPIRE_NEVER, 0 /* expire time */);
+  }
+
+  return false;
 }
 
 // Convert error info into proper message text and send OnStatusChange

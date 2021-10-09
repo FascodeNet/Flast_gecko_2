@@ -19,7 +19,6 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
-#include "CrashAnnotations.h"
 #include "ErrorList.h"
 #include "MainThreadUtils.h"
 #include "mozIStorageAsyncConnection.h"
@@ -97,7 +96,6 @@
 #include "nsTHashMap.h"
 #include "nsDebug.h"
 #include "nsError.h"
-#include "nsExceptionHandler.h"
 #include "nsHashKeys.h"
 #include "nsIBinaryInputStream.h"
 #include "nsIBinaryOutputStream.h"
@@ -174,8 +172,8 @@ class PreparedDatastore;
 class QuotaClient;
 class Snapshot;
 
-typedef nsClassHashtable<nsCStringHashKey, ArchivedOriginInfo>
-    ArchivedOriginHashtable;
+using ArchivedOriginHashtable =
+    nsClassHashtable<nsCStringHashKey, ArchivedOriginInfo>;
 
 /*******************************************************************************
  * Constants
@@ -2734,8 +2732,9 @@ class nsCStringHashKeyDM : public nsCStringHashKey {
 // When CheckedUnsafePtr's checking is enabled, it's necessary to ensure that
 // the hashtable uses the copy constructor instead of memmove for moving entries
 // since memmove will break CheckedUnsafePtr in a memory-corrupting way.
-typedef std::conditional<DiagnosticAssertEnabled::value, nsCStringHashKeyDM,
-                         nsCStringHashKey>::type DatastoreHashKey;
+using DatastoreHashKey =
+    std::conditional<DiagnosticAssertEnabled::value, nsCStringHashKeyDM,
+                     nsCStringHashKey>::type;
 
 using DatastoreHashtable =
     nsBaseHashtable<DatastoreHashKey, NotNull<CheckedUnsafePtr<Datastore>>,
@@ -2745,8 +2744,8 @@ StaticAutoPtr<DatastoreHashtable> gDatastores;
 
 uint64_t gLastDatastoreId = 0;
 
-typedef nsClassHashtable<nsUint64HashKey, PreparedDatastore>
-    PreparedDatastoreHashtable;
+using PreparedDatastoreHashtable =
+    nsClassHashtable<nsUint64HashKey, PreparedDatastore>;
 
 StaticAutoPtr<PreparedDatastoreHashtable> gPreparedDatastores;
 
@@ -2781,12 +2780,12 @@ StaticRefPtr<ConnectionThread> gConnectionThread;
 
 uint64_t gLastObserverId = 0;
 
-typedef nsRefPtrHashtable<nsUint64HashKey, Observer> PreparedObserverHashtable;
+using PreparedObserverHashtable = nsRefPtrHashtable<nsUint64HashKey, Observer>;
 
 StaticAutoPtr<PreparedObserverHashtable> gPreparedObsevers;
 
-typedef nsClassHashtable<nsCStringHashKey, nsTArray<NotNull<Observer*>>>
-    ObserverHashtable;
+using ObserverHashtable =
+    nsClassHashtable<nsCStringHashKey, nsTArray<NotNull<Observer*>>>;
 
 StaticAutoPtr<ObserverHashtable> gObservers;
 
@@ -2796,7 +2795,7 @@ Atomic<int32_t, Relaxed> gSnapshotGradualPrefill(
     kDefaultSnapshotGradualPrefill);
 Atomic<bool> gClientValidation(kDefaultClientValidation);
 
-typedef nsTHashMap<nsCStringHashKey, int64_t> UsageHashtable;
+using UsageHashtable = nsTHashMap<nsCStringHashKey, int64_t>;
 
 StaticAutoPtr<ArchivedOriginHashtable> gArchivedOrigins;
 

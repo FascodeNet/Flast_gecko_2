@@ -140,23 +140,23 @@ ContentBlocking::AllowAccessFor(
 
   switch (aReason) {
     case ContentBlockingNotifier::eOpener:
-      if (!StaticPrefs::
+      if (!StaticPrefs::privacy_antitracking_enableWebcompat() ||
+          !StaticPrefs::
               privacy_restrict3rdpartystorage_heuristic_window_open()) {
         LOG(
-            ("Bailing out early because the "
-             "privacy.restrict3rdpartystorage.heuristic.window_open preference "
-             "has been disabled"));
+            ("Bailing out early because the window open heuristic is disabled "
+             "by pref"));
         return StorageAccessPermissionGrantPromise::CreateAndReject(false,
                                                                     __func__);
       }
       break;
     case ContentBlockingNotifier::eOpenerAfterUserInteraction:
-      if (!StaticPrefs::
+      if (!StaticPrefs::privacy_antitracking_enableWebcompat() ||
+          !StaticPrefs::
               privacy_restrict3rdpartystorage_heuristic_opened_window_after_interaction()) {
         LOG(
-            ("Bailing out early because the "
-             "privacy.restrict3rdpartystorage.heuristic.opened_window_after_"
-             "interaction preference has been disabled"));
+            ("Bailing out early because the window open after interaction "
+             "heuristic is disabled by pref"));
         return StorageAccessPermissionGrantPromise::CreateAndReject(false,
                                                                     __func__);
       }
@@ -988,21 +988,6 @@ bool ContentBlocking::ShouldAllowAccessFor(nsPIDOMWindowInner* aWindow,
 
     blockedReason = nsIWebProgressListener::STATE_COOKIES_PARTITIONED_FOREIGN;
   }
-
-#ifdef DEBUG
-  nsCOMPtr<mozIThirdPartyUtil> thirdPartyUtil =
-      components::ThirdPartyUtil::Service();
-  if (thirdPartyUtil) {
-    bool thirdParty = false;
-    nsresult rv = thirdPartyUtil->IsThirdPartyWindow(aWindow->GetOuterWindow(),
-                                                     aURI, &thirdParty);
-    // The result of this assertion depends on whether IsThirdPartyWindow
-    // succeeds, because otherwise IsThirdPartyWindowOrChannel artificially
-    // fails.
-    MOZ_ASSERT_IF(NS_SUCCEEDED(rv), nsContentUtils::IsThirdPartyWindowOrChannel(
-                                        aWindow, nullptr, aURI) == thirdParty);
-  }
-#endif
 
   Document* doc = aWindow->GetExtantDoc();
   // Make sure storage access isn't disabled

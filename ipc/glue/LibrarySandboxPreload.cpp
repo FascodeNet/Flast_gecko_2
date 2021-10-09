@@ -12,44 +12,30 @@
 namespace mozilla {
 namespace ipc {
 
-static nsAutoCString GetSandboxedPath(const nsACString& libName) {
-  nsCOMPtr<nsIFile> binaryPath;
-  nsresult rv = mozilla::BinaryPath::GetFile(getter_AddRefs(binaryPath));
+PathString GetSandboxedRLBoxPath() {
+  nsCOMPtr<nsIFile> libFile;
+  nsresult rv = mozilla::BinaryPath::GetFile(getter_AddRefs(libFile));
   if (NS_FAILED(rv)) {
     MOZ_CRASH("Library preload failure: Failed to get binary file\n");
   }
 
-  nsCOMPtr<nsIFile> libFile;
-  rv = binaryPath->GetParent(getter_AddRefs(libFile));
-  if (NS_FAILED(rv)) {
-    MOZ_CRASH("Library preload failure: Failed to get binary folder\n");
-  }
-
-  rv = libFile->AppendNative(libName);
-
+  rv = libFile->SetNativeLeafName(MOZ_DLL_PREFIX "rlbox" MOZ_DLL_SUFFIX ""_ns);
   if (NS_FAILED(rv)) {
     MOZ_CRASH("Library preload failure: Failed to get library file\n");
   }
 
-  nsAutoString fullPath;
-  rv = libFile->GetPath(fullPath);
-  if (NS_FAILED(rv)) {
-    MOZ_CRASH("Library preload failure: Failed to get library path\n");
-  }
-
-  nsAutoCString converted_path = NS_ConvertUTF16toUTF8(fullPath);
-  return converted_path;
+  return libFile->NativePath();
 }
 
-nsAutoCString GetSandboxedRLBoxPath() {
-  return GetSandboxedPath(
-      nsLiteralCString(MOZ_DLL_PREFIX "rlbox" MOZ_DLL_SUFFIX));
-}
-
-PRLibrary* PreloadLibrary(const nsAutoCString& path) {
+PRLibrary* PreloadLibrary(const PathString& path) {
   PRLibSpec libSpec;
+#ifdef XP_WIN
+  libSpec.type = PR_LibSpec_PathnameU;
+  libSpec.value.pathname_u = path.get();
+#else
   libSpec.type = PR_LibSpec_Pathname;
   libSpec.value.pathname = path.get();
+#endif
   PRLibrary* ret = PR_LoadLibraryWithFlags(libSpec, PR_LD_LAZY);
   return ret;
 }
@@ -57,9 +43,8 @@ PRLibrary* PreloadLibrary(const nsAutoCString& path) {
 void PreloadSandboxedDynamicLibrary() {
   // The process level sandbox does not allow loading of dynamic libraries.
   // This preloads wasm sandboxed libraries before the process level sandbox is
-  // enabled. Currently, this is only needed for Linux as Mac allows loading
-  // libraries from the package file.
-#if defined(XP_LINUX) && defined(MOZ_USING_WASM_SANDBOXING)
+  // enabled. Currently, this is only needed for Linux and Windows.
+#if (defined(XP_LINUX) || defined(XP_WIN)) && defined(MOZ_USING_WASM_SANDBOXING)
   if (!PreloadLibrary(GetSandboxedRLBoxPath())) {
     MOZ_CRASH("Library preload failure: Failed to load librlbox\n");
   }

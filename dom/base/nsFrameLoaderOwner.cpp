@@ -92,7 +92,7 @@ nsFrameLoaderOwner::ShouldPreserveBrowsingContext(
 
 void nsFrameLoaderOwner::ChangeRemotenessCommon(
     const ChangeRemotenessContextType& aContextType,
-    const RemotenessChangeOptions& aOptions, bool aSwitchingInProgressLoad,
+    const NavigationIsolationOptions& aOptions, bool aSwitchingInProgressLoad,
     bool aIsRemote, BrowsingContextGroup* aGroup,
     std::function<void()>& aFrameLoaderInit, mozilla::ErrorResult& aRv) {
   MOZ_ASSERT_IF(aGroup, aContextType != ChangeRemotenessContextType::PRESERVE);
@@ -186,18 +186,13 @@ void nsFrameLoaderOwner::ChangeRemotenessCommon(
   // nsSubDocumentFrame to use the new one. We can delay doing this if we're
   // keeping our old frameloader around in the BFCache and the new frame hasn't
   // presented yet to continue painting the previous document.
-  //
-  // We may not have a `BrowserParent` yet, so if `IsRemoteFrame` is true, and
-  // `browserParent` is null, we know it hasn't painted yet.
-  bool retainPaint = true;
-  auto* browserParent = BrowserParent::GetFrom(mFrameLoader);
-  if (!bfcacheEntry || !mFrameLoader->IsRemoteFrame()) {
-    MOZ_LOG(gSHIPBFCacheLog, LogLevel::Debug,
-            ("Previous frameLoader not entering BFCache - immediately "
-             "resetting nsSubDocumentFrame (bfcacheEntry=%p, isRemoteFrame=%d, "
-             "browserParent=%p)",
-             bfcacheEntry.get(), mFrameLoader->IsRemoteFrame(), browserParent));
-    retainPaint = false;
+  const bool retainPaint = bfcacheEntry && mFrameLoader->IsRemoteFrame();
+  if (!retainPaint) {
+    MOZ_LOG(
+        gSHIPBFCacheLog, LogLevel::Debug,
+        ("Previous frameLoader not entering BFCache - not retaining paint data"
+         "(bfcacheEntry=%p, isRemoteFrame=%d)",
+         bfcacheEntry.get(), mFrameLoader->IsRemoteFrame()));
   }
 
   ChangeFrameLoaderCommon(owner, retainPaint);
@@ -263,7 +258,7 @@ void nsFrameLoaderOwner::ChangeRemoteness(
 
   auto shouldPreserve = ShouldPreserveBrowsingContext(
       isRemote, /* replaceBrowsingContext */ false);
-  RemotenessChangeOptions options;
+  NavigationIsolationOptions options;
   ChangeRemotenessCommon(shouldPreserve, options,
                          aOptions.mSwitchingInProgressLoad, isRemote,
                          /* group */ nullptr, frameLoaderInit, rv);
@@ -286,7 +281,7 @@ void nsFrameLoaderOwner::ChangeRemotenessWithBridge(BrowserBridgeChild* aBridge,
     mFrameLoader->mInitialized = true;
   };
 
-  RemotenessChangeOptions options;
+  NavigationIsolationOptions options;
   ChangeRemotenessCommon(ChangeRemotenessContextType::PRESERVE, options,
                          /* inProgress */ true,
                          /* isRemote */ true, /* group */ nullptr,
@@ -294,7 +289,7 @@ void nsFrameLoaderOwner::ChangeRemotenessWithBridge(BrowserBridgeChild* aBridge,
 }
 
 void nsFrameLoaderOwner::ChangeRemotenessToProcess(
-    ContentParent* aContentParent, const RemotenessChangeOptions& aOptions,
+    ContentParent* aContentParent, const NavigationIsolationOptions& aOptions,
     BrowsingContextGroup* aGroup, mozilla::ErrorResult& rv) {
   MOZ_ASSERT(XRE_IsParentProcess());
   MOZ_ASSERT_IF(aGroup, aOptions.mReplaceBrowsingContext);
@@ -337,7 +332,7 @@ void nsFrameLoaderOwner::SubframeCrashed() {
         }));
   };
 
-  RemotenessChangeOptions options;
+  NavigationIsolationOptions options;
   ChangeRemotenessCommon(ChangeRemotenessContextType::PRESERVE, options,
                          /* inProgress */ false, /* isRemote */ false,
                          /* group */ nullptr, frameLoaderInit, IgnoreErrors());
