@@ -60,9 +60,6 @@ pref("ui.useOverlayScrollbars", 1);
 pref("ui.scrollbarFadeBeginDelay", 450);
 pref("ui.scrollbarFadeDuration", 0);
 
-/* turn off the caret blink after 10 cycles */
-pref("ui.caretBlinkCount", 10);
-
 pref("browser.cache.memory_limit", 5120); // 5 MB
 
 /* image cache prefs */
@@ -392,7 +389,6 @@ pref("apz.second_tap_tolerance", "0.3");
 pref("apz.touch_move_tolerance", "0.03");
 pref("apz.touch_start_tolerance", "0.06");
 
-pref("layers.progressive-paint", true);
 pref("layers.low-precision-buffer", true);
 // We want to limit layers for two reasons:
 // 1) We can't scroll smoothly if we have to many draw calls
@@ -653,4 +649,3 @@ pref("browser.tabs.remote.enforceRemoteTypeRestrictions", false);
 
 // Allow Web Authentication
 pref("security.webauth.webauthn_enable_android_fido2", true);
-pref("browser.tabs.remote.separatePrivilegedMozillaWebContentProcess", false);

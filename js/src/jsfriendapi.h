@@ -7,33 +7,18 @@
 #ifndef jsfriendapi_h
 #define jsfriendapi_h
 
-#include "mozilla/MemoryReporting.h"
-#include "mozilla/PodOperations.h"
-
 #include "jspubtd.h"
 
 #include "js/CallArgs.h"
-#include "js/CharacterEncoding.h"
 #include "js/Class.h"
-#include "js/ErrorReport.h"
-#include "js/Exception.h"
-#include "js/friend/PerformanceHint.h"
 #include "js/GCAPI.h"
 #include "js/HeapAPI.h"
 #include "js/Object.h"           // JS::GetClass
 #include "js/shadow/Function.h"  // JS::shadow::Function
 #include "js/shadow/Object.h"    // JS::shadow::Object
 #include "js/TypeDecls.h"
-#include "js/Utility.h"
 
 class JSJitInfo;
-
-namespace JS {
-template <class T>
-class Heap;
-
-class ExceptionStack;
-} /* namespace JS */
 
 extern JS_PUBLIC_API void JS_SetGrayGCRootsTracer(JSContext* cx,
                                                   JSTraceDataOp traceOp,
@@ -562,20 +547,21 @@ static const unsigned JS_FUNCTION_INTERPRETED_BITS = 0x0060;
 static MOZ_ALWAYS_INLINE const JSJitInfo* FUNCTION_VALUE_TO_JITINFO(
     const JS::Value& v) {
   JSObject* obj = &v.toObject();
-  MOZ_ASSERT(JS::GetClass(obj) == js::FunctionClassPtr);
+  MOZ_ASSERT(JS::GetClass(obj)->isJSFunction());
 
   auto* fun = reinterpret_cast<JS::shadow::Function*>(obj);
-  MOZ_ASSERT(!(fun->flags & js::JS_FUNCTION_INTERPRETED_BITS),
+  MOZ_ASSERT(!(fun->flagsAndArgCount() & js::JS_FUNCTION_INTERPRETED_BITS),
              "Unexpected non-native function");
 
-  return fun->jitinfo;
+  return static_cast<const JSJitInfo*>(fun->jitInfoOrScript());
 }
 
 static MOZ_ALWAYS_INLINE void SET_JITINFO(JSFunction* func,
                                           const JSJitInfo* info) {
   auto* fun = reinterpret_cast<JS::shadow::Function*>(func);
-  MOZ_ASSERT(!(fun->flags & js::JS_FUNCTION_INTERPRETED_BITS));
-  fun->jitinfo = info;
+  MOZ_ASSERT(!(fun->flagsAndArgCount() & js::JS_FUNCTION_INTERPRETED_BITS));
+
+  fun->setJitInfoOrScript(const_cast<JSJitInfo*>(info));
 }
 
 static_assert(sizeof(jsid) == sizeof(void*));

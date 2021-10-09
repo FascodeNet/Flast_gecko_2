@@ -11,7 +11,6 @@
 #include <stddef.h>  // size_t
 #include <stdint.h>  // uint32_t
 
-#include "jsapi.h"        // JS::IdVector
 #include "jsfriendapi.h"  // js::GetPropertyKeys, JSITER_OWNONLY
 #include "jstypes.h"      // JS_PUBLIC_API
 
@@ -830,11 +829,13 @@ JS_PUBLIC_API JSObject* JS_DefineObject(JSContext* cx,
   CHECK_THREAD(cx);
   cx->check(obj);
 
+  JS::Rooted<JSObject*> nobj(cx);
   if (!clasp) {
-    clasp = &PlainObject::class_; /* default class is Object */
+    // Default class is Object.
+    nobj = NewPlainObject(cx);
+  } else {
+    nobj = NewBuiltinClassInstance(cx, clasp);
   }
-
-  JS::Rooted<JSObject*> nobj(cx, NewBuiltinClassInstance(cx, clasp));
   if (!nobj) {
     return nullptr;
   }

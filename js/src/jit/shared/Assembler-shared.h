@@ -21,7 +21,6 @@
 #include "jit/RegisterSets.h"
 #include "js/ScalarType.h"  // js::Scalar::Type
 #include "vm/HelperThreads.h"
-#include "vm/NativeObject.h"
 #include "wasm/WasmCodegenTypes.h"
 #include "wasm/WasmConstants.h"
 
@@ -355,31 +354,27 @@ struct BaseValueIndex : BaseIndex {
 // base.  The index must not already be scaled by sizeof(Value)!
 struct BaseObjectElementIndex : BaseValueIndex {
   BaseObjectElementIndex(Register base, Register index, int32_t offset = 0)
-      : BaseValueIndex(base, index, offset) {
-    NativeObject::elementsSizeMustNotOverflow();
-  }
+      : BaseValueIndex(base, index, offset) {}
 
 #ifdef JS_HAS_HIDDEN_SP
   BaseObjectElementIndex(RegisterOrSP base, Register index, int32_t offset = 0)
-      : BaseValueIndex(base, index, offset) {
-    NativeObject::elementsSizeMustNotOverflow();
-  }
+      : BaseValueIndex(base, index, offset) {}
 #endif
+
+  static void staticAssertions();
 };
 
 // Like BaseObjectElementIndex, except for object slots.
 struct BaseObjectSlotIndex : BaseValueIndex {
   BaseObjectSlotIndex(Register base, Register index)
-      : BaseValueIndex(base, index) {
-    NativeObject::slotsSizeMustNotOverflow();
-  }
+      : BaseValueIndex(base, index) {}
 
 #ifdef JS_HAS_HIDDEN_SP
   BaseObjectSlotIndex(RegisterOrSP base, Register index)
-      : BaseValueIndex(base, index) {
-    NativeObject::slotsSizeMustNotOverflow();
-  }
+      : BaseValueIndex(base, index) {}
 #endif
+
+  static void staticAssertions();
 };
 
 enum class RelocationKind {
@@ -513,10 +508,10 @@ class MemoryAccessDesc {
 
  public:
   explicit MemoryAccessDesc(
-      Scalar::Type type, uint32_t align, uint32_t offset,
+      Scalar::Type type, uint32_t align, uint64_t offset,
       BytecodeOffset trapOffset,
       const jit::Synchronization& sync = jit::Synchronization::None())
-      : offset_(offset),
+      : offset_(uint32_t(offset)),
         align_(align),
         type_(type),
         sync_(sync),
@@ -524,6 +519,9 @@ class MemoryAccessDesc {
         widenOp_(wasm::SimdOp::Limit),
         loadOp_(Plain) {
     MOZ_ASSERT(mozilla::IsPowerOfTwo(align));
+    // Temporary implementation limit on the offset, enforced by
+    // readLinearMemoryAddress in WasmOpIter.h
+    MOZ_ASSERT(offset <= UINT32_MAX);
   }
 
   uint32_t offset() const { return offset_; }

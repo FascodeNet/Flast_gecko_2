@@ -7,48 +7,6 @@ const TWO_DAYS = 2 * 24 * 3600 * 1000;
 
 const MESSAGES = () => [
   {
-    id: "SIMPLE_FXA_BOOKMARK_TEST_FLUENT",
-    template: "fxa_bookmark_panel",
-    content: {
-      title: { string_id: "cfr-doorhanger-bookmark-fxa-header" },
-      text: { string_id: "cfr-doorhanger-bookmark-fxa-body" },
-      cta: { string_id: "cfr-doorhanger-bookmark-fxa-link-text" },
-      color: "white",
-      background_color_1: "#7d31ae",
-      background_color_2: "#5033be",
-      info_icon: {
-        tooltiptext: {
-          string_id: "cfr-doorhanger-bookmark-fxa-info-icon-tooltip",
-        },
-      },
-      close_button: {
-        tooltiptext: {
-          string_id: "cfr-doorhanger-bookmark-fxa-close-btn-tooltip",
-        },
-      },
-    },
-    trigger: { id: "bookmark-panel" },
-  },
-  {
-    id: "SIMPLE_FXA_BOOKMARK_TEST_NON_FLUENT",
-    template: "fxa_bookmark_panel",
-    content: {
-      title: "Bookmark Message Title",
-      text: "Bookmark Message Body",
-      cta: "Sync bookmarks now",
-      color: "white",
-      background_color_1: "#7d31ae",
-      background_color_2: "#5033be",
-      info_icon: {
-        tooltiptext: "Toggle tooltip",
-      },
-      close_button: {
-        tooltiptext: "Close tooltip",
-      },
-    },
-    trigger: { id: "bookmark-panel" },
-  },
-  {
     id: "WNP_THANK_YOU",
     template: "update_action",
     content: {
@@ -251,6 +209,44 @@ const MESSAGES = () => [
       id: "openURL",
       patterns: ["*://*/*.pdf"],
     },
+  },
+  {
+    id: "SPOTLIGHT_MESSAGE_93",
+    template: "spotlight",
+    content: {
+      template: "logo-and-content",
+      logoImageURL: "chrome://browser/content/logos/vpn-promo-logo.svg",
+      body: {
+        title: {
+          label: {
+            string_id: "spotlight-public-wifi-vpn-header",
+          },
+        },
+        text: {
+          label: {
+            string_id: "spotlight-public-wifi-vpn-body",
+          },
+        },
+        primary: {
+          label: {
+            string_id: "spotlight-public-wifi-vpn-primary-button",
+          },
+          action: {
+            type: "OPEN_URL",
+            data: {
+              args: "https://www.mozilla.org/en-US/products/vpn/",
+              where: "tabshifted",
+            },
+          },
+        },
+        secondary: {
+          label: {
+            string_id: "spotlight-public-wifi-vpn-link",
+          },
+        },
+      },
+    },
+    frequency: { lifetime: 3 },
   },
 ];
 

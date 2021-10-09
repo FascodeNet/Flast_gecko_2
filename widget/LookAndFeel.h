@@ -46,6 +46,8 @@ class LookAndFeel {
   enum class IntID {
     // default, may be overriden by OS
     CaretBlinkTime,
+    // Amount of blinks that happen before the caret stops blinking.
+    CaretBlinkCount,
     // pixel width of caret
     CaretWidth,
     // show the caret when text is selected?
@@ -340,6 +342,9 @@ class LookAndFeel {
     /** The horizontal scrollbar height, in CSS pixels. */
     SystemHorizontalScrollbarHeight,
 
+    /** A boolean value to determine whether a touch device is present */
+    TouchDeviceSupportPresent,
+
     /*
      * Not an ID; used to define the range of valid IDs.  Must be last.
      */
@@ -429,6 +434,7 @@ class LookAndFeel {
                                               : ColorScheme::Light;
   }
 
+  static ColorScheme ColorSchemeForChrome();
   static ColorScheme ColorSchemeForStyle(const dom::Document&,
                                          const StyleColorSchemeFlags&);
   static ColorScheme ColorSchemeForFrame(const nsIFrame*);

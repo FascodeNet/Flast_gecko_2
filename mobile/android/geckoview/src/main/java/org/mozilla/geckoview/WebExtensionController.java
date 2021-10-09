@@ -12,6 +12,7 @@ import androidx.annotation.UiThread;
 
 import android.os.Build;
 import android.util.Log;
+import android.util.SparseArray;
 
 import org.json.JSONException;
 import org.mozilla.gecko.EventDispatcher;
@@ -43,7 +44,7 @@ public class WebExtensionController {
     private final MultiMap<String, Message> mPendingBrowsingData;
     private final MultiMap<String, Message> mPendingDownload;
 
-    private final HashMap<Integer, WebExtension.Download> mDownloads;
+    private final SparseArray<WebExtension.Download> mDownloads;
 
     private static class Message {
         final GeckoBundle bundle;
@@ -694,7 +695,7 @@ public class WebExtensionController {
         mPendingBrowsingData = new MultiMap<>();
         mPendingDownload = new MultiMap<>();
         mExtensions.setObserver(mInternals);
-        mDownloads = new HashMap<>();
+        mDownloads = new SparseArray<>();
     }
 
     /* package */ WebExtension registerWebExtension(final WebExtension webExtension) {
@@ -723,15 +724,7 @@ public class WebExtensionController {
             return;
         }
 
-        final GeckoBundle senderBundle;
-        if ("GeckoView:WebExtension:Connect".equals(event) ||
-                "GeckoView:WebExtension:Message".equals(event)) {
-            senderBundle = bundle.getBundle("sender");
-        } else {
-            senderBundle = bundle;
-        }
-
-        extensionFromBundle(senderBundle).accept(extension -> {
+        extensionFromBundle(bundle).accept(extension -> {
             if ("GeckoView:WebExtension:NewTab".equals(event)) {
                 newTab(message, extension);
                 return;
@@ -766,6 +759,9 @@ public class WebExtensionController {
                 download(message, extension);
                 return;
             }
+
+            // GeckoView:WebExtension:Connect and GeckoView:WebExtension:Message
+            // are handled below.
             final String nativeApp = bundle.getString("nativeApp");
             if (nativeApp == null) {
                 if (BuildConfig.DEBUG) {
@@ -775,6 +771,7 @@ public class WebExtensionController {
                 return;
             }
 
+            final GeckoBundle senderBundle = bundle.getBundle("sender");
             final WebExtension.MessageSender sender = fromBundle(extension, senderBundle, session);
             if (sender == null) {
                 if (callback != null) {
@@ -1288,7 +1285,7 @@ public class WebExtensionController {
     @Nullable
     @UiThread
     public WebExtension.Download createDownload(final int id) {
-        if (mDownloads.containsKey(id)) {
+        if (mDownloads.indexOfKey(id) >= 0) {
             throw new IllegalArgumentException("Download with this id already exists");
         } else {
             final WebExtension.Download download = new WebExtension.Download(id);

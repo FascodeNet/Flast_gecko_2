@@ -13,10 +13,7 @@
 #  include "jit/PerfSpewer.h"
 #endif
 #include "jit/VMFunctions.h"
-#include "jit/x64/SharedICHelpers-x64.h"
-#ifdef MOZ_VTUNE
-#  include "vtune/VTuneWrapper.h"
-#endif
+#include "jit/x64/SharedICRegisters-x64.h"
 #include "vm/JitActivation.h"  // js::jit::JitActivation
 #include "vm/JSContext.h"
 
@@ -493,7 +490,8 @@ void JitRuntime::generateArgumentsRectifier(MacroAssembler& masm,
   masm.loadPtr(Address(rsp, RectifierFrameLayout::offsetOfCalleeToken()), rax);
   masm.mov(rax, rcx);
   masm.andq(Imm32(uint32_t(CalleeTokenMask)), rcx);
-  masm.movzwl(Operand(rcx, JSFunction::offsetOfNargs()), rcx);
+  masm.load32(Operand(rcx, JSFunction::offsetOfFlagsAndArgCount()), rcx);
+  masm.rshift32(Imm32(JSFunction::ArgCountShift), rcx);
 
   // Stash another copy in r11, since we are going to do destructive operations
   // on rcx

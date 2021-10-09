@@ -16,7 +16,6 @@
 #include "mozilla/dom/HTMLVideoElement.h"
 #include "mozilla/dom/ShadowRoot.h"
 #include "mozilla/layers/RenderRootStateManager.h"
-#include "BasicLayers.h"
 #include "nsDisplayList.h"
 #include "nsGenericHTMLElement.h"
 #include "nsPresContext.h"
@@ -167,76 +166,6 @@ void nsVideoFrame::DestroyFrom(nsIFrame* aDestructRoot,
   aPostDestroyData.AddAnonymousContent(mCaptionDiv.forget());
   aPostDestroyData.AddAnonymousContent(mPosterImage.forget());
   nsContainerFrame::DestroyFrom(aDestructRoot, aPostDestroyData);
-}
-
-already_AddRefed<Layer> nsVideoFrame::BuildLayer(
-    nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-    nsDisplayItem* aItem,
-    const ContainerLayerParameters& aContainerParameters) {
-  nsRect area = GetContentRectRelativeToSelf() + aItem->ToReferenceFrame();
-  HTMLVideoElement* element = static_cast<HTMLVideoElement*>(GetContent());
-
-  Maybe<CSSIntSize> videoSizeInPx = element->GetVideoSize();
-  if (videoSizeInPx.isNothing() || area.IsEmpty()) {
-    return nullptr;
-  }
-
-  RefPtr<ImageContainer> container = element->GetImageContainer();
-  if (!container) return nullptr;
-
-  // Retrieve the size of the decoded video frame, before being scaled
-  // by pixel aspect ratio.
-  mozilla::gfx::IntSize frameSize = container->GetCurrentSize();
-  if (frameSize.width == 0 || frameSize.height == 0) {
-    // No image, or zero-sized image. No point creating a layer.
-    return nullptr;
-  }
-
-  const auto aspectRatio = AspectRatio::FromSize(*videoSizeInPx);
-  const IntrinsicSize intrinsicSize(CSSPixel::ToAppUnits(*videoSizeInPx));
-  nsRect dest = nsLayoutUtils::ComputeObjectDestRect(
-      area, intrinsicSize, aspectRatio, StylePosition());
-
-  gfxRect destGFXRect = PresContext()->AppUnitsToGfxUnits(dest);
-  destGFXRect.Round();
-  if (destGFXRect.IsEmpty()) {
-    return nullptr;
-  }
-
-  VideoInfo::Rotation rotationDeg = element->RotationDegrees();
-  IntSize scaleHint(static_cast<int32_t>(destGFXRect.Width()),
-                    static_cast<int32_t>(destGFXRect.Height()));
-  // scaleHint is set regardless of rotation, so swap w/h if needed.
-  SwapScaleWidthHeightForRotation(scaleHint, rotationDeg);
-  container->SetScaleHint(scaleHint);
-
-  RefPtr<ImageLayer> layer = static_cast<ImageLayer*>(
-      aManager->GetLayerBuilder()
-          ? aManager->GetLayerBuilder()->GetLeafLayerFor(aBuilder, aItem)
-          : nullptr);
-  if (!layer) {
-    layer = aManager->CreateImageLayer();
-    if (!layer) return nullptr;
-  }
-
-  layer->SetContainer(container);
-  layer->SetSamplingFilter(nsLayoutUtils::GetSamplingFilterForFrame(this));
-  // Set a transform on the layer to draw the video in the right place
-  gfxPoint p = destGFXRect.TopLeft() + aContainerParameters.mOffset;
-
-  Matrix preTransform = ComputeRotationMatrix(
-      destGFXRect.Width(), destGFXRect.Height(), rotationDeg);
-
-  Matrix transform = preTransform * Matrix::Translation(p.x, p.y);
-
-  layer->SetBaseTransform(gfx::Matrix4x4::From2D(transform));
-  layer->SetScaleToSize(scaleHint, ScaleMode::STRETCH);
-
-  uint32_t flags = element->HasAlpha() ? 0 : Layer::CONTENT_OPAQUE;
-  layer->SetContentFlags(flags);
-
-  RefPtr<Layer> result = std::move(layer);
-  return result.forget();
 }
 
 class DispatchResizeEvent : public Runnable {
@@ -594,24 +523,19 @@ class nsDisplayVideo : public nsPaintedDisplayItem {
 
   NS_DISPLAY_DECL_NAME("Video", TYPE_VIDEO)
 
-  virtual bool CreateWebRenderCommands(
-      mozilla::wr::DisplayListBuilder& aBuilder,
-      mozilla::wr::IpcResourceUpdateQueue& aResources,
-      const mozilla::layers::StackingContextHelper& aSc,
-      mozilla::layers::RenderRootStateManager* aManager,
-      nsDisplayListBuilder* aDisplayListBuilder) override {
+  already_AddRefed<ImageContainer> GetImageContainer(gfxRect& aDestGFXRect) {
     nsRect area = Frame()->GetContentRectRelativeToSelf() + ToReferenceFrame();
     HTMLVideoElement* element =
         static_cast<HTMLVideoElement*>(Frame()->GetContent());
 
     Maybe<CSSIntSize> videoSizeInPx = element->GetVideoSize();
     if (videoSizeInPx.isNothing() || area.IsEmpty()) {
-      return true;
+      return nullptr;
     }
 
     RefPtr<ImageContainer> container = element->GetImageContainer();
     if (!container) {
-      return true;
+      return nullptr;
     }
 
     // Retrieve the size of the decoded video frame, before being scaled
@@ -619,7 +543,7 @@ class nsDisplayVideo : public nsPaintedDisplayItem {
     mozilla::gfx::IntSize frameSize = container->GetCurrentSize();
     if (frameSize.width == 0 || frameSize.height == 0) {
       // No image, or zero-sized image. Don't render.
-      return true;
+      return nullptr;
     }
 
     const auto aspectRatio = AspectRatio::FromSize(*videoSizeInPx);
@@ -627,9 +551,26 @@ class nsDisplayVideo : public nsPaintedDisplayItem {
     nsRect dest = nsLayoutUtils::ComputeObjectDestRect(
         area, intrinsicSize, aspectRatio, Frame()->StylePosition());
 
-    gfxRect destGFXRect = Frame()->PresContext()->AppUnitsToGfxUnits(dest);
-    destGFXRect.Round();
-    if (destGFXRect.IsEmpty()) {
+    aDestGFXRect = Frame()->PresContext()->AppUnitsToGfxUnits(dest);
+    aDestGFXRect.Round();
+    if (aDestGFXRect.IsEmpty()) {
+      return nullptr;
+    }
+
+    return container.forget();
+  }
+
+  virtual bool CreateWebRenderCommands(
+      mozilla::wr::DisplayListBuilder& aBuilder,
+      mozilla::wr::IpcResourceUpdateQueue& aResources,
+      const mozilla::layers::StackingContextHelper& aSc,
+      mozilla::layers::RenderRootStateManager* aManager,
+      nsDisplayListBuilder* aDisplayListBuilder) override {
+    HTMLVideoElement* element =
+        static_cast<HTMLVideoElement*>(Frame()->GetContent());
+    gfxRect destGFXRect;
+    RefPtr<ImageContainer> container = GetImageContainer(destGFXRect);
+    if (!container) {
       return true;
     }
 
@@ -655,31 +596,6 @@ class nsDisplayVideo : public nsPaintedDisplayItem {
     return f->GetContentRectRelativeToSelf() + ToReferenceFrame();
   }
 
-  virtual already_AddRefed<Layer> BuildLayer(
-      nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-      const ContainerLayerParameters& aContainerParameters) override {
-    return static_cast<nsVideoFrame*>(mFrame)->BuildLayer(
-        aBuilder, aManager, this, aContainerParameters);
-  }
-
-  virtual LayerState GetLayerState(
-      nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-      const ContainerLayerParameters& aParameters) override {
-    if (aManager->IsCompositingCheap()) {
-      // Since ImageLayers don't require additional memory of the
-      // video frames we have to have anyway, we can't save much by
-      // making layers inactive. Also, for many accelerated layer
-      // managers calling imageContainer->GetCurrentAsSurface can be
-      // very expensive. So just always be active when compositing is
-      // cheap (i.e. hardware accelerated).
-      return LayerState::LAYER_ACTIVE;
-    }
-    HTMLMediaElement* elem =
-        static_cast<HTMLMediaElement*>(mFrame->GetContent());
-    return elem->IsPotentiallyPlaying() ? LayerState::LAYER_ACTIVE_FORCE
-                                        : LayerState::LAYER_INACTIVE;
-  }
-
   // Only report FirstContentfulPaint when the video is set
   bool IsContentful() const override {
     nsVideoFrame* f = static_cast<nsVideoFrame*>(Frame());
@@ -689,22 +605,51 @@ class nsDisplayVideo : public nsPaintedDisplayItem {
 
   virtual void Paint(nsDisplayListBuilder* aBuilder,
                      gfxContext* aCtx) override {
-    // This currently uses BasicLayerManager to re-use the code for extracting
-    // the current Image and generating DrawTarget rendering commands for it.
-    // Ideally we'll factor out that code and use it directly soon.
-    RefPtr<BasicLayerManager> layerManager =
-        new BasicLayerManager(BasicLayerManager::BLM_OFFSCREEN);
-
-    layerManager->BeginTransactionWithTarget(aCtx);
-    RefPtr<Layer> layer =
-        BuildLayer(aBuilder, layerManager, ContainerLayerParameters());
-    if (!layer) {
-      layerManager->AbortTransaction();
+    HTMLVideoElement* element =
+        static_cast<HTMLVideoElement*>(Frame()->GetContent());
+    gfxRect destGFXRect;
+    RefPtr<ImageContainer> container = GetImageContainer(destGFXRect);
+    if (!container) {
       return;
     }
 
-    layerManager->SetRoot(layer);
-    layerManager->EndEmptyTransaction();
+    VideoInfo::Rotation rotationDeg = element->RotationDegrees();
+    Matrix preTransform = ComputeRotationMatrix(
+        destGFXRect.Width(), destGFXRect.Height(), rotationDeg);
+    Matrix transform =
+        preTransform * Matrix::Translation(destGFXRect.x, destGFXRect.y);
+
+    AutoLockImage autoLock(container);
+    Image* image = autoLock.GetImage(TimeStamp::Now());
+    if (!image) {
+      return;
+    }
+    RefPtr<gfx::SourceSurface> surface = image->GetAsSourceSurface();
+    if (!surface || !surface->IsValid()) {
+      return;
+    }
+    gfx::IntSize size = surface->GetSize();
+
+    IntSize scaleToSize(static_cast<int32_t>(destGFXRect.Width()),
+                        static_cast<int32_t>(destGFXRect.Height()));
+    // scaleHint is set regardless of rotation, so swap w/h if needed.
+    SwapScaleWidthHeightForRotation(scaleToSize, rotationDeg);
+    transform.PreScale(scaleToSize.width / double(size.Width()),
+                       scaleToSize.height / double(size.Height()));
+
+    gfxContextMatrixAutoSaveRestore saveMatrix(aCtx);
+    aCtx->SetMatrix(
+        gfxUtils::SnapTransformTranslation(aCtx->CurrentMatrix(), nullptr));
+
+    transform = gfxUtils::SnapTransform(
+        transform, gfxRect(0, 0, size.width, size.height), nullptr);
+    aCtx->Multiply(ThebesMatrix(transform));
+
+    aCtx->GetDrawTarget()->FillRect(
+        Rect(0, 0, size.width, size.height),
+        SurfacePattern(surface, ExtendMode::CLAMP, Matrix(),
+                       nsLayoutUtils::GetSamplingFilterForFrame(Frame())),
+        DrawOptions());
   }
 };
 

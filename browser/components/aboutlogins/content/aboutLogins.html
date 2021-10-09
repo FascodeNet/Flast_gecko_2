@@ -6,7 +6,7 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; object-src 'none'; script-src resource: chrome:; img-src data: blob: https://firefoxusercontent.com;"/>
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; object-src 'none'; script-src resource: chrome:; img-src data: blob: https://firefoxusercontent.com https://profile.accounts.firefox.com;"/>
     <title data-l10n-id="about-logins-page-title"></title>
     <link rel="localization" href="branding/brand.ftl">
     <link rel="localization" href="browser/branding/sync-brand.ftl">
@@ -23,6 +23,7 @@
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-item.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-list.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/login-list-item.js"></script>
+    <script type="module" src="chrome://browser/content/aboutlogins/components/login-list-section.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/components/menu-button.js"></script>
     <script type="module" src="chrome://browser/content/aboutlogins/aboutLogins.js"></script>
     <link rel="stylesheet" href="chrome://global/skin/in-content/common.css">
@@ -184,6 +185,8 @@
           <select id="login-sort">
             <option name="name" data-l10n-id="login-list-name-option" value="name">
             <option name="name-reverse" data-l10n-id="login-list-name-reverse-option" value="name-reverse">
+            <option name="username" data-l10n-id="login-list-username-option" value="username">
+            <option name="username-reverse" data-l10n-id="login-list-username-reverse-option" value="username-reverse">
             <option name="last-used" data-l10n-id="login-list-last-used-option" value="last-used">
             <option name="last-changed" data-l10n-id="login-list-last-changed-option" value="last-changed">
             <option name="alerts" data-l10n-id="about-logins-login-list-alerts-option" value="alerts" hidden>
@@ -219,6 +222,12 @@
         </div>
         <img class="alert-icon" title="" src=""/>
       </li>
+    </template>
+
+    <template id="login-list-section-template">
+      <section class="login-list-section">
+        <span class="login-list-header" dir="auto"></span>
+      </section>
     </template>
 
     <template id="login-intro-template">
@@ -379,7 +388,6 @@
         <button role="menuitem" class="menuitem-button menuitem-remove-all-logins ghost-button" data-event-name="AboutLoginsRemoveAllLoginsDialog" data-l10n-id="about-logins-menu-menuitem-remove-all-logins"></button>
         <hr role="separator" class="menuitem-separator"></hr>
         <button role="menuitem" class="menuitem-button menuitem-preferences ghost-button" data-event-name="AboutLoginsOpenPreferences" data-l10n-id="menu-menuitem-preferences"></button>
-        <hr role="separator" class="menuitem-separator"></hr>
         <button role="menuitem" class="menuitem-button menuitem-help ghost-button" data-event-name="AboutLoginsGetHelp" data-l10n-id="about-logins-menu-menuitem-help"></button>
       </ul>
     </template>

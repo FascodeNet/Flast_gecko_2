@@ -1536,8 +1536,10 @@ class BaseScript : public gc::TenuredCellWithNonGCPointer<uint8_t> {
   // Canonical function for the script, if it has a function. For top-level
   // scripts this is nullptr.
   JSFunction* function() const {
-    if (functionOrGlobal_->is<JSFunction>()) {
-      return &functionOrGlobal_->as<JSFunction>();
+    // JSFunction's definition isn't visible at this point, so we can't use
+    // the normal |is<JSFunction>| and |as<JSFunction>| pair.
+    if (isFunction()) {
+      return reinterpret_cast<JSFunction*>(functionOrGlobal_.get());
     }
     return nullptr;
   }
@@ -1706,10 +1708,6 @@ XDRResult XDRLazyScript(XDRState<mode>* xdr, HandleScope enclosingScope,
 
 template <XDRMode mode>
 XDRResult XDRSourceExtent(XDRState<mode>* xdr, SourceExtent* extent);
-
-template <XDRMode mode>
-XDRResult XDRImmutableScriptData(XDRState<mode>* xdr,
-                                 SharedImmutableScriptData& sisd);
 
 /*
  * Code any constant value.
@@ -2111,6 +2109,15 @@ class JSScript : public js::BaseScript {
   JSObject* getObject(jsbytecode* pc) const {
     MOZ_ASSERT(containsPC<js::GCThingIndex>(pc));
     return getObject(GET_GCTHING_INDEX(pc));
+  }
+
+  js::Shape* getShape(js::GCThingIndex index) const {
+    return &gcthings()[index].as<js::Shape>();
+  }
+
+  js::Shape* getShape(jsbytecode* pc) const {
+    MOZ_ASSERT(containsPC<js::GCThingIndex>(pc));
+    return getShape(GET_GCTHING_INDEX(pc));
   }
 
   js::Scope* getScope(js::GCThingIndex index) const {

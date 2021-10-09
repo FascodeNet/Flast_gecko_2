@@ -143,10 +143,6 @@ class nsDisplayCanvasBackgroundColor final : public nsDisplaySolidColorBase {
                                  nsIFrame* aFrame)
       : nsDisplaySolidColorBase(aBuilder, aFrame, NS_RGBA(0, 0, 0, 0)) {}
 
-  virtual bool ComputeVisibility(nsDisplayListBuilder* aBuilder,
-                                 nsRegion* aVisibleRegion) override {
-    return NS_GET_A(mColor) > 0;
-  }
   virtual nsRect GetBounds(nsDisplayListBuilder* aBuilder,
                            bool* aSnap) const override {
     nsCanvasFrame* frame = static_cast<nsCanvasFrame*>(mFrame);
@@ -159,23 +155,12 @@ class nsDisplayCanvasBackgroundColor final : public nsDisplaySolidColorBase {
     // We need to override so we don't consider border-radius.
     aOutFrames->AppendElement(mFrame);
   }
-  virtual already_AddRefed<Layer> BuildLayer(
-      nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-      const ContainerLayerParameters& aContainerParameters) override;
   virtual bool CreateWebRenderCommands(
       mozilla::wr::DisplayListBuilder& aBuilder,
       mozilla::wr::IpcResourceUpdateQueue& aResources,
       const StackingContextHelper& aSc,
       mozilla::layers::RenderRootStateManager* aManager,
       nsDisplayListBuilder* aDisplayListBuilder) override;
-  virtual LayerState GetLayerState(
-      nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-      const ContainerLayerParameters& aParameters) override {
-    if (ForceActiveLayers()) {
-      return mozilla::LayerState::LAYER_ACTIVE;
-    }
-    return mozilla::LayerState::LAYER_NONE;
-  }
   virtual void Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) override;
 
   void SetExtraBackgroundColor(nscolor aColor) { mColor = aColor; }

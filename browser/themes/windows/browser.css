@@ -113,7 +113,8 @@
 }
 
 @media (-moz-windows-compositor: 0),
-       (-moz-windows-default-theme: 0) {
+       (-moz-windows-default-theme: 0),
+       (-moz-os-version: windows-win8) {
   /* Please keep the menu text colors in this media block in sync with
    * compacttheme.css, minus the :not(:-moz-lwtheme) condition - see Bug 1165718.
    */
@@ -531,8 +532,8 @@ menuitem.bookmark-item {
 
 toolbarbutton.bookmark-item[dragover="true"][open="true"] {
   appearance: none;
-  background: Highlight !important;
-  color: HighlightText !important;
+  background: SelectedItem !important;
+  color: SelectedItemText !important;
 }
 
 /* Translation infobar */
@@ -643,11 +644,6 @@ panel[touchmode] .PanelUI-subView .subviewbutton,
 menupopup[touchmode] menu,
 menupopup[touchmode] menuitem {
   padding-block: 12px;
-}
-
-panel[touchmode] .PanelUI-subView #appMenu-edit-controls > .subviewbutton,
-panel[touchmode] .PanelUI-subView #appMenu-zoom-controls > .subviewbutton-iconic {
-  padding-inline: 12px;
 }
 
 #contentAreaContextMenu[touchmode] > #context-navigation > menuitem {

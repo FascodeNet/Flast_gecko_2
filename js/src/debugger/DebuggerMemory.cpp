@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <utility>
 
+#include "jsapi.h"
+
 #include "builtin/MapObject.h"
 #include "debugger/Debugger.h"
 #include "gc/Marking.h"
@@ -207,7 +209,7 @@ bool DebuggerMemory::CallData::drainAllocationsLog() {
   result->ensureDenseInitializedLength(0, length);
 
   for (size_t i = 0; i < length; i++) {
-    RootedPlainObject obj(cx, NewBuiltinClassInstance<PlainObject>(cx));
+    RootedPlainObject obj(cx, NewPlainObject(cx));
     if (!obj) {
       return false;
     }

@@ -23,21 +23,27 @@ struct FileIOMarker {
       aWriter.StringProperty("filename", aFilename);
     }
     if (!aOperationThreadId.IsUnspecified()) {
-      aWriter.IntProperty("threadId", aOperationThreadId.ThreadId().ToNumber());
+      // Tech note: If `ToNumber()` returns a uint64_t, the conversion to
+      // int64_t is "implementation-defined" before C++20. This is acceptable
+      // here, because this is a one-way conversion to a unique identifier
+      // that's used to visually separate data by thread on the front-end.
+      aWriter.IntProperty(
+          "threadId",
+          static_cast<int64_t>(aOperationThreadId.ThreadId().ToNumber()));
     }
   }
   static MarkerSchema MarkerTypeDisplay() {
     using MS = MarkerSchema;
-    MS schema{MS::Location::markerChart, MS::Location::markerTable,
-              MS::Location::timelineFileIO};
+    MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable,
+              MS::Location::TimelineFileIO};
     schema.AddKeyLabelFormatSearchable("operation", "Operation",
-                                       MS::Format::string,
-                                       MS::Searchable::searchable);
-    schema.AddKeyLabelFormatSearchable("source", "Source", MS::Format::string,
-                                       MS::Searchable::searchable);
+                                       MS::Format::String,
+                                       MS::Searchable::Searchable);
+    schema.AddKeyLabelFormatSearchable("source", "Source", MS::Format::String,
+                                       MS::Searchable::Searchable);
     schema.AddKeyLabelFormatSearchable("filename", "Filename",
-                                       MS::Format::filePath,
-                                       MS::Searchable::searchable);
+                                       MS::Format::FilePath,
+                                       MS::Searchable::Searchable);
     return schema;
   }
 };

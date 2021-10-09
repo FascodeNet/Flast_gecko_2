@@ -11,8 +11,6 @@
 
 #include <string.h>
 
-#include "jsapi.h"
-
 #include "js/friend/ErrorMessages.h"  // JSMSG_*
 #include "js/friend/StackLimits.h"  // js::AutoCheckRecursionLimit, js::GetNativeStackLimit
 #include "js/friend/WindowProxy.h"  // js::IsWindow, js::IsWindowProxy, js::ToWindowProxyIfWindow
@@ -116,7 +114,7 @@ static bool ProxyDefineOnExpando(JSContext* cx, HandleObject proxy, HandleId id,
   RootedObject expando(cx, proxy->as<ProxyObject>().expando().toObjectOrNull());
 
   if (!expando) {
-    expando = NewObjectWithGivenProto<PlainObject>(cx, nullptr);
+    expando = NewPlainObjectWithProto(cx, nullptr);
     if (!expando) {
       return false;
     }

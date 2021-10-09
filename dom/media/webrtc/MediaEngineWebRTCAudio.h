@@ -141,9 +141,13 @@ class AudioInputProcessing : public AudioDataListener {
             GraphTime aTrackEnd, AudioSegment* aSegment,
             bool aLastPullThisIteration, bool* aEnded);
 
-  void NotifyOutputData(MediaTrackGraphImpl* aGraph, BufferInfo aInfo) override;
+  void NotifyOutputData(MediaTrackGraphImpl* aGraph, AudioDataValue* aBuffer,
+                        size_t aFrames, TrackRate aRate,
+                        uint32_t aChannels) override;
   void NotifyInputStopped(MediaTrackGraphImpl* aGraph) override;
-  void NotifyInputData(MediaTrackGraphImpl* aGraph, const BufferInfo aInfo,
+  void NotifyInputData(MediaTrackGraphImpl* aGraph,
+                       const AudioDataValue* aBuffer, size_t aFrames,
+                       TrackRate aRate, uint32_t aChannels,
                        uint32_t aAlreadyBuffered) override;
   bool IsVoiceInput(MediaTrackGraphImpl* aGraph) const override {
     // If we're passing data directly without AEC or any other process, this
@@ -225,15 +229,13 @@ class AudioInputProcessing : public AudioDataListener {
   AlignedFloatBuffer mInputDownmixBuffer;
   // Stores data waiting to be pulled.
   AudioSegment mSegment;
-  // Set to false by Start(). Becomes true after the first time we append real
-  // audio frames from the audio callback.
-  bool mLiveFramesAppended;
-  // Once live frames have been appended, this is the number of frames appended
-  // as pre-buffer for that data, to avoid underruns. Buffering in the track
-  // might be needed because of the AUDIO_BLOCK interval at which we run the
-  // graph, the packetizer keeping some input data. Care must be taken when
-  // turning on and off the packetizer.
-  TrackTime mLiveBufferingAppended;
+  // Set to Nothing() by Start(). Once live frames have been appended from the
+  // audio callback, this is the number of frames appended as pre-buffer for
+  // that data, to avoid underruns. Buffering in the track might be needed
+  // because of the AUDIO_BLOCK interval at which we run the graph, the
+  // packetizer keeping some input data. Care must be taken when turning on and
+  // off the packetizer.
+  Maybe<TrackTime> mLiveBufferingAppended;
   // Principal for the data that flows through this class.
   const PrincipalHandle mPrincipal;
   // Whether or not this MediaEngine is enabled. If it's not enabled, it
@@ -243,7 +245,7 @@ class AudioInputProcessing : public AudioDataListener {
   // Whether or not we've ended and removed the AudioInputTrack.
   bool mEnded;
   // Store the unprocessed interleaved audio input data
-  Maybe<BufferInfo> mInputData;
+  AudioInputSamples mPendingData;
 };
 
 // MediaTrack subclass tailored for MediaEngineWebRTCMicrophoneSource.

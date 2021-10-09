@@ -453,6 +453,21 @@ var BrowserTestUtils = {
       } else if (typeof wantLoad == "function") {
         return wantLoad(url);
       }
+
+      // HTTPS-First (Bug 1704453) TODO: In case we are waiting
+      // for an http:// URL to be loaded and https-first is enabled,
+      // then we also return true in case the backend upgraded
+      // the load to https://.
+      if (
+        BrowserTestUtils._httpsFirstEnabled &&
+        wantLoad.startsWith("http://")
+      ) {
+        let wantLoadHttps = wantLoad.replace("http://", "https://");
+        if (wantLoadHttps == url) {
+          return true;
+        }
+      }
+
       // It's a string.
       return wantLoad == url;
     }
@@ -2324,8 +2339,9 @@ var BrowserTestUtils = {
   /**
    * Waits for the dialog to open, and clicks the specified button.
    *
-   * @param {string} buttonAction
-   *        The ID of the button to click ("accept", "cancel", etc).
+   * @param {string} buttonNameOrElementID
+   *        The name of the button ("accept", "cancel", etc) or element ID to
+   *        click.
    * @param {string} uri
    *        The URI of the dialog to wait for.  Defaults to the common dialog.
    * @return {Promise}
@@ -2334,7 +2350,7 @@ var BrowserTestUtils = {
    *         specified button is clicked.
    */
   async promiseAlertDialogOpen(
-    buttonAction,
+    buttonNameOrElementID,
     uri = "chrome://global/content/commonDialog.xhtml",
     options = { callback: null, isSubDialog: false }
   ) {
@@ -2357,9 +2373,12 @@ var BrowserTestUtils = {
       return win;
     }
 
-    if (buttonAction) {
+    if (buttonNameOrElementID) {
       let dialog = win.document.querySelector("dialog");
-      dialog.getButton(buttonAction).click();
+      let element =
+        dialog.getButton(buttonNameOrElementID) ||
+        win.document.getElementById(buttonNameOrElementID);
+      element.click();
     }
 
     return win;
@@ -2369,8 +2388,9 @@ var BrowserTestUtils = {
    * Waits for the dialog to open, and clicks the specified button, and waits
    * for the dialog to close.
    *
-   * @param {string} buttonAction
-   *        The ID of the button to click ("accept", "cancel", etc).
+   * @param {string} buttonNameOrElementID
+   *        The name of the button ("accept", "cancel", etc) or element ID to
+   *        click.
    * @param {string} uri
    *        The URI of the dialog to wait for.  Defaults to the common dialog.
    * @return {Promise}
@@ -2379,11 +2399,15 @@ var BrowserTestUtils = {
    *         specified button is clicked, and the dialog has been fully closed.
    */
   async promiseAlertDialog(
-    buttonAction,
+    buttonNameOrElementID,
     uri = "chrome://global/content/commonDialog.xhtml",
     options = { callback: null, isSubDialog: false }
   ) {
-    let win = await this.promiseAlertDialogOpen(buttonAction, uri, options);
+    let win = await this.promiseAlertDialogOpen(
+      buttonNameOrElementID,
+      uri,
+      options
+    );
     if (!win.docShell.browsingContext.embedderElement) {
       return this.windowClosed(win);
     }
@@ -2564,5 +2588,12 @@ var BrowserTestUtils = {
     });
   },
 };
+
+XPCOMUtils.defineLazyPreferenceGetter(
+  BrowserTestUtils,
+  "_httpsFirstEnabled",
+  "dom.security.https_first",
+  false
+);
 
 Services.obs.addObserver(BrowserTestUtils, "test-complete");

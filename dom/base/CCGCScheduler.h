@@ -142,6 +142,7 @@ class CCGCScheduler {
 
   void UserIsInactive();
   void UserIsActive();
+  bool IsUserActive() const { return mUserIsActive; }
 
   void KillShrinkingGCTimer();
   void KillFullGCTimer();
@@ -178,6 +179,7 @@ class CCGCScheduler {
       SetNeedsFullGC();
     }
   }
+
   // Ensure that the current runner does a cycle collection, and trigger a GC
   // after it finishes.
   void EnsureCCThenGC() {
@@ -189,7 +191,7 @@ class CCGCScheduler {
   // Returns false if we started and finished a major GC while waiting for a
   // response.
   [[nodiscard]] bool NoteReadyForMajorGC() {
-    if (mMajorGCReason == JS::GCReason::NO_REASON) {
+    if (mMajorGCReason == JS::GCReason::NO_REASON || InIncrementalGC()) {
       return false;
     }
     mReadyForMajorGC = true;
@@ -198,6 +200,8 @@ class CCGCScheduler {
 
   void NoteGCBegin();
   void NoteGCEnd();
+  // A timer fired, but then decided not to run a GC.
+  void NoteWontGC();
 
   void NoteGCSliceEnd(TimeDuration aSliceDuration) {
     if (mMajorGCReason == JS::GCReason::NO_REASON) {
@@ -215,9 +219,10 @@ class CCGCScheduler {
   }
 
   bool GCRunnerFired(TimeStamp aDeadline);
+  bool GCRunnerFiredDoGC(TimeStamp aDeadline, const GCRunnerStep& aStep);
 
   using MayGCPromise =
-      MozPromise<bool /* aIgnored */, mozilla::ipc::ResponseRejectReason, true>;
+      MozPromise<bool, mozilla::ipc::ResponseRejectReason, true>;
 
   // Returns null if we shouldn't GC now (eg a GC is already running).
   static RefPtr<MayGCPromise> MayGCNow(JS::GCReason reason);

@@ -515,11 +515,8 @@ void finalizeCB(GObject* aObj) {
 
 const gchar* getNameCB(AtkObject* aAtkObj) {
   nsAutoString name;
-  AccessibleWrap* accWrap = GetAccessibleWrap(aAtkObj);
-  if (accWrap) {
-    accWrap->Name(name);
-  } else if (RemoteAccessible* proxy = GetProxy(aAtkObj)) {
-    proxy->Name(name);
+  if (Accessible* acc = GetInternalObj(aAtkObj)) {
+    acc->Name(name);
   } else {
     return nullptr;
   }
@@ -554,13 +551,8 @@ static void MaybeFireNameChange(AtkObject* aAtkObj, const nsString& aNewName) {
 
 const gchar* getDescriptionCB(AtkObject* aAtkObj) {
   nsAutoString uniDesc;
-  AccessibleWrap* accWrap = GetAccessibleWrap(aAtkObj);
-  if (accWrap) {
-    if (accWrap->IsDefunct()) return nullptr;
-
-    accWrap->Description(uniDesc);
-  } else if (RemoteAccessible* proxy = GetProxy(aAtkObj)) {
-    proxy->Description(uniDesc);
+  if (Accessible* acc = GetInternalObj(aAtkObj)) {
+    acc->Description(uniDesc);
   } else {
     return nullptr;
   }
@@ -1108,7 +1100,7 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
 
     case nsIAccessibleEvent::EVENT_FOCUS: {
       a11y::RootAccessible* rootAccWrap = accWrap->RootAccessible();
-      if (rootAccWrap && rootAccWrap->mActivated) {
+      if (rootAccWrap && rootAccWrap->IsActivated()) {
         atk_focus_tracker_notify(atkObj);
         // Fire state change event for focus
         atk_object_notify_state_change(atkObj, ATK_STATE_FOCUSED, true);
@@ -1267,7 +1259,6 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
       break;
 
     case nsIAccessibleEvent::EVENT_WINDOW_ACTIVATE: {
-      accessible->AsRoot()->mActivated = true;
       guint id = g_signal_lookup("activate", MAI_TYPE_ATK_OBJECT);
       g_signal_emit(atkObj, id, 0);
 
@@ -1276,7 +1267,6 @@ nsresult AccessibleWrap::HandleAccEvent(AccEvent* aEvent) {
     } break;
 
     case nsIAccessibleEvent::EVENT_WINDOW_DEACTIVATE: {
-      accessible->AsRoot()->mActivated = false;
       guint id = g_signal_lookup("deactivate", MAI_TYPE_ATK_OBJECT);
       g_signal_emit(atkObj, id, 0);
     } break;

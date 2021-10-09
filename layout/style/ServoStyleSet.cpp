@@ -348,7 +348,7 @@ void ServoStyleSet::PreTraverseSync() {
     uint64_t generation = userFontSet->GetGeneration();
     if (generation != mUserFontSetUpdateGeneration) {
       mDocument->GetFonts()->CacheFontLoadability();
-      presContext->DeviceContext()->UpdateFontCacheUserFonts(userFontSet);
+      presContext->UpdateFontCacheUserFonts(userFontSet);
       mUserFontSetUpdateGeneration = generation;
     }
   }
@@ -950,6 +950,13 @@ void ServoStyleSet::RuleChanged(StyleSheet& aSheet, css::Rule* aRule,
     MarkOriginsDirty(ToOriginFlags(aSheet.GetOrigin()));
   } else {
     RuleChangedInternal(aSheet, *aRule, aKind);
+  }
+}
+
+void ServoStyleSet::SheetCloned(StyleSheet& aSheet) {
+  mNeedsRestyleAfterEnsureUniqueInner = true;
+  if (mStyleRuleMap) {
+    mStyleRuleMap->SheetCloned(aSheet);
   }
 }
 

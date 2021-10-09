@@ -13,6 +13,7 @@
 #include "builtin/RegExp.h"
 #include "builtin/String.h"
 #include "jit/BaselineIC.h"
+#include "jit/Ion.h"
 #include "jit/IonIC.h"
 #include "jit/TrialInlining.h"
 #include "jit/VMFunctions.h"
@@ -51,6 +52,7 @@ namespace jit {
   _(AtomicsOr64, js::jit::AtomicsOr64)                                         \
   _(AtomicsSub64, js::jit::AtomicsSub64)                                       \
   _(AtomicsXor64, js::jit::AtomicsXor64)                                       \
+  _(AtomizeString, js::AtomizeString)                                          \
   _(BaselineCompileFromBaselineInterpreter,                                    \
     js::jit::BaselineCompileFromBaselineInterpreter)                           \
   _(BaselineDebugPrologue, js::jit::DebugPrologue)                             \
@@ -180,6 +182,8 @@ namespace jit {
   _(LambdaArrow, js::LambdaArrow)                                              \
   _(LeaveWith, js::jit::LeaveWith)                                             \
   _(LoadAliasedDebugVar, js::LoadAliasedDebugVar)                              \
+  _(MapObjectGet, js::jit::MapObjectGet)                                       \
+  _(MapObjectHas, js::jit::MapObjectHas)                                       \
   _(MutatePrototype, js::jit::MutatePrototype)                                 \
   _(NamedLambdaObjectCreateTemplateObject,                                     \
     js::NamedLambdaObject::createTemplateObject)                               \
@@ -192,9 +196,9 @@ namespace jit {
   _(NewArrayWithShape, js::NewArrayWithShape)                                  \
   _(NewCallObject, js::jit::NewCallObject)                                     \
   _(NewObjectOperation, js::NewObjectOperation)                                \
-  _(NewObjectOperationWithTemplate, js::NewObjectOperationWithTemplate)        \
   _(NewPlainObjectBaselineFallback, js::NewPlainObjectBaselineFallback)        \
   _(NewPlainObjectOptimizedFallback, js::NewPlainObjectOptimizedFallback)      \
+  _(NewPrivateName, js::NewPrivateName)                                        \
   _(NewRegExpStringIterator, js::NewRegExpStringIterator)                      \
   _(NewStringIterator, js::NewStringIterator)                                  \
   _(NewStringObject, js::jit::NewStringObject)                                 \
@@ -231,6 +235,7 @@ namespace jit {
   _(SetFunctionName, js::SetFunctionName)                                      \
   _(SetIntrinsicOperation, js::SetIntrinsicOperation)                          \
   _(SetObjectElementWithReceiver, js::SetObjectElementWithReceiver)            \
+  _(SetObjectHas, js::jit::SetObjectHas)                                       \
   _(SetPropertySuper, js::SetPropertySuper)                                    \
   _(StartDynamicModuleImport, js::StartDynamicModuleImport)                    \
   _(StringBigIntGreaterThanOrEqual,                                            \

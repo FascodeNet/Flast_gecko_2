@@ -2,7 +2,6 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-from __future__ import absolute_import, print_function, unicode_literals
 
 """Utility functions to handle test chunking."""
 
@@ -11,7 +10,6 @@ import logging
 import os
 from abc import ABCMeta, abstractmethod
 
-import six
 from manifestparser import TestManifest
 from manifestparser.filters import chunk_by_runtime
 from mozbuild.util import memoize
@@ -46,13 +44,12 @@ def guess_mozinfo_from_task(task):
         "asan": "asan" in task["build-attributes"]["build_platform"],
         "bits": 32 if "32" in task["build-attributes"]["build_platform"] else 64,
         "ccov": "ccov" in task["build-attributes"]["build_platform"],
-        "crashreporter": True,
         "debug": task["build-attributes"]["build_type"] == "debug",
         "e10s": task["attributes"]["e10s"],
-        "fission": task["attributes"].get("unittest_variant") == "fission",
+        "fission": "fission" in task["attributes"].get("unittest_variant", ""),
         "headless": "-headless" in task["test-name"],
         "tsan": "tsan" in task["build-attributes"]["build_platform"],
-        "webrender": task.get("webrender", False),
+        "webrender": task.get("webrender", True),
     }
     for platform in ("android", "linux", "mac", "win"):
         if platform in task["build-attributes"]["build_platform"]:
@@ -64,6 +61,12 @@ def guess_mozinfo_from_task(task):
                 task["build-attributes"]["build_platform"]
             )
         )
+
+    # crashreporter is disabled for asan / tsan builds
+    if info["asan"] or info["tsan"]:
+        info["crashreporter"] = False
+    else:
+        info["crashreporter"] = True
 
     info["appname"] = "fennec" if info["os"] == "android" else "firefox"
 
@@ -87,6 +90,19 @@ def guess_mozinfo_from_task(task):
     else:
         info["toolkit"] = "gtk"
 
+    # guess os_version
+    os_versions = {
+        "linux1804": "18.04",
+        "macosx1015": "10.15",
+        "macosx1100": "11.00",
+        "windows7": "6.1",
+        "windows10": "10.0",
+    }
+    for platform, version in os_versions.items():
+        if platform in task["test-platform"]:
+            info["os_version"] = version
+            break
+
     return info
 
 
@@ -104,9 +120,9 @@ def get_runtimes(platform, suite_name):
         path = base.format("unix")
 
     if not os.path.exists(path):
-        raise IOError("manifest runtime file at {} not found.".format(path))
+        raise OSError(f"manifest runtime file at {path} not found.")
 
-    with open(path, "r") as fh:
+    with open(path) as fh:
         return json.load(fh)[suite_name]
 
 
@@ -150,8 +166,7 @@ def chunk_manifests(suite, platform, chunks, manifests):
     return chunked_manifests
 
 
-@six.add_metaclass(ABCMeta)
-class BaseManifestLoader(object):
+class BaseManifestLoader(metaclass=ABCMeta):
     def __init__(self, params):
         self.params = params
 
@@ -175,7 +190,6 @@ class BaseManifestLoader(object):
             run at least one test. The second is a list of skipped manifests (all tests are
             skipped).
         """
-        pass
 
 
 class DefaultLoader(BaseManifestLoader):
@@ -205,13 +219,13 @@ class DefaultLoader(BaseManifestLoader):
                 manifests.add(t["manifest"])
             return {"active": list(manifests), "skipped": []}
 
-        manifests = set(chunk_by_runtime.get_manifest(t) for t in tests)
+        manifests = {chunk_by_runtime.get_manifest(t) for t in tests}
 
         # Compute  the active tests.
         m = TestManifest()
         m.tests = tests
         tests = m.active_tests(disabled=False, exists=False, **mozinfo)
-        active = set(chunk_by_runtime.get_manifest(t) for t in tests)
+        active = {chunk_by_runtime.get_manifest(t) for t in tests}
         skipped = manifests - active
         return {"active": list(active), "skipped": list(skipped)}
 
@@ -223,12 +237,12 @@ class BugbugLoader(DefaultLoader):
     CONFIDENCE_THRESHOLD = CT_LOW
 
     def __init__(self, *args, **kwargs):
-        super(BugbugLoader, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.timedout = False
 
     @memoize
     def get_manifests(self, suite, mozinfo):
-        manifests = super(BugbugLoader, self).get_manifests(suite, mozinfo)
+        manifests = super().get_manifests(suite, mozinfo)
 
         # Don't prune any manifests if we're on a backstop push or there was a timeout.
         if self.params["backstop"] or self.timedout:

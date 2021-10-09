@@ -10,6 +10,8 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 
+#include "jsfriendapi.h"
+
 #include "gc/Barrier.h"
 #include "js/Conversions.h"
 #include "js/friend/ErrorMessages.h"  // JSErrNum
@@ -687,6 +689,12 @@ struct JSObject_Slots4 : JSObject {
   void* data[2];
   js::Value fslots[4];
 };
+struct JSObject_Slots6 : JSObject {
+  // Only used for extended functions which are required to have exactly six
+  // fixed slots due to JIT assumptions.
+  void* data[2];
+  js::Value fslots[6];
+};
 struct JSObject_Slots8 : JSObject {
   void* data[2];
   js::Value fslots[8];
@@ -761,11 +769,6 @@ JSObject* GetThisObjectOfWith(JSObject* env);
 } /* namespace js */
 
 namespace js {
-
-bool NewObjectWithTaggedProtoIsCachable(JSContext* cx,
-                                        Handle<TaggedProto> proto,
-                                        NewObjectKind newKind,
-                                        const JSClass* clasp);
 
 // ES6 9.1.15 GetPrototypeFromConstructor.
 extern bool GetPrototypeFromConstructor(JSContext* cx,

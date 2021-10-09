@@ -23,13 +23,11 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
 
-// These prefs are relative to the `browser.urlbar` branch.
-const SUGGEST_PREF = "suggest.quicksuggest";
+XPCOMUtils.defineLazyGlobalGetters(this, ["AbortController", "fetch"]);
 
-const FEATURE_NAME = "Firefox Suggest";
-const NONSPONSORED_ACTION_TEXT = FEATURE_NAME;
-const HELP_TITLE = `Learn more about ${FEATURE_NAME}`;
+const MERINO_ENDPOINT_PARAM_QUERY = "q";
 
+const TELEMETRY_MERINO_LATENCY = "FX_URLBAR_MERINO_LATENCY_MS";
 const TELEMETRY_SCALAR_IMPRESSION =
   "contextual.services.quicksuggest.impression";
 const TELEMETRY_SCALAR_CLICK = "contextual.services.quicksuggest.click";
@@ -62,14 +60,6 @@ class ProviderQuickSuggest extends UrlbarProvider {
    */
   get type() {
     return UrlbarUtils.PROVIDER_TYPE.NETWORK;
-  }
-
-  /**
-   * @returns {string} The name of the Firefox Suggest feature, suitable for
-   *   display to the user. en-US only for now.
-   */
-  get featureName() {
-    return FEATURE_NAME;
   }
 
   /**
@@ -107,11 +97,7 @@ class ProviderQuickSuggest extends UrlbarProvider {
       !queryContext.searchMode &&
       !queryContext.isPrivate &&
       UrlbarPrefs.get("quickSuggestEnabled") &&
-      (UrlbarPrefs.get("quicksuggest.showedOnboardingDialog") ||
-        !UrlbarPrefs.get("quickSuggestShouldShowOnboardingDialog")) &&
-      UrlbarPrefs.get(SUGGEST_PREF) &&
-      UrlbarPrefs.get("suggest.searches") &&
-      UrlbarPrefs.get("browser.search.suggest.enabled")
+      UrlbarPrefs.get("suggest.quicksuggest")
     );
   }
 
@@ -125,15 +111,44 @@ class ProviderQuickSuggest extends UrlbarProvider {
    */
   async startQuery(queryContext, addCallback) {
     let instance = this.queryInstance;
-    let suggestion = await UrlbarQuickSuggest.query(
-      queryContext.searchString.trimStart()
-    );
-    if (!suggestion || instance != this.queryInstance) {
+
+    // Trim only the start of the search string because a trailing space can
+    // affect the suggestions.
+    let searchString = queryContext.searchString.trimStart();
+
+    // We currently have two sources for quick suggest: remote settings
+    // (from `UrlbarQuickSuggest`) and Merino.
+    let promises = [];
+    if (UrlbarPrefs.get("quickSuggestRemoteSettingsEnabled")) {
+      promises.push(UrlbarQuickSuggest.query(searchString));
+    }
+    if (UrlbarPrefs.get("merinoEnabled") && queryContext.allowRemoteResults()) {
+      promises.push(this._fetchMerinoSuggestions(queryContext, searchString));
+    }
+
+    let allSuggestions = await Promise.all(promises);
+    if (instance != this.queryInstance) {
+      return;
+    }
+
+    // Filter out sponsored suggestions if they're disabled. Also filter out
+    // null suggestions since both the remote settings and Merino fetches return
+    // null when there are no matches. Take the remaining suggestion with the
+    // largest score.
+    let suggestion = allSuggestions
+      .flat()
+      .filter(
+        s =>
+          s &&
+          (!s.is_sponsored || UrlbarPrefs.get("suggest.quicksuggest.sponsored"))
+      )
+      .sort((a, b) => b.score - a.score)[0];
+    if (!suggestion) {
       return;
     }
 
     let payload = {
-      qsSuggestion: [suggestion.fullKeyword, UrlbarUtils.HIGHLIGHT.SUGGESTED],
+      qsSuggestion: [suggestion.full_keyword, UrlbarUtils.HIGHLIGHT.SUGGESTED],
       title: suggestion.title,
       url: suggestion.url,
       icon: suggestion.icon,
@@ -141,22 +156,21 @@ class ProviderQuickSuggest extends UrlbarProvider {
       sponsoredClickUrl: suggestion.click_url,
       sponsoredBlockId: suggestion.block_id,
       sponsoredAdvertiser: suggestion.advertiser,
-      isSponsored: true,
+      isSponsored: suggestion.is_sponsored,
       helpUrl: this.helpUrl,
-      helpTitle: HELP_TITLE,
+      helpL10nId: "firefox-suggest-urlbar-learn-more",
     };
-
-    if (!suggestion.isSponsored) {
-      // In addition to the view, we also use `sponsoredText` in the muxer to
-      // tell whether the result is sponsored or non-sponsored, so be careful
-      // about changing it. See also bug 1695302 re: these property names.
-      payload.sponsoredText = NONSPONSORED_ACTION_TEXT;
-    }
 
     let result = new UrlbarResult(
       UrlbarUtils.RESULT_TYPE.URL,
       UrlbarUtils.RESULT_SOURCE.SEARCH,
       ...UrlbarResult.payloadAndSimpleHighlights(queryContext.tokens, payload)
+    );
+    result.isSuggestedIndexRelativeToGroup = true;
+    result.suggestedIndex = UrlbarPrefs.get(
+      suggestion.is_sponsored
+        ? "quickSuggestSponsoredIndex"
+        : "quickSuggestNonSponsoredIndex"
     );
     addCallback(this, result);
 
@@ -247,20 +261,29 @@ class ProviderQuickSuggest extends UrlbarProvider {
       let isQuickSuggestLinkClicked =
         details.selIndex == resultIndex && details.selType !== "help";
       let {
+        qsSuggestion, // The full keyword
         sponsoredAdvertiser,
         sponsoredImpressionUrl,
         sponsoredClickUrl,
         sponsoredBlockId,
       } = result.payload;
+
+      let searchQuery = "";
+      let matchedKeywords = "";
+      let scenario = UrlbarPrefs.get("quicksuggest.scenario");
+      // Only collect the search query and matched keywords for "online" scenario.
+      // For other scenarios, those fields are set as empty strings.
+      if (scenario === "online") {
+        matchedKeywords = qsSuggestion || details.searchString;
+        searchQuery = details.searchString;
+      }
+
       // impression
-      //
-      // Set `search_query` and `matched_keywords` to empty string, both of
-      // them are required fields for the impression, so we need to keep them
-      // in the payload. See bug 1725492 for more details.
       PartnerLinkAttribution.sendContextualServicesPing(
         {
-          search_query: "",
-          matched_keywords: "",
+          scenario,
+          search_query: searchQuery,
+          matched_keywords: matchedKeywords,
           advertiser: sponsoredAdvertiser,
           block_id: sponsoredBlockId,
           position: telemetryResultIndex,
@@ -273,6 +296,7 @@ class ProviderQuickSuggest extends UrlbarProvider {
       if (isQuickSuggestLinkClicked) {
         PartnerLinkAttribution.sendContextualServicesPing(
           {
+            scenario,
             advertiser: sponsoredAdvertiser,
             block_id: sponsoredBlockId,
             position: telemetryResultIndex,
@@ -293,14 +317,106 @@ class ProviderQuickSuggest extends UrlbarProvider {
    */
   onPrefChanged(pref) {
     switch (pref) {
-      case SUGGEST_PREF:
-        Services.telemetry.recordEvent(
-          TELEMETRY_EVENT_CATEGORY,
-          "enable_toggled",
-          UrlbarPrefs.get(SUGGEST_PREF) ? "enabled" : "disabled"
-        );
+      case "suggest.quicksuggest":
+        if (!UrlbarPrefs.updatingFirefoxSuggestScenario) {
+          Services.telemetry.recordEvent(
+            TELEMETRY_EVENT_CATEGORY,
+            "enable_toggled",
+            UrlbarPrefs.get(pref) ? "enabled" : "disabled"
+          );
+        }
+        break;
+      case "suggest.quicksuggest.sponsored":
+        if (!UrlbarPrefs.updatingFirefoxSuggestScenario) {
+          Services.telemetry.recordEvent(
+            TELEMETRY_EVENT_CATEGORY,
+            "sponsored_toggled",
+            UrlbarPrefs.get(pref) ? "enabled" : "disabled"
+          );
+        }
         break;
     }
+  }
+
+  /**
+   * Cancels the current query.
+   *
+   * @param {UrlbarQueryContext} queryContext
+   */
+  cancelQuery(queryContext) {
+    try {
+      this._merinoFetchController?.abort();
+    } catch (error) {
+      Cu.reportError(error);
+    }
+    this._merinoFetchController = null;
+  }
+
+  /**
+   * Fetches Merino suggestions.
+   *
+   * @param {UrlbarQueryContext} queryContext
+   * @param {string} searchString
+   * @returns {array}
+   *   The Merino suggestions or null if there's an error or unexpected
+   *   response.
+   */
+  async _fetchMerinoSuggestions(queryContext, searchString) {
+    let instance = this.queryInstance;
+
+    // Fetch a response from the endpoint.
+    let response;
+    let controller;
+    try {
+      let url = new URL(UrlbarPrefs.get("merino.endpointURL"));
+      url.searchParams.set(MERINO_ENDPOINT_PARAM_QUERY, searchString);
+
+      controller = this._merinoFetchController = new AbortController();
+      TelemetryStopwatch.start(TELEMETRY_MERINO_LATENCY, queryContext);
+      response = await fetch(url, {
+        signal: controller.signal,
+      });
+      TelemetryStopwatch.finish(TELEMETRY_MERINO_LATENCY, queryContext);
+      if (instance != this.queryInstance) {
+        return null;
+      }
+    } catch (error) {
+      TelemetryStopwatch.cancel(TELEMETRY_MERINO_LATENCY, queryContext);
+      if (error.name != "AbortError") {
+        Cu.reportError(error);
+      }
+    } finally {
+      if (controller == this._merinoFetchController) {
+        this._merinoFetchController = null;
+      }
+    }
+
+    if (!response) {
+      return null;
+    }
+
+    // Get the response body as an object.
+    let body;
+    try {
+      body = await response.json();
+      if (instance != this.queryInstance) {
+        return null;
+      }
+    } catch (error) {
+      Cu.reportError(error);
+    }
+
+    if (!body?.suggestions?.length) {
+      return null;
+    }
+
+    let { suggestions } = body;
+    if (!Array.isArray(suggestions)) {
+      Cu.reportError("Unexpected Merino response: " + JSON.stringify(body));
+      return null;
+    }
+
+    return suggestions;
   }
 
   /**

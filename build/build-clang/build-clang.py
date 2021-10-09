@@ -367,10 +367,6 @@ def build_one_stage(
     # Android; we now have to provide all the necessary compiler switches to
     # make that work.
     if is_final_stage and android_targets:
-        cmake_args += [
-            "-DLLVM_LIBDIR_SUFFIX=64",
-        ]
-
         android_link_flags = "-fuse-ld=lld"
 
         for target, cfg in android_targets.items():
@@ -993,19 +989,17 @@ if __name__ == "__main__":
         )
 
     # Copy the wasm32 builtins to the final_inst_dir if the archive is present.
-    if "wasi-sysroot" in config:
-        sysroot = config["wasi-sysroot"].format(**os.environ)
-        if os.path.isdir(sysroot):
-            for srcdir in glob.glob(
-                os.path.join(sysroot, "lib", "clang", "*", "lib", "wasi")
+    if "wasi-compiler-rt" in config:
+        compiler_rt = config["wasi-compiler-rt"].format(**os.environ)
+        if os.path.isdir(compiler_rt):
+            for libdir in glob.glob(
+                os.path.join(final_inst_dir, "lib", "clang", "*", "lib")
             ):
-                print("Copying from wasi-sysroot srcdir %s" % srcdir)
+                srcdir = os.path.join(compiler_rt, "lib", "wasi")
+                print("Copying from wasi-compiler-rt srcdir %s" % srcdir)
                 # Copy the contents of the "lib/wasi" subdirectory to the
                 # appropriate location in final_inst_dir.
-                version = os.path.basename(os.path.dirname(os.path.dirname(srcdir)))
-                destdir = os.path.join(
-                    final_inst_dir, "lib", "clang", version, "lib", "wasi"
-                )
+                destdir = os.path.join(libdir, "wasi")
                 mkdir_p(destdir)
                 copy_tree(srcdir, destdir)
 

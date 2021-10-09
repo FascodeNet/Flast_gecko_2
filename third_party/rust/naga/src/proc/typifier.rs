@@ -111,6 +111,7 @@ pub enum ResolveError {
 
 pub struct ResolveContext<'a> {
     pub constants: &'a Arena<crate::Constant>,
+    pub types: &'a Arena<crate::Type>,
     pub global_vars: &'a Arena<crate::GlobalVariable>,
     pub local_vars: &'a Arena<crate::LocalVariable>,
     pub functions: &'a Arena<crate::Function>,
@@ -121,13 +122,21 @@ impl<'a> ResolveContext<'a> {
     pub fn resolve(
         &self,
         expr: &crate::Expression,
-        types: &'a Arena<crate::Type>,
         past: impl Fn(Handle<crate::Expression>) -> &'a TypeResolution,
     ) -> Result<TypeResolution, ResolveError> {
         use crate::TypeInner as Ti;
+        let types = self.types;
         Ok(match *expr {
             crate::Expression::Access { base, .. } => match *past(base).inner_with(types) {
+                // Arrays and matrices can only be indexed dynamically behind a
+                // pointer, but that's a validation error, not a type error, so
+                // go ahead provide a type here.
                 Ti::Array { base, .. } => TypeResolution::Handle(base),
+                Ti::Matrix { rows, width, .. } => TypeResolution::Value(Ti::Vector {
+                    size: rows,
+                    kind: crate::ScalarKind::Float,
+                    width,
+                }),
                 Ti::Vector {
                     size: _,
                     kind,
@@ -144,37 +153,39 @@ impl<'a> ResolveContext<'a> {
                     width,
                     class,
                 }),
-                Ti::Pointer { base, class } => TypeResolution::Value(match types[base].inner {
-                    Ti::Array { base, .. } => Ti::Pointer { base, class },
-                    Ti::Vector {
-                        size: _,
-                        kind,
-                        width,
-                    } => Ti::ValuePointer {
-                        size: None,
-                        kind,
-                        width,
-                        class,
-                    },
-                    // Matrices are only dynamically indexed behind a pointer
-                    Ti::Matrix {
-                        columns: _,
-                        rows,
-                        width,
-                    } => Ti::ValuePointer {
-                        kind: crate::ScalarKind::Float,
-                        size: Some(rows),
-                        width,
-                        class,
-                    },
-                    ref other => {
-                        log::error!("Access sub-type {:?}", other);
-                        return Err(ResolveError::InvalidSubAccess {
-                            ty: base,
-                            indexed: false,
-                        });
-                    }
-                }),
+                Ti::Pointer { base, class } => {
+                    TypeResolution::Value(match types[base].inner {
+                        Ti::Array { base, .. } => Ti::Pointer { base, class },
+                        Ti::Vector {
+                            size: _,
+                            kind,
+                            width,
+                        } => Ti::ValuePointer {
+                            size: None,
+                            kind,
+                            width,
+                            class,
+                        },
+                        // Matrices are only dynamically indexed behind a pointer
+                        Ti::Matrix {
+                            columns: _,
+                            rows,
+                            width,
+                        } => Ti::ValuePointer {
+                            kind: crate::ScalarKind::Float,
+                            size: Some(rows),
+                            width,
+                            class,
+                        },
+                        ref other => {
+                            log::error!("Access sub-type {:?}", other);
+                            return Err(ResolveError::InvalidSubAccess {
+                                ty: base,
+                                indexed: false,
+                            });
+                        }
+                    })
+                }
                 ref other => {
                     log::error!("Access type {:?}", other);
                     return Err(ResolveError::InvalidAccess {
@@ -339,7 +350,13 @@ impl<'a> ResolveContext<'a> {
                 })
             }
             crate::Expression::Load { pointer } => match *past(pointer).inner_with(types) {
-                Ti::Pointer { base, class: _ } => TypeResolution::Handle(base),
+                Ti::Pointer { base, class: _ } => {
+                    if let Ti::Atomic { kind, width } = types[base].inner {
+                        TypeResolution::Value(Ti::Scalar { kind, width })
+                    } else {
+                        TypeResolution::Handle(base)
+                    }
+                }
                 Ti::ValuePointer {
                     size,
                     kind,
@@ -357,7 +374,7 @@ impl<'a> ResolveContext<'a> {
             crate::Expression::ImageSample { image, .. }
             | crate::Expression::ImageLoad { image, .. } => match *past(image).inner_with(types) {
                 Ti::Image { class, .. } => TypeResolution::Value(match class {
-                    crate::ImageClass::Depth => Ti::Scalar {
+                    crate::ImageClass::Depth { multi: _ } => Ti::Scalar {
                         kind: crate::ScalarKind::Float,
                         width: 4,
                     },
@@ -366,7 +383,7 @@ impl<'a> ResolveContext<'a> {
                         width: 4,
                         size: crate::VectorSize::Quad,
                     },
-                    crate::ImageClass::Storage(format) => Ti::Vector {
+                    crate::ImageClass::Storage { format, .. } => Ti::Vector {
                         kind: format.into(),
                         width: 4,
                         size: crate::VectorSize::Quad,
@@ -384,12 +401,12 @@ impl<'a> ResolveContext<'a> {
                             kind: crate::ScalarKind::Sint,
                             width: 4,
                         },
-                        crate::ImageDimension::D2 => Ti::Vector {
+                        crate::ImageDimension::D2 | crate::ImageDimension::Cube => Ti::Vector {
                             size: crate::VectorSize::Bi,
                             kind: crate::ScalarKind::Sint,
                             width: 4,
                         },
-                        crate::ImageDimension::D3 | crate::ImageDimension::Cube => Ti::Vector {
+                        crate::ImageDimension::D3 => Ti::Vector {
                             size: crate::VectorSize::Tri,
                             kind: crate::ScalarKind::Sint,
                             width: 4,
@@ -491,6 +508,21 @@ impl<'a> ResolveContext<'a> {
                 | crate::BinaryOperator::ShiftLeft
                 | crate::BinaryOperator::ShiftRight => past(left).clone(),
             },
+            crate::Expression::AtomicResult {
+                kind,
+                width,
+                comparison,
+            } => {
+                if comparison {
+                    TypeResolution::Value(Ti::Vector {
+                        size: crate::VectorSize::Bi,
+                        kind,
+                        width,
+                    })
+                } else {
+                    TypeResolution::Value(Ti::Scalar { kind, width })
+                }
+            }
             crate::Expression::Select { accept, .. } => past(accept).clone(),
             crate::Expression::Derivative { axis: _, expr } => past(expr).clone(),
             crate::Expression::Relational { .. } => TypeResolution::Value(Ti::Scalar {
@@ -522,6 +554,9 @@ impl<'a> ResolveContext<'a> {
                     Mf::Asin |
                     Mf::Atan |
                     Mf::Atan2 |
+                    Mf::Asinh |
+                    Mf::Acosh |
+                    Mf::Atanh |
                     // decomposition
                     Mf::Ceil |
                     Mf::Floor |
@@ -649,7 +684,7 @@ impl<'a> ResolveContext<'a> {
                     )))
                 }
             },
-            crate::Expression::Call(function) => {
+            crate::Expression::CallResult(function) => {
                 let result = self.functions[function]
                     .result
                     .as_ref()

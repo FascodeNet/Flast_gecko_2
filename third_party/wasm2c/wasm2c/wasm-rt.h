@@ -43,17 +43,20 @@ extern "C" {
 #define WASM_RT_MAX_CALL_STACK_DEPTH 500
 #endif
 
-/** Check if we should use guard page model. This is enabled if
- * --- the os is 64-bit
- * --- the user has not asked for the use of explicit bounds checks
+/** Check if we should use guard page model.
+ * This is enabled by default unless WASM_USE_EXPLICIT_BOUNDS_CHECKS is defined.
  */
-#if !defined(WASM_USING_GUARD_PAGES)
-  #if !defined(WASM_USE_EXPLICIT_BOUNDS_CHECKS) && UINTPTR_MAX == 0xffffffffffffffff
-    #define WASM_USING_GUARD_PAGES 1
-  #else
-    #define WASM_USING_GUARD_PAGES 0
-  #endif
+#if defined(WASM_USE_GUARD_PAGES) && defined(WASM_USE_EXPLICIT_BOUNDS_CHECKS)
+#  error "Cannot define both WASM_USE_GUARD_PAGES and WASM_USE_EXPLICIT_BOUNDS_CHECKS"
+#elif !defined(WASM_USE_GUARD_PAGES) && !defined(WASM_USE_EXPLICIT_BOUNDS_CHECKS)
+// default to guard pages
+#  define WASM_USE_GUARD_PAGES
 #endif
+
+/** Define WASM_USE_INCREMENTAL_MOVEABLE_MEMORY_ALLOC if you want the runtime to incrementally allocate heap/linear memory
+ * Note that this memory may be moved when it needs to expand
+ */
+
 #if defined(_MSC_VER)
 #define WASM_RT_NO_RETURN __declspec(noreturn)
 #else
@@ -85,8 +88,17 @@ typedef enum {
  * call. */
 typedef void (*wasm_rt_anyfunc_t)(void);
 
+/**
+ * The class of the indirect function being invoked
+ */
+typedef enum {
+  WASM_RT_INTERNAL_FUNCTION,
+  WASM_RT_EXTERNAL_FUNCTION
+} wasm_rt_elem_target_class_t;
+
 /** A single element of a Table. */
 typedef struct {
+  wasm_rt_elem_target_class_t func_class;
   /** The index as returned from `wasm_rt_register_func_type`. */
   uint32_t func_type;
   /** The function. The embedder must know the actual C signature of the
@@ -106,7 +118,11 @@ typedef struct {
 /** A Memory object. */
 typedef struct {
   /** The linear memory data, with a byte length of `size`. */
+#if defined(WASM_USE_GUARD_PAGES) || !defined(WASM_USE_INCREMENTAL_MOVEABLE_MEMORY_ALLOC)
   uint8_t* const data;
+#else
+  uint8_t* data;
+#endif
   /** The current and maximum page count for this Memory object. If there is no
    * maximum, `max_pages` is 0xffffffffu (i.e. UINT32_MAX). */
   uint32_t pages, max_pages;
@@ -161,7 +177,7 @@ typedef void* (*create_wasm2c_sandbox_t)(void);
 typedef void (*destroy_wasm2c_sandbox_t)(void* sbx_ptr);
 typedef void* (*lookup_wasm2c_nonfunc_export_t)(void* sbx_ptr, const char* name);
 typedef uint32_t (*lookup_wasm2c_func_index_t)(void* sbx_ptr, uint32_t param_count, uint32_t result_count, wasm_rt_type_t* types);
-typedef uint32_t (*add_wasm2c_callback_t)(void* sbx_ptr, uint32_t func_type_idx, void* func_ptr);
+typedef uint32_t (*add_wasm2c_callback_t)(void* sbx_ptr, uint32_t func_type_idx, void* func_ptr, wasm_rt_elem_target_class_t func_class);
 typedef void (*remove_wasm2c_callback_t)(void* sbx_ptr, uint32_t callback_idx);
 
 typedef struct wasm2c_sandbox_funcs_t {

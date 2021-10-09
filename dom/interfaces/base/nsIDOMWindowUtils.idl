@@ -1044,6 +1044,13 @@ interface nsIDOMWindowUtils : nsISupports {
    * Transform a rectangle given in coordinates relative to this document
    * into CSS coordinates relative to the screen.
    */
+  DOMRect toScreenRectInCSSUnits(in float aX, in float aY,
+                                 in float aWidth, in float aHeight);
+
+  /**
+   * Transform a rectangle given in coordinates relative to this document
+   * to the screen.
+   */
   DOMRect toScreenRect(in float aX, in float aY,
                        in float aWidth, in float aHeight);
 
@@ -1693,14 +1700,6 @@ interface nsIDOMWindowUtils : nsISupports {
    * findElementWithViewId().
    */
   nsViewID getViewId(in Element aElement);
-
-  /**
-   * Checks the layer tree for this window and returns true
-   * if all layers have transforms that are translations by integers,
-   * no leaf layers overlap, and the union of the leaf layers is exactly
-   * the bounds of the window. Always returns true in non-DEBUG builds.
-   */
-  boolean leafLayersPartitionWindow();
 
   /**
    * Check if any PaintedLayer painting has been done for this element,

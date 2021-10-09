@@ -11,7 +11,6 @@
 
 #include "jit/arm/Assembler-arm.h"
 #include "jit/MoveResolver.h"
-#include "vm/BigIntType.h"
 #include "vm/BytecodeUtil.h"
 #include "wasm/WasmBuiltins.h"
 #include "wasm/WasmCodegenTypes.h"
@@ -1059,6 +1058,10 @@ class MacroAssemblerARMCompat : public MacroAssemblerARM {
   void storePrivateValue(Register src, const Address& dest) {
     store32(Imm32(0), ToType(dest));
     store32(src, ToPayload(dest));
+  }
+  void storePrivateValue(ImmGCPtr imm, const Address& dest) {
+    store32(Imm32(0), ToType(dest));
+    storePtr(imm, ToPayload(dest));
   }
 
   void loadValue(Address src, ValueOperand val);

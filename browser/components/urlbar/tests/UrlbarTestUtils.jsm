@@ -21,10 +21,12 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   Services: "resource://gre/modules/Services.jsm",
   setTimeout: "resource://gre/modules/Timer.jsm",
+  sinon: "resource://testing-common/Sinon.jsm",
   TestUtils: "resource://testing-common/TestUtils.jsm",
   UrlbarController: "resource:///modules/UrlbarController.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
   UrlbarProvider: "resource:///modules/UrlbarUtils.jsm",
+  UrlbarQuickSuggest: "resource:///modules/UrlbarQuickSuggest.jsm",
   UrlbarSearchUtils: "resource:///modules/UrlbarSearchUtils.jsm",
   UrlbarUtils: "resource:///modules/UrlbarUtils.jsm",
 });
@@ -35,17 +37,6 @@ XPCOMUtils.defineLazyServiceGetter(
   "@mozilla.org/uuid-generator;1",
   "nsIUUIDGenerator"
 );
-
-// This must be kept in sync with FeatureManifest.js. UrlbarPrefs.get() will
-// throw an "unknown pref" error if a test enrolls in a mock experiment and hits
-// a code path that accesses a Nimbus feature variable not defined here.
-const DEFAULT_EXPERIMENT_FEATURE_VARIABLES = {
-  quickSuggestEnabled: false,
-  quickSuggestNonSponsoredIndex: -1,
-  quickSuggestShouldShowOnboardingDialog: true,
-  quickSuggestShowOnboardingDialogAfterNRestarts: 2,
-  quickSuggestSponsoredIndex: -1,
-};
 
 var UrlbarTestUtils = {
   /**
@@ -826,13 +817,7 @@ var UrlbarTestUtils = {
    * Enrolls in a mock Nimbus experiment.
    *
    * @param {object} [valueOverrides]
-   *   Individual feature variables to override. By default, feature variables
-   *   take their values from DEFAULT_EXPERIMENT_FEATURE_VARIABLES. Overridden
-   *   by `recipe`.
-   * @param {object} [recipe]
-   *   If given, this recipe is used as is.
-   * @param {string} [name]
-   *   The name of the experiment.
+   *   Values for feature variables.
    * @returns {function}
    *   The experiment cleanup function (async).
    */
@@ -841,12 +826,36 @@ var UrlbarTestUtils = {
     let doExperimentCleanup = await ExperimentFakes.enrollWithFeatureConfig({
       enabled: true,
       featureId: "urlbar",
-      value: Object.assign(
-        DEFAULT_EXPERIMENT_FEATURE_VARIABLES,
-        valueOverrides
-      ),
+      value: valueOverrides,
     });
     return doExperimentCleanup;
+  },
+
+  /**
+   * Waits for quick suggest initialization to finish, ensures its data will not
+   * be updated again during the test, and also optionally sets it up with mock
+   * data.
+   *
+   * @param {array} [data]
+   *   Array of quick suggest data objects. If not given, then this function
+   *   won't set up any mock data.
+   */
+  async ensureQuickSuggestInit(data = null) {
+    this._testScope?.info("Awaiting UrlbarQuickSuggest.init");
+    await UrlbarQuickSuggest.init();
+    this._testScope?.info("Done awaiting UrlbarQuickSuggest.init");
+    let sandbox = sinon.createSandbox();
+    sandbox.stub(UrlbarQuickSuggest, "_ensureAttachmentsDownloadedHelper");
+    this._testScope?.registerCleanupFunction(() => sandbox.restore());
+    if (data) {
+      this._testScope?.info(
+        "Awaiting UrlbarQuickSuggest._processSuggestionsJSON"
+      );
+      await UrlbarQuickSuggest._processSuggestionsJSON(data);
+      this._testScope?.info(
+        "Done awaiting UrlbarQuickSuggest._processSuggestionsJSON"
+      );
+    }
   },
 };
 

@@ -220,6 +220,7 @@ class AnonymousContent;
 class Attr;
 class XULBroadcastManager;
 class XULPersist;
+class BrowserBridgeChild;
 class ChromeObserver;
 class ClientInfo;
 class ClientState;
@@ -3644,7 +3645,7 @@ class Document : public nsINode,
 
   // Return true if there is transient user gesture activation and it hasn't yet
   // timed out.
-  bool HasValidTransientUserGestureActivation();
+  bool HasValidTransientUserGestureActivation() const;
 
   // Return true.
   bool ConsumeTransientUserGestureActivation();
@@ -4016,6 +4017,20 @@ class Document : public nsINode,
   bool ShouldAvoidNativeTheme() const;
 
   static bool IsValidDomain(nsIURI* aOrigHost, nsIURI* aNewURI);
+
+  // Inform a parent document that a BrowserBridgeChild has been created for
+  // an OOP sub-document.
+  // (This is the OOP counterpart to nsDocLoader::ChildEnteringOnload)
+  void OOPChildLoadStarted(BrowserBridgeChild* aChild);
+
+  // Inform a parent document that the BrowserBridgeChild for one of its
+  // OOP sub-documents is done calling its onload handler.
+  // (This is the OOP counterpart to nsDocLoader::ChildDoneWithOnload)
+  void OOPChildLoadDone(BrowserBridgeChild* aChild);
+
+  void ClearOOPChildrenLoading();
+
+  bool HasOOPChildrenLoading() { return !mOOPChildrenLoading.IsEmpty(); }
 
  protected:
   // Returns the WindowContext for the document that we will contribute
@@ -5250,6 +5265,10 @@ class Document : public nsINode,
 
   // Accumulate page load metrics
   void AccumulatePageLoadTelemetry();
+
+  // The OOP counterpart to nsDocLoader::mChildrenInOnload.
+  // Not holding strong refs here since we don't actually use the BBCs.
+  nsTArray<const BrowserBridgeChild*> mOOPChildrenLoading;
 
  public:
   // Needs to be public because the bindings code pokes at it.

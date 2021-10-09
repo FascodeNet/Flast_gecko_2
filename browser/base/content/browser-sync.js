@@ -197,13 +197,16 @@ this.SyncedTabsPanelList = class SyncedTabsPanelList {
     }
   }
 
-  _appendMessageLabel(messageAttr, appendTo = null) {
+  _createNoSyncedTabsElement(messageAttr, appendTo = null) {
     if (!appendTo) {
       appendTo = this.tabsList;
     }
-    let message = this.tabsList.getAttribute(messageAttr);
+
     let messageLabel = document.createXULElement("label");
-    messageLabel.textContent = message;
+    document.l10n.setAttributes(
+      messageLabel,
+      this.tabsList.getAttribute(messageAttr)
+    );
     appendTo.appendChild(messageLabel);
     return messageLabel;
   }
@@ -229,18 +232,20 @@ this.SyncedTabsPanelList = class SyncedTabsPanelList {
     container.appendChild(clientItem);
 
     if (!client.tabs.length) {
-      let label = this._appendMessageLabel("notabsforclientlabel", container);
+      let label = this._createNoSyncedTabsElement(
+        "notabsforclientlabel",
+        container
+      );
       label.setAttribute("class", "PanelUI-remotetabs-notabsforclient-label");
     } else {
       // If this page will display all tabs, show no additional buttons.
-      // If the next page will display all the remaining tabs, show a "Show All" button
-      // Otherwise, show a "Shore More" button
+      // Otherwise, show a "Show More" button
       let hasNextPage = client.tabs.length > maxTabs;
       let nextPageIsLastPage =
         hasNextPage &&
         maxTabs + SyncedTabsPanelList.sRemoteTabsPerPage >= client.tabs.length;
       if (nextPageIsLastPage) {
-        // When the user clicks "Show All", try to have at least sRemoteTabsNextPageMinTabs more tabs
+        // When the user clicks "Show More", try to have at least sRemoteTabsNextPageMinTabs more tabs
         // to display in order to avoid user frustration
         maxTabs = Math.min(
           client.tabs.length - SyncedTabsPanelList.sRemoteTabsNextPageMinTabs,
@@ -271,7 +276,9 @@ this.SyncedTabsPanelList = class SyncedTabsPanelList {
       "label",
       tabInfo.title != "" ? tabInfo.title : tabInfo.url
     );
-    item.setAttribute("image", tabInfo.icon);
+    if (tabInfo.icon) {
+      item.setAttribute("image", tabInfo.icon);
+    }
     item.setAttribute("tooltiptext", tooltipText);
     // We need to use "click" instead of "command" here so openUILink
     // respects different buttons (eg, to open in a new tab).
@@ -292,8 +299,6 @@ this.SyncedTabsPanelList = class SyncedTabsPanelList {
   }
 
   _createShowMoreSyncedTabsElement(clientId) {
-    let labelAttr = "showMoreLabel";
-    let tooltipAttr = "showMoreTooltipText";
     let showCount = Infinity;
 
     let showMoreItem = document.createXULElement("toolbarbutton");
@@ -303,12 +308,8 @@ this.SyncedTabsPanelList = class SyncedTabsPanelList {
       "subviewbutton-nav",
       "subviewbutton-nav-down"
     );
-    let label = gSync.fluentStrings.formatValueSync(
-      this.tabsList.getAttribute(labelAttr)
-    );
-    showMoreItem.setAttribute("label", label);
-    let tooltipText = this.tabsList.getAttribute(tooltipAttr);
-    showMoreItem.setAttribute("tooltiptext", tooltipText);
+    document.l10n.setAttributes(showMoreItem, "appmenu-remote-tabs-showmore");
+
     showMoreItem.addEventListener("click", e => {
       e.preventDefault();
       e.stopPropagation();
@@ -733,7 +734,8 @@ var gSync = {
           }
         });
         return item;
-      }
+      },
+      true
     );
 
     bodyNode.removeAttribute("state");
@@ -982,10 +984,6 @@ var gSync = {
       document,
       "appMenu-fxa-label2"
     );
-    const appMenuAvatar = PanelMultiView.getViewNode(
-      document,
-      "appMenu-fxa-avatar"
-    );
     const appMenuHeaderText = PanelMultiView.getViewNode(
       document,
       "appMenu-fxa-text"
@@ -1008,7 +1006,6 @@ var gSync = {
     appMenuLabel.setAttribute("label", defaultLabel);
     appMenuLabel.removeAttribute("aria-labelledby");
     appMenuStatus.removeAttribute("fxastatus");
-    appMenuAvatar.style.removeProperty("list-style-image");
 
     if (status == UIState.STATUS_NOT_CONFIGURED) {
       appMenuHeaderText.hidden = false;
@@ -1271,7 +1268,8 @@ var gSync = {
     url,
     title,
     multiselected,
-    createDeviceNodeFn
+    createDeviceNodeFn,
+    isFxaMenu = false
   ) {
     if (!createDeviceNodeFn) {
       createDeviceNodeFn = (targetId, name, targetType, lastModified) => {
@@ -1305,7 +1303,8 @@ var gSync = {
           createDeviceNodeFn,
           url,
           title,
-          multiselected
+          multiselected,
+          isFxaMenu
         );
       } else {
         this._appendSendTabSingleDevice(fragment, createDeviceNodeFn);
@@ -1335,7 +1334,8 @@ var gSync = {
     createDeviceNodeFn,
     url,
     title,
-    multiselected
+    multiselected,
+    isFxaMenu = false
   ) {
     let tabsToSend = multiselected
       ? gBrowser.selectedTabs.map(t => {
@@ -1420,15 +1420,15 @@ var gSync = {
       const separator = createDeviceNodeFn();
       separator.classList.add("sync-menuitem");
       fragment.appendChild(separator);
-      const allDevicesLabel = this.fxaStrings.GetStringFromName(
-        "sendToAllDevices.menuitem"
-      );
+      const allDevicesLabel = isFxaMenu
+        ? this.fluentStrings.formatValueSync("account-send-to-all-devices")
+        : this.fxaStrings.GetStringFromName("sendToAllDevices.menuitem");
       addTargetDevice("", allDevicesLabel, "");
 
       // "Manage devices" menu item
-      const manageDevicesLabel = this.fxaStrings.GetStringFromName(
-        "manageDevices.menuitem"
-      );
+      const manageDevicesLabel = isFxaMenu
+        ? this.fluentStrings.formatValueSync("account-manage-devices")
+        : this.fxaStrings.GetStringFromName("manageDevices.menuitem");
       // We piggyback on the createDeviceNodeFn implementation,
       // it's a big disgusting.
       const targetDevice = createDeviceNodeFn(
@@ -1542,12 +1542,9 @@ var gSync = {
       let tabCount = aTargetTab.multiselected
         ? gBrowser.multiSelectedTabsCount
         : 1;
-      sendTabsToDevice.label = PluralForm.get(
-        tabCount,
-        gNavigatorBundle.getString("sendTabsToDevice.label")
-      ).replace("#1", tabCount.toLocaleString());
-      sendTabsToDevice.accessKey = gNavigatorBundle.getString(
-        "sendTabsToDevice.accesskey"
+      sendTabsToDevice.setAttribute(
+        "data-l10n-args",
+        JSON.stringify({ tabCount })
       );
       sendTabsToDevice.hidden = false;
     }

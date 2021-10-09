@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <Windows.h>
+#include <windows.h>
 
 #ifdef VERBOSE_LOGGING
 #define VERBOSE_LOG(...) { printf(__VA_ARGS__); }
@@ -274,6 +274,22 @@ int os_clock_getres(void* clock_data, int clock_id, struct timespec* out_struct)
   out_struct->tv_sec = 0;
   out_struct->tv_nsec = 1000;
   return 0;
+}
+
+void os_print_last_error(const char* msg) {
+  DWORD errorMessageID  = GetLastError();
+  if (errorMessageID != 0) {
+    LPSTR messageBuffer = 0;
+    //The api creates the buffer that holds the message
+    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                NULL, errorMessageID, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), (LPSTR)&messageBuffer, 0, NULL);
+    (void) size;
+    //Copy the error message into a std::string.
+    printf("%s. %s\n", msg, messageBuffer);
+    LocalFree(messageBuffer);
+  } else {
+    printf("%s. No error code.\n", msg);
+  }
 }
 
 #undef VERBOSE_LOG

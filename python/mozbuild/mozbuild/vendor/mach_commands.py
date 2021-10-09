@@ -15,8 +15,6 @@ from mozbuild.vendor.moz_yaml import load_moz_yaml, MozYamlVerifyError
 
 @CommandProvider
 class Vendor(MachCommandBase):
-    """Vendor third-party dependencies into the source repository."""
-
     # Fun quirk of ./mach - you can specify a default argument as well as subcommands.
     # If the default argument matches a subcommand, the subcommand gets called. If it
     # doesn't, we wind up in the default command.
@@ -29,6 +27,12 @@ class Vendor(MachCommandBase):
         "--check-for-update",
         action="store_true",
         help="For scripted use, prints the new commit to update to, or nothing if up to date.",
+        default=False,
+    )
+    @CommandArgument(
+        "--add-to-exports",
+        action="store_true",
+        help="Will attempt to add new header files into any relevant EXPORTS block",
         default=False,
     )
     @CommandArgument(
@@ -51,6 +55,7 @@ class Vendor(MachCommandBase):
         revision,
         ignore_modified=False,
         check_for_update=False,
+        add_to_exports=False,
         verify=False,
     ):
         """
@@ -84,7 +89,9 @@ class Vendor(MachCommandBase):
         from mozbuild.vendor.vendor_manifest import VendorManifest
 
         vendor_command = command_context._spawn(VendorManifest)
-        vendor_command.vendor(library, manifest, revision, check_for_update)
+        vendor_command.vendor(
+            library, manifest, revision, check_for_update, add_to_exports
+        )
 
         sys.exit(0)
 

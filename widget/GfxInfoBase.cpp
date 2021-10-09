@@ -34,7 +34,6 @@
 #include "mozilla/gfx/GPUProcessManager.h"
 #include "mozilla/gfx/Logging.h"
 #include "mozilla/gfx/gfxVars.h"
-#include "mozilla/layers/PaintThread.h"
 
 #include "gfxPlatform.h"
 #include "gfxConfig.h"
@@ -225,9 +224,6 @@ static const char* GetPrefNameForFeature(int32_t aFeature) {
       break;
     case nsIGfxInfo::FEATURE_THREADSAFE_GL:
       name = BLOCKLIST_PREF_BRANCH "gl.threadsafe";
-      break;
-    case nsIGfxInfo::FEATURE_WEBRENDER_SOFTWARE:
-      name = BLOCKLIST_PREF_BRANCH "webrender.software";
       break;
     case nsIGfxInfo::FEATURE_WEBRENDER_OPTIMIZED_SHADERS:
       name = BLOCKLIST_PREF_BRANCH "webrender.optimized-shaders";
@@ -480,9 +476,6 @@ static int32_t BlocklistFeatureToGfxFeature(const nsAString& aFeature) {
   }
   if (aFeature.EqualsLiteral("THREADSAFE_GL")) {
     return nsIGfxInfo::FEATURE_THREADSAFE_GL;
-  }
-  if (aFeature.EqualsLiteral("WEBRENDER_SOFTWARE")) {
-    return nsIGfxInfo::FEATURE_WEBRENDER_SOFTWARE;
   }
   if (aFeature.EqualsLiteral("X11_EGL")) {
     return nsIGfxInfo::FEATURE_X11_EGL;
@@ -1133,8 +1126,7 @@ int32_t GfxInfoBase::FindBlocklistedDeviceInList(
 #endif
 
     if (match || info[i].mDriverVersion == GfxDriverInfo::allDriverVersions) {
-      if ((info[i].mFeature == GfxDriverInfo::allFeatures &&
-           aFeature != nsIGfxInfo::FEATURE_WEBRENDER_SOFTWARE) ||
+      if (info[i].mFeature == GfxDriverInfo::allFeatures ||
           info[i].mFeature == aFeature) {
         status = info[i].mFeatureStatus;
         if (!info[i].mRuleId.IsEmpty()) {
@@ -1232,8 +1224,7 @@ bool GfxInfoBase::DoesDriverVendorMatch(const nsAString& aBlocklistVendor,
 }
 
 bool GfxInfoBase::IsFeatureAllowlisted(int32_t aFeature) const {
-  return aFeature == nsIGfxInfo::FEATURE_WEBRENDER ||
-         aFeature == nsIGfxInfo::FEATURE_WEBRENDER_SOFTWARE;
+  return aFeature == nsIGfxInfo::FEATURE_WEBRENDER;
 }
 
 nsresult GfxInfoBase::GetFeatureStatusImpl(
@@ -1366,7 +1357,6 @@ void GfxInfoBase::EvaluateDownloadedBlocklist(
                         nsIGfxInfo::FEATURE_D3D11_KEYED_MUTEX,
                         nsIGfxInfo::FEATURE_WEBRENDER,
                         nsIGfxInfo::FEATURE_WEBRENDER_COMPOSITOR,
-                        nsIGfxInfo::FEATURE_WEBRENDER_SOFTWARE,
                         nsIGfxInfo::FEATURE_DX_NV12,
                         nsIGfxInfo::FEATURE_DX_P010,
                         nsIGfxInfo::FEATURE_DX_P016,
@@ -1808,30 +1798,6 @@ GfxInfoBase::GetWebRenderEnabled(bool* aWebRenderEnabled) {
 NS_IMETHODIMP
 GfxInfoBase::GetUsesTiling(bool* aUsesTiling) {
   *aUsesTiling = gfxPlatform::GetPlatform()->UsesTiling();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-GfxInfoBase::GetContentUsesTiling(bool* aUsesTiling) {
-  *aUsesTiling = gfxPlatform::GetPlatform()->ContentUsesTiling();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-GfxInfoBase::GetOffMainThreadPaintEnabled(bool* aOffMainThreadPaintEnabled) {
-  *aOffMainThreadPaintEnabled = gfxConfig::IsEnabled(gfx::Feature::OMTP);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-GfxInfoBase::GetOffMainThreadPaintWorkerCount(
-    int32_t* aOffMainThreadPaintWorkerCount) {
-  if (gfxConfig::IsEnabled(gfx::Feature::OMTP)) {
-    *aOffMainThreadPaintWorkerCount =
-        layers::PaintThread::CalculatePaintWorkerCount();
-  } else {
-    *aOffMainThreadPaintWorkerCount = 0;
-  }
   return NS_OK;
 }
 

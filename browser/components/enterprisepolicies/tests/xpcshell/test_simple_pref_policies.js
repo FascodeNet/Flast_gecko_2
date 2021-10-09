@@ -229,6 +229,23 @@ const POLICIES_TESTS = [
 
   {
     policies: {
+      SanitizeOnShutdown: false,
+    },
+    lockedPrefs: {
+      "privacy.sanitize.sanitizeOnShutdown": false,
+      "privacy.clearOnShutdown.cache": false,
+      "privacy.clearOnShutdown.cookies": false,
+      "privacy.clearOnShutdown.downloads": false,
+      "privacy.clearOnShutdown.formdata": false,
+      "privacy.clearOnShutdown.history": false,
+      "privacy.clearOnShutdown.sessions": false,
+      "privacy.clearOnShutdown.siteSettings": false,
+      "privacy.clearOnShutdown.offlineApps": false,
+    },
+  },
+
+  {
+    policies: {
       SanitizeOnShutdown: {
         Cache: true,
       },
@@ -755,7 +772,7 @@ const POLICIES_TESTS = [
       "security.ssl3.ecdhe_ecdsa_aes_128_gcm_sha256": true,
       "security.ssl3.rsa_aes_128_sha": true,
       "security.ssl3.rsa_aes_256_sha": true,
-      "security.ssl3.rsa_des_ede3_sha": true,
+      "security.ssl3.deprecated.rsa_des_ede3_sha": true,
       "security.ssl3.rsa_aes_128_gcm_sha256": true,
       "security.ssl3.rsa_aes_256_gcm_sha384": true,
     },
@@ -786,7 +803,7 @@ const POLICIES_TESTS = [
       "security.ssl3.ecdhe_ecdsa_aes_128_gcm_sha256": false,
       "security.ssl3.rsa_aes_128_sha": false,
       "security.ssl3.rsa_aes_256_sha": false,
-      "security.ssl3.rsa_des_ede3_sha": false,
+      "security.ssl3.deprecated.rsa_des_ede3_sha": false,
       "security.ssl3.rsa_aes_128_gcm_sha256": false,
       "security.ssl3.rsa_aes_256_gcm_sha384": false,
     },

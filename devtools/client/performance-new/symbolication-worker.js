@@ -30,7 +30,7 @@ importScripts(
 // itself.
 
 /* eslint camelcase: 0*/
-const { getCompactSymbolTable } = wasm_bindgen;
+const { getCompactSymbolTable, queryAPI } = wasm_bindgen;
 
 // Read parts of an open OS.File instance into the Uint8Array dataBuf.
 // This reads destBuf.byteLength bytes at offset offset.
@@ -101,7 +101,7 @@ class FileAndPathHelper {
       );
     }
 
-    const { name, path, debugPath } = lib;
+    const { name, path, debugPath, arch } = lib;
     const candidatePaths = [];
 
     // First, try to find a binary with a matching file name and breakpadId
@@ -117,13 +117,19 @@ class FileAndPathHelper {
     // This only works if the binary is one of the Gecko binaries and not
     // a system library.
     for (const objdirPath of this._objdirs) {
-      // Binaries are usually expected to exist at objdir/dist/bin/filename.
-      candidatePaths.push(OS.Path.join(objdirPath, "dist", "bin", name));
-      // Also search in the "objdir" directory itself (not just in dist/bin).
-      // If, for some unforeseen reason, the relevant binary is not inside the
-      // objdirs dist/bin/ directory, this provides a way out because it lets the
-      // user specify the actual location.
-      candidatePaths.push(OS.Path.join(objdirPath, name));
+      try {
+        // Binaries are usually expected to exist at objdir/dist/bin/filename.
+        candidatePaths.push(PathUtils.join(objdirPath, "dist", "bin", name));
+
+        // Also search in the "objdir" directory itself (not just in dist/bin).
+        // If, for some unforeseen reason, the relevant binary is not inside the
+        // objdirs dist/bin/ directory, this provides a way out because it lets the
+        // user specify the actual location.
+        candidatePaths.push(PathUtils.join(objdirPath, name));
+      } catch (e) {
+        // PathUtils.join throws if objdirPath is not an absolute path.
+        // Ignore those invalid objdir paths.
+      }
     }
 
     // Check the absolute paths of the library last.
@@ -144,6 +150,16 @@ class FileAndPathHelper {
     // (and not, for example, on an Android device), this file should always
     // exist.
     candidatePaths.push(path);
+
+    // On macOS, for system libraries, add a final fallback for the dyld shared
+    // cache. Starting with macOS 11, most system libraries are located in this
+    // system-wide cache file and not present as individual files.
+    if (arch && (path.startsWith("/usr/") || path.startsWith("/System/"))) {
+      // Use the special syntax `dyldcache:<dyldcachepath>:<librarypath>`.
+      candidatePaths.push(
+        `dyldcache:/System/Library/dyld/dyld_shared_cache_${arch}:${path}`
+      );
+    }
 
     return candidatePaths;
   }
@@ -181,7 +197,7 @@ class FileAndPathHelper {
 /** @param {MessageEvent<SymbolicationWorkerInitialMessage>} e */
 onmessage = async e => {
   try {
-    const { debugName, breakpadId, libInfoMap, objdirs, module } = e.data;
+    const { request, libInfoMap, objdirs, module } = e.data;
 
     if (!(module instanceof WebAssembly.Module)) {
       throw new Error("invalid WebAssembly module");
@@ -191,11 +207,30 @@ onmessage = async e => {
     await wasm_bindgen(module);
 
     const helper = new FileAndPathHelper(libInfoMap, objdirs);
-    const result = await getCompactSymbolTable(debugName, breakpadId, helper);
-    postMessage(
-      { result },
-      result.map(r => r.buffer)
-    );
+
+    switch (request.type) {
+      case "GET_SYMBOL_TABLE": {
+        const { debugName, breakpadId } = request;
+        const result = await getCompactSymbolTable(
+          debugName,
+          breakpadId,
+          helper
+        );
+        postMessage(
+          { result },
+          result.map(r => r.buffer)
+        );
+        break;
+      }
+      case "QUERY_SYMBOLICATION_API": {
+        const { path, requestJson } = request;
+        const result = await queryAPI(path, requestJson, helper);
+        postMessage({ result });
+        break;
+      }
+      default:
+        throw new Error(`Unexpected request type ${request.type}`);
+    }
   } catch (error) {
     postMessage({ error: createPlainErrorObject(error) });
   }

@@ -2375,7 +2375,7 @@ __webpack_require__.r(__webpack_exports__);
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 
-const MESSAGE_TYPE_LIST = ["BLOCK_MESSAGE_BY_ID", "USER_ACTION", "IMPRESSION", "TRIGGER", "NEWTAB_MESSAGE_REQUEST", "DOORHANGER_TELEMETRY", "TOOLBAR_BADGE_TELEMETRY", "TOOLBAR_PANEL_TELEMETRY", "MOMENTS_PAGE_TELEMETRY", "INFOBAR_TELEMETRY", "AS_ROUTER_TELEMETRY_USER_EVENT", // Admin types
+const MESSAGE_TYPE_LIST = ["BLOCK_MESSAGE_BY_ID", "USER_ACTION", "IMPRESSION", "TRIGGER", "NEWTAB_MESSAGE_REQUEST", "DOORHANGER_TELEMETRY", "TOOLBAR_BADGE_TELEMETRY", "TOOLBAR_PANEL_TELEMETRY", "MOMENTS_PAGE_TELEMETRY", "INFOBAR_TELEMETRY", "SPOTLIGHT_TELEMETRY", "AS_ROUTER_TELEMETRY_USER_EVENT", // Admin types
 "ADMIN_CONNECT_STATE", "UNBLOCK_MESSAGE_BY_ID", "UNBLOCK_ALL", "BLOCK_BUNDLE", "UNBLOCK_BUNDLE", "DISABLE_PROVIDER", "ENABLE_PROVIDER", "EVALUATE_JEXL_EXPRESSION", "EXPIRE_QUERY_CACHE", "FORCE_ATTRIBUTION", "FORCE_WHATSNEW_PANEL", "CLOSE_WHATSNEW_PANEL", "OVERRIDE_MESSAGE", "MODIFY_MESSAGE_JSON", "RESET_PROVIDER_PREF", "SET_PROVIDER_USER_PREF", "RESET_GROUPS_STATE"];
 const MESSAGE_TYPE_HASH = MESSAGE_TYPE_LIST.reduce((hash, value) => {
   hash[value] = value;
@@ -3194,8 +3194,7 @@ class _DiscoveryStreamBase extends react__WEBPACK_IMPORTED_MODULE_13___default.a
           const prefix = `.ds-layout > .ds-column:nth-child(${rowIndex + 1}) .ds-column-grid > :nth-child(${componentIndex + 1})`; // NB: Splitting on "," doesn't work with strings with commas, but
           // we're okay with not supporting those selectors
 
-          rule.selectorText = selectors.split(",").map(selector => prefix + ( // Assume :pseudo-classes are for component instead of descendant
-          selector[0] === ":" ? "" : " ") + selector).join(","); // CSSOM silently ignores bad selectors, so we'll be noisy instead
+          rule.selectorText = selectors.split(",").map(selector => prefix + (selector[0] === ":" ? "" : " ") + selector).join(","); // CSSOM silently ignores bad selectors, so we'll be noisy instead
 
           if (rule.selectorText === DUMMY_CSS_SELECTOR) {
             console.error(`Bad CSS selector ${selectors}`); // eslint-disable-line no-console
@@ -7408,10 +7407,7 @@ class Section extends react__WEBPACK_IMPORTED_MODULE_8___default.a.PureComponent
     const wasCollapsed = prevProps.pref.collapsed;
 
     if ( // Don't send impression stats for the empty state
-    props.rows.length && ( // We only want to send impression stats if the content of the cards has changed
-    // and the section is not collapsed...
-    props.rows !== prevProps.rows && !isCollapsed || // or if we are expanding a section that was collapsed.
-    wasCollapsed && !isCollapsed)) {
+    props.rows.length && (props.rows !== prevProps.rows && !isCollapsed || wasCollapsed && !isCollapsed)) {
       this.sendImpressionStatsOrAddListener();
     }
   }

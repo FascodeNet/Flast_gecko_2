@@ -20,7 +20,6 @@
 #  include "mozilla/X11Util.h"
 #  include "WindowSurfaceX11Image.h"
 #  include "WindowSurfaceX11SHM.h"
-#  include "WindowSurfaceXRender.h"
 #endif
 
 #undef LOG
@@ -56,7 +55,9 @@ WindowSurfaceProvider::WindowSurfaceProvider()
 }
 
 #ifdef MOZ_WAYLAND
-void WindowSurfaceProvider::Initialize(nsWindow* aWidget) { mWidget = aWidget; }
+void WindowSurfaceProvider::Initialize(RefPtr<nsWindow> aWidget) {
+  mWidget = std::move(aWidget);
+}
 #endif
 #ifdef MOZ_X11
 void WindowSurfaceProvider::Initialize(Window aWindow, Visual* aVisual,
@@ -78,28 +79,21 @@ RefPtr<WindowSurface> WindowSurfaceProvider::CreateWindowSurface() {
       LOG(
           ("Drawing to nsWindow %p will use wl_surface. Using multi-buffered "
            "backend.\n",
-           mWidget));
+           mWidget.get()));
       return MakeRefPtr<WindowSurfaceWaylandMB>(mWidget);
     }
     LOG(
         ("Drawing to nsWindow %p will use wl_surface. Using single-buffered "
          "backend.\n",
-         mWidget));
+         mWidget.get()));
     return MakeRefPtr<WindowSurfaceWayland>(mWidget);
   }
 #endif
 #ifdef MOZ_X11
   if (GdkIsX11Display()) {
     // Blit to the window with the following priority:
-    // 1. XRender (iff XRender is enabled && we are in-process)
-    // 2. MIT-SHM
-    // 3. XPutImage
-    if (!mIsShaped && gfx::gfxVars::UseXRender()) {
-      LOG(("Drawing to Window 0x%lx will use XRender\n", mXWindow));
-      return MakeRefPtr<WindowSurfaceXRender>(DefaultXDisplay(), mXWindow,
-                                              mXVisual, mXDepth);
-    }
-
+    // 1. MIT-SHM
+    // 2. XPutImage
 #  ifdef MOZ_HAVE_SHMIMAGE
     if (!mIsShaped && nsShmImage::UseShm()) {
       LOG(("Drawing to Window 0x%lx will use MIT-SHM\n", mXWindow));

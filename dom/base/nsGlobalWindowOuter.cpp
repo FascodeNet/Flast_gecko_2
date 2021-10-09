@@ -84,6 +84,7 @@
 #include "js/friend/WindowProxy.h"  // js::IsWindowProxy, js::SetWindowProxy
 #include "js/PropertyAndElement.h"  // JS_DefineObject, JS_GetProperty
 #include "js/PropertySpec.h"
+#include "js/RealmIterators.h"
 #include "js/Wrapper.h"
 #include "nsLayoutUtils.h"
 #include "nsReadableUtils.h"
@@ -2403,6 +2404,11 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
 
   if (!aState) {
     if (reUseInnerWindow) {
+      // The StorageAccess state may have changed. Invalidate the cached
+      // StorageAllowed field, so that the next call to StorageAllowedForWindow
+      // recomputes it.
+      newInnerWindow->ClearStorageAllowedCache();
+
       // The storage objects contain the URL of the window. We have to
       // recreate them when the innerWindow is reused.
       newInnerWindow->mLocalStorage = nullptr;
@@ -5432,7 +5438,7 @@ void nsGlobalWindowOuter::MoveToOuter(int32_t aXPos, int32_t aYPos,
    * prevent window.moveTo() by exiting early
    */
 
-  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsFrame()) {
+  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsSubframe()) {
     return;
   }
 
@@ -5489,7 +5495,7 @@ void nsGlobalWindowOuter::MoveByOuter(int32_t aXDif, int32_t aYDif,
    * prevent window.moveBy() by exiting early
    */
 
-  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsFrame()) {
+  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsSubframe()) {
     return;
   }
 
@@ -5540,7 +5546,7 @@ void nsGlobalWindowOuter::ResizeToOuter(int32_t aWidth, int32_t aHeight,
    * prevent window.resizeTo() by exiting early
    */
 
-  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsFrame()) {
+  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsSubframe()) {
     return;
   }
 
@@ -5568,7 +5574,7 @@ void nsGlobalWindowOuter::ResizeByOuter(int32_t aWidthDif, int32_t aHeightDif,
    * prevent window.resizeBy() by exiting early
    */
 
-  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsFrame()) {
+  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsSubframe()) {
     return;
   }
 
@@ -5614,7 +5620,7 @@ void nsGlobalWindowOuter::SizeToContentOuter(CallerType aCallerType,
    * prevent window.sizeToContent() by exiting early
    */
 
-  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsFrame()) {
+  if (!CanMoveResizeWindows(aCallerType) || mBrowsingContext->IsSubframe()) {
     return;
   }
 
@@ -6169,7 +6175,7 @@ bool nsGlobalWindowOuter::CanClose() {
 }
 
 void nsGlobalWindowOuter::CloseOuter(bool aTrustedCaller) {
-  if (!mDocShell || IsInModalState() || mBrowsingContext->IsFrame()) {
+  if (!mDocShell || IsInModalState() || mBrowsingContext->IsSubframe()) {
     // window.close() is called on a frame in a frameset, on a window
     // that's already closed, or on a window for which there's
     // currently a modal dialog open. Ignore such calls.
@@ -6265,7 +6271,7 @@ nsresult nsGlobalWindowOuter::Close() {
 void nsGlobalWindowOuter::ForceClose() {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_Default);
 
-  if (mBrowsingContext->IsFrame() || !mDocShell) {
+  if (mBrowsingContext->IsSubframe() || !mDocShell) {
     // This may be a frame in a frameset, or a window that's already closed.
     // Ignore such calls.
     return;
@@ -7184,7 +7190,7 @@ void nsGlobalWindowOuter::MaybeAllowStorageForOpenedWindow(nsIURI* aURI) {
   }
 
   // No 3rd party URL/window.
-  if (!nsContentUtils::IsThirdPartyWindowOrChannel(inner, nullptr, aURI)) {
+  if (!AntiTrackingUtils::IsThirdPartyWindow(inner, aURI)) {
     return;
   }
 
@@ -7306,6 +7312,8 @@ void nsGlobalWindowOuter::EnsureSizeAndPositionUpToDate() {
 }
 
 already_AddRefed<nsISupports> nsGlobalWindowOuter::SaveWindowState() {
+  MOZ_ASSERT(!mozilla::SessionHistoryInParent());
+
   if (!mContext || !GetWrapperPreserveColor()) {
     // The window may be getting torn down; don't bother saving state.
     return nullptr;
@@ -7313,6 +7321,11 @@ already_AddRefed<nsISupports> nsGlobalWindowOuter::SaveWindowState() {
 
   nsGlobalWindowInner* inner = GetCurrentInnerWindowInternal();
   NS_ASSERTION(inner, "No inner window to save");
+
+  if (WindowContext* wc = inner->GetWindowContext()) {
+    MOZ_ASSERT(!wc->GetWindowStateSaved());
+    Unused << wc->SetWindowStateSaved(true);
+  }
 
   // Don't do anything else to this inner window! After this point, all
   // calls to SetTimeoutOrInterval will create entries in the timeout
@@ -7330,6 +7343,8 @@ already_AddRefed<nsISupports> nsGlobalWindowOuter::SaveWindowState() {
 }
 
 nsresult nsGlobalWindowOuter::RestoreWindowState(nsISupports* aState) {
+  MOZ_ASSERT(!mozilla::SessionHistoryInParent());
+
   if (!mContext || !GetWrapperPreserveColor()) {
     // The window may be getting torn down; don't bother restoring state.
     return NS_OK;
@@ -7352,6 +7367,11 @@ nsresult nsGlobalWindowOuter::RestoreWindowState(nsISupports* aState) {
       fm->SetFocus(focusedElement, nsIFocusManager::FLAG_NOSCROLL |
                                        nsIFocusManager::FLAG_SHOWRING);
     }
+  }
+
+  if (WindowContext* wc = inner->GetWindowContext()) {
+    MOZ_ASSERT(wc->GetWindowStateSaved());
+    Unused << wc->SetWindowStateSaved(false);
   }
 
   inner->Thaw();

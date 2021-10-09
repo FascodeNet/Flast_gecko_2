@@ -15,11 +15,9 @@
 #include <utility>
 
 #include "BrowserParent.h"
-#include "ClientLayerManager.h"
 #include "ContentChild.h"
 #include "DocumentInlines.h"
 #include "EventStateManager.h"
-#include "FrameLayerBuilder.h"
 #include "Layers.h"
 #include "MMPrinter.h"
 #include "PermissionMessageUtils.h"
@@ -94,8 +92,6 @@
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/InputAPZContext.h"
-#include "mozilla/layers/LayerTransactionChild.h"
-#include "mozilla/layers/ShadowLayers.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "nsBrowserStatusFilter.h"
 #include "nsColorPickerProxy.h"
@@ -174,7 +170,7 @@ static const char BEFORE_FIRST_PAINT[] = "before-first-paint";
 
 static uint32_t sConsecutiveTouchMoveCount = 0;
 
-typedef nsTHashMap<nsUint64HashKey, BrowserChild*> BrowserChildMap;
+using BrowserChildMap = nsTHashMap<nsUint64HashKey, BrowserChild*>;
 static BrowserChildMap* sBrowserChildren;
 StaticMutex sBrowserChildrenMutex;
 
@@ -368,8 +364,7 @@ BrowserChild::BrowserChild(ContentChild* aManager, const TabId& aTabId,
                NestedBrowserChildMap().end());
     NestedBrowserChildMap()[mUniqueId] = this;
   }
-  mCoalesceMouseMoveEvents =
-      Preferences::GetBool("dom.event.coalesce_mouse_move");
+  mCoalesceMouseMoveEvents = StaticPrefs::dom_events_coalesce_mousemove();
   if (mCoalesceMouseMoveEvents) {
     mCoalescedMouseEventFlusher = new CoalescedMouseMoveFlusher(this);
   }
@@ -804,6 +799,15 @@ BrowserChild::FocusPrevElement(bool aForDocumentNavigation) {
 
 NS_IMETHODIMP
 BrowserChild::GetInterface(const nsIID& aIID, void** aSink) {
+  if (aIID.Equals(NS_GET_IID(nsITopLevelNavigationDelegate))) {
+    nsCOMPtr<nsITopLevelNavigationDelegate> delegate =
+        GetTopLevelNavigationDelegate();
+    if (delegate) {
+      delegate.forget(aSink);
+      return NS_OK;
+    }
+  }
+
   // XXXbz should we restrict the set of interfaces we hand out here?
   // See bug 537429
   return QueryInterface(aIID, aSink);
@@ -1560,7 +1564,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvStopIMEStateManagement() {
   return IPC_OK();
 }
 
-void BrowserChild::ProcessPendingColaescedTouchData() {
+void BrowserChild::ProcessPendingCoalescedTouchData() {
   MOZ_ASSERT(StaticPrefs::dom_events_coalesce_touchmove());
 
   if (mCoalescedTouchData.IsEmpty()) {
@@ -1907,7 +1911,7 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchEvent(
 
   if (StaticPrefs::dom_events_coalesce_touchmove()) {
     if (aEvent.mMessage == eTouchEnd || aEvent.mMessage == eTouchStart) {
-      ProcessPendingColaescedTouchData();
+      ProcessPendingCoalescedTouchData();
     }
 
     if (aEvent.mMessage != eTouchMove) {
@@ -1967,11 +1971,9 @@ mozilla::ipc::IPCResult BrowserChild::RecvNormalPriorityRealTouchEvent(
 mozilla::ipc::IPCResult BrowserChild::RecvRealTouchMoveEvent(
     const WidgetTouchEvent& aEvent, const ScrollableLayerGuid& aGuid,
     const uint64_t& aInputBlockId, const nsEventStatus& aApzResponse) {
-  // Only start to coalesce the second touchmove to ensure the first
-  // touchmove isn't overridden by the second one.
   if (StaticPrefs::dom_events_coalesce_touchmove()) {
     ++sConsecutiveTouchMoveCount;
-    if (mCoalescedTouchMoveEventFlusher && sConsecutiveTouchMoveCount > 1) {
+    if (mCoalescedTouchMoveEventFlusher) {
       MOZ_ASSERT(aEvent.mMessage == eTouchMove);
       if (mCoalescedTouchData.IsEmpty() ||
           mCoalescedTouchData.CanCoalesce(aEvent, aGuid, aInputBlockId,
@@ -1992,7 +1994,14 @@ mozilla::ipc::IPCResult BrowserChild::RecvRealTouchMoveEvent(
           return IPC_FAIL_NO_REASON(this);
         }
       }
-      mCoalescedTouchMoveEventFlusher->StartObserver();
+
+      if (sConsecutiveTouchMoveCount > 1) {
+        mCoalescedTouchMoveEventFlusher->StartObserver();
+      } else {
+        // Flush the pending coalesced touch in order to avoid the first
+        // touchmove be overridden by the second one.
+        ProcessPendingCoalescedTouchData();
+      }
       return IPC_OK();
     }
   }
@@ -2665,8 +2674,8 @@ mozilla::ipc::IPCResult BrowserChild::RecvRenderLayers(
 
   if (mCompositorOptions) {
     MOZ_ASSERT(mPuppetWidget);
-    RefPtr<LayerManager> lm =
-        mPuppetWidget->GetWindowRenderer()->AsLayerManager();
+    RefPtr<WebRenderLayerManager> lm =
+        mPuppetWidget->GetWindowRenderer()->AsWebRender();
     if (lm) {
       // We send the current layer observer epoch to the compositor so that
       // BrowserParent knows whether a layer update notification corresponds to
@@ -2711,8 +2720,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvRenderLayers(
   }
 
   if (nsIFrame* root = presShell->GetRootFrame()) {
-    FrameLayerBuilder::InvalidateAllLayersForFrame(
-        nsLayoutUtils::GetDisplayRootFrame(root));
     root->SchedulePaint();
   }
 
@@ -2848,8 +2855,8 @@ void BrowserChild::InitRenderingState(
     ImageBridgeChild::IdentifyCompositorTextureHost(mTextureFactoryIdentifier);
     gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
     InitAPZState();
-    RefPtr<LayerManager> lm =
-        mPuppetWidget->GetWindowRenderer()->AsLayerManager();
+    RefPtr<WebRenderLayerManager> lm =
+        mPuppetWidget->GetWindowRenderer()->AsWebRender();
     if (lm) {
       lm->SetLayersObserverEpoch(mLayersObserverEpoch);
     }
@@ -2870,51 +2877,13 @@ bool BrowserChild::CreateRemoteLayerManager(
     mozilla::layers::PCompositorBridgeChild* aCompositorChild) {
   MOZ_ASSERT(aCompositorChild);
 
-  bool success = false;
-  if (mCompositorOptions->UseWebRender()) {
-    success = mPuppetWidget->CreateRemoteLayerManager(
-        [&](LayerManager* aLayerManager) -> bool {
-          MOZ_ASSERT(aLayerManager->AsWebRenderLayerManager());
-          nsCString error;
-          return aLayerManager->AsWebRenderLayerManager()->Initialize(
-              aCompositorChild, wr::AsPipelineId(mLayersId),
-              &mTextureFactoryIdentifier, error);
-        });
-  } else {
-    nsTArray<LayersBackend> ignored;
-    PLayerTransactionChild* shadowManager =
-        aCompositorChild->SendPLayerTransactionConstructor(ignored,
-                                                           GetLayersId());
-    if (shadowManager &&
-        shadowManager->SendGetTextureFactoryIdentifier(
-            &mTextureFactoryIdentifier) &&
-        mTextureFactoryIdentifier.mParentBackend !=
-            LayersBackend::LAYERS_NONE) {
-      success = true;
-    }
-    if (!success) {
-      // Since no LayerManager is associated with the tab's widget, we will
-      // never have an opportunity to destroy the PLayerTransaction on the next
-      // device or compositor reset. Therefore, we make sure to forcefully close
-      // it here. Failure to do so will cause the next layer tree to fail to
-      // attach due since the compositor requires the old layer tree to be
-      // disassociated.
-      if (shadowManager) {
-        static_cast<LayerTransactionChild*>(shadowManager)->Destroy();
-        shadowManager = nullptr;
-      }
-      NS_WARNING("failed to allocate layer transaction");
-    } else {
-      success = mPuppetWidget->CreateRemoteLayerManager(
-          [&](LayerManager* aLayerManager) -> bool {
-            ShadowLayerForwarder* lf = aLayerManager->AsShadowForwarder();
-            lf->SetShadowManager(shadowManager);
-            lf->IdentifyTextureHost(mTextureFactoryIdentifier);
-            return true;
-          });
-    }
-  }
-  return success;
+  return mPuppetWidget->CreateRemoteLayerManager(
+      [&](WebRenderLayerManager* aLayerManager) -> bool {
+        nsCString error;
+        return aLayerManager->Initialize(aCompositorChild,
+                                         wr::AsPipelineId(mLayersId),
+                                         &mTextureFactoryIdentifier, error);
+      });
 }
 
 void BrowserChild::InitAPZState() {
@@ -3060,6 +3029,16 @@ BrowserChild::GetMessageManager(ContentFrameMessageManager** aResult) {
   return *aResult ? NS_OK : NS_ERROR_FAILURE;
 }
 
+already_AddRefed<nsITopLevelNavigationDelegate>
+BrowserChild::GetTopLevelNavigationDelegate() {
+  nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
+  if (nsCOMPtr<nsITopLevelNavigationDelegate> delegate = do_QueryActor(
+          "TopLevelNavigationDelegate", docShell->GetDocument())) {
+    return delegate.forget();
+  }
+  return nullptr;
+}
+
 void BrowserChild::SendRequestFocus(bool aCanFocus, CallerType aCallerType) {
   nsFocusManager* fm = nsFocusManager::GetFocusManager();
   if (!fm) {
@@ -3146,8 +3125,8 @@ void BrowserChild::DidComposite(mozilla::layers::TransactionId aTransactionId,
                                 const TimeStamp& aCompositeStart,
                                 const TimeStamp& aCompositeEnd) {
   MOZ_ASSERT(mPuppetWidget);
-  RefPtr<LayerManager> lm =
-      mPuppetWidget->GetWindowRenderer()->AsLayerManager();
+  RefPtr<WebRenderLayerManager> lm =
+      mPuppetWidget->GetWindowRenderer()->AsWebRender();
   MOZ_ASSERT(lm);
 
   if (lm) {
@@ -3181,8 +3160,8 @@ void BrowserChild::DidRequestComposite(const TimeStamp& aCompositeReqStart,
 
 void BrowserChild::ClearCachedResources() {
   MOZ_ASSERT(mPuppetWidget);
-  RefPtr<LayerManager> lm =
-      mPuppetWidget->GetWindowRenderer()->AsLayerManager();
+  RefPtr<WebRenderLayerManager> lm =
+      mPuppetWidget->GetWindowRenderer()->AsWebRender();
   if (lm) {
     lm->ClearCachedResources();
   }
@@ -3195,14 +3174,7 @@ void BrowserChild::ClearCachedResources() {
   }
 }
 
-void BrowserChild::InvalidateLayers() {
-  MOZ_ASSERT(mPuppetWidget);
-  RefPtr<LayerManager> lm =
-      mPuppetWidget->GetWindowRenderer()->AsLayerManager();
-  if (lm) {
-    FrameLayerBuilder::InvalidateAllLayers(lm);
-  }
-}
+void BrowserChild::InvalidateLayers() { MOZ_ASSERT(mPuppetWidget); }
 
 void BrowserChild::SchedulePaint() {
   nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
@@ -3223,6 +3195,12 @@ void BrowserChild::SchedulePaint() {
 
 void BrowserChild::ReinitRendering() {
   MOZ_ASSERT(mLayersId.IsValid());
+
+  // In some cases, like when we create a windowless browser,
+  // RemoteLayerTreeOwner/BrowserChild is not connected to a compositor.
+  if (mLayersConnected.isNothing() || !*mLayersConnected) {
+    return;
+  }
 
   // Before we establish a new PLayerTransaction, we must connect our layer tree
   // id, CompositorBridge, and the widget compositor all together again.
@@ -3255,8 +3233,8 @@ void BrowserChild::ReinitRendering() {
   gfx::VRManagerChild::IdentifyTextureHost(mTextureFactoryIdentifier);
 
   InitAPZState();
-  RefPtr<LayerManager> lm =
-      mPuppetWidget->GetWindowRenderer()->AsLayerManager();
+  RefPtr<WebRenderLayerManager> lm =
+      mPuppetWidget->GetWindowRenderer()->AsWebRender();
   if (lm) {
     lm->SetLayersObserverEpoch(mLayersObserverEpoch);
   }
@@ -3268,22 +3246,10 @@ void BrowserChild::ReinitRendering() {
 void BrowserChild::ReinitRenderingForDeviceReset() {
   InvalidateLayers();
 
-  RefPtr<LayerManager> lm =
-      mPuppetWidget->GetWindowRenderer()->AsLayerManager();
-  if (lm && lm->AsWebRenderLayerManager()) {
-    lm->AsWebRenderLayerManager()->DoDestroy(/* aIsSync */ true);
-  } else if (lm && lm->AsClientLayerManager()) {
-    if (ShadowLayerForwarder* fwd = lm->AsShadowForwarder()) {
-      // Force the LayerTransactionChild to synchronously shutdown. It is
-      // okay to do this early, we'll simply stop sending messages. This
-      // step is necessary since otherwise the compositor will think we
-      // are trying to attach two layer trees to the same ID.
-      fwd->SynchronouslyShutdown();
-    }
-  } else {
-    if (mLayersConnected.isNothing()) {
-      return;
-    }
+  RefPtr<WebRenderLayerManager> lm =
+      mPuppetWidget->GetWindowRenderer()->AsWebRender();
+  if (lm) {
+    lm->DoDestroy(/* aIsSync */ true);
   }
 
   // Proceed with destroying and recreating the layer manager.
@@ -3309,8 +3275,8 @@ BrowserChild::OnHideTooltip() {
 void BrowserChild::NotifyJankedAnimations(
     const nsTArray<uint64_t>& aJankedAnimations) {
   MOZ_ASSERT(mPuppetWidget);
-  RefPtr<LayerManager> lm =
-      mPuppetWidget->GetWindowRenderer()->AsLayerManager();
+  RefPtr<WebRenderLayerManager> lm =
+      mPuppetWidget->GetWindowRenderer()->AsWebRender();
   if (lm) {
     lm->UpdatePartialPrerenderedAnimations(aJankedAnimations);
   }

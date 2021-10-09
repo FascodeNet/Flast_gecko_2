@@ -1314,6 +1314,10 @@ BrowserGlue.prototype = {
       this._matchCBCategory
     );
     Services.prefs.removeObserver(
+      "network.http.referer.disallowCrossSiteRelaxingDefault",
+      this._matchCBCategory
+    );
+    Services.prefs.removeObserver(
       ContentBlockingCategoriesPrefs.PREF_CB_CATEGORY,
       this._updateCBCategory
     );
@@ -1373,6 +1377,37 @@ BrowserGlue.prototype = {
       "1.4",
       "resource://builtin-themes/alpenglow/"
     );
+
+    if (
+      AppConstants.NIGHTLY_BUILD &&
+      Services.prefs.getBoolPref(
+        "browser.theme.temporary.monochromatic.enabled",
+        false
+      )
+    ) {
+      // Temporarily install a prototype monochromatic theme for UX iteration.
+      // We uninstall it during shutdown so it does not persist if the pref is
+      // disabled.
+      const kMonochromaticThemeID = "firefox-monochromatic-purple@mozilla.org";
+      AddonManager.maybeInstallBuiltinAddon(
+        kMonochromaticThemeID,
+        "1.0",
+        "resource://builtin-themes/monochromatic-purple/"
+      );
+      AsyncShutdown.profileChangeTeardown.addBlocker(
+        "Uninstall Prototype Monochromatic Theme",
+        async () => {
+          try {
+            let addon = await AddonManager.getAddonByID(kMonochromaticThemeID);
+            await addon.uninstall();
+          } catch (e) {
+            Cu.reportError(
+              "Failed to uninstall firefox-monochromatic-purple on shutdown"
+            );
+          }
+        }
+      );
+    }
 
     if (AppConstants.MOZ_NORMANDY) {
       Normandy.init();
@@ -1607,6 +1642,8 @@ BrowserGlue.prototype = {
 
     ProcessHangMonitor.init();
 
+    UrlbarPrefs.updateFirefoxSuggestScenario();
+
     // A channel for "remote troubleshooting" code...
     let channel = new WebChannel(
       "remote-troubleshooting",
@@ -1719,6 +1756,10 @@ BrowserGlue.prototype = {
     );
     Services.prefs.addObserver(
       "network.cookie.cookieBehavior.pbmode",
+      this._matchCBCategory
+    );
+    Services.prefs.addObserver(
+      "network.http.referer.disallowCrossSiteRelaxingDefault",
       this._matchCBCategory
     );
     Services.prefs.addObserver(
@@ -3229,7 +3270,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 116;
+    const UI_VERSION = 117;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (!Services.prefs.prefHasUserValue("browser.migration.version")) {
@@ -3844,7 +3885,7 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (currentUIVersion < 116) {
+    if (currentUIVersion < 117) {
       // Update urlbar result groups for the following changes:
       // 110 (bug 1662167): Add INPUT_HISTORY group
       // 111 (bug 1677126): Add REMOTE_TABS group
@@ -3853,6 +3894,7 @@ BrowserGlue.prototype = {
       // 114 (bug 1662172): Add HEURISTIC_BOOKMARK_KEYWORD group
       // 115 (bug 1713322): Move TAIL_SUGGESTION group and rename properties
       // 116 (bug 1717509): Remove HEURISTIC_UNIFIED_COMPLETE group
+      // 117 (bug 1710518): Add GENERAL_PARENT group
       UrlbarPrefs.migrateResultBuckets();
     }
 
@@ -4293,6 +4335,7 @@ var ContentBlockingCategoriesPrefs = {
         "privacy.trackingprotection.fingerprinting.enabled": null,
         "privacy.trackingprotection.cryptomining.enabled": null,
         "privacy.annotate_channels.strict_list.enabled": null,
+        "network.http.referer.disallowCrossSiteRelaxingDefault": null,
       },
       standard: {
         "network.cookie.cookieBehavior": null,
@@ -4303,6 +4346,7 @@ var ContentBlockingCategoriesPrefs = {
         "privacy.trackingprotection.fingerprinting.enabled": null,
         "privacy.trackingprotection.cryptomining.enabled": null,
         "privacy.annotate_channels.strict_list.enabled": null,
+        "network.http.referer.disallowCrossSiteRelaxingDefault": null,
       },
     };
     let type = "strict";
@@ -4369,6 +4413,16 @@ var ContentBlockingCategoriesPrefs = {
         case "-lvl2":
           this.CATEGORY_PREFS[type][
             "privacy.annotate_channels.strict_list.enabled"
+          ] = false;
+          break;
+        case "rp":
+          this.CATEGORY_PREFS[type][
+            "network.http.referer.disallowCrossSiteRelaxingDefault"
+          ] = true;
+          break;
+        case "-rp":
+          this.CATEGORY_PREFS[type][
+            "network.http.referer.disallowCrossSiteRelaxingDefault"
           ] = false;
           break;
         case "cookieBehavior0":

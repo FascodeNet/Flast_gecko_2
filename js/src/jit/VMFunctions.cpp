@@ -8,19 +8,18 @@
 
 #include "mozilla/FloatingPoint.h"
 
+#include "builtin/MapObject.h"
 #include "builtin/String.h"
-#include "frontend/BytecodeCompiler.h"
+#include "ds/OrderedHashTable.h"
 #include "gc/Cell.h"
 #include "jit/arm/Simulator-arm.h"
 #include "jit/AtomicOperations.h"
 #include "jit/BaselineIC.h"
 #include "jit/CalleeToken.h"
-#include "jit/Invalidation.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRuntime.h"
 #include "jit/mips32/Simulator-mips32.h"
 #include "jit/mips64/Simulator-mips64.h"
-#include "js/CallAndConstruct.h"      // JS::Construct, JS::IsConstructor
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/friend/StackLimits.h"    // js::AutoCheckRecursionLimit
 #include "js/friend/WindowProxy.h"    // js::IsWindow
@@ -137,7 +136,14 @@ template <>
 struct TypeToDataType<JSLinearString*> {
   static const DataType result = Type_Object;
 };
-
+template <>
+struct TypeToDataType<JSAtom*> {
+  static const DataType result = Type_Object;
+};
+template <>
+struct TypeToDataType<JS::Symbol*> {
+  static const DataType result = Type_Object;
+};
 template <>
 struct TypeToDataType<BigInt*> {
   static const DataType result = Type_Object;
@@ -148,6 +154,10 @@ struct TypeToDataType<HandleObject> {
 };
 template <>
 struct TypeToDataType<HandleString> {
+  static const DataType result = Type_Handle;
+};
+template <>
+struct TypeToDataType<HandleAtom> {
   static const DataType result = Type_Handle;
 };
 template <>
@@ -240,6 +250,11 @@ template <>
 struct TypeToArgProperties<HandleString> {
   static const uint32_t result =
       TypeToArgProperties<JSString*>::result | VMFunctionData::ByRef;
+};
+template <>
+struct TypeToArgProperties<HandleAtom> {
+  static const uint32_t result =
+      TypeToArgProperties<JSAtom*>::result | VMFunctionData::ByRef;
 };
 template <>
 struct TypeToArgProperties<HandlePropertyName> {
@@ -361,6 +376,10 @@ struct TypeToRootType<HandleObject> {
 };
 template <>
 struct TypeToRootType<HandleString> {
+  static const uint32_t result = VMFunctionData::RootString;
+};
+template <>
+struct TypeToRootType<HandleAtom> {
   static const uint32_t result = VMFunctionData::RootString;
 };
 template <>
@@ -2804,6 +2823,60 @@ BigInt* AtomicsXor64(JSContext* cx, TypedArrayObject* typedArray, size_t index,
         return jit::AtomicOperations::fetchXorSeqCst(addr, val);
       },
       value);
+}
+
+JSAtom* AtomizeStringNoGC(JSContext* cx, JSString* str) {
+  // IC code calls this directly so we shouldn't GC.
+  AutoUnsafeCallWithABI unsafe;
+
+  JSAtom* atom = AtomizeString(cx, str);
+  if (!atom) {
+    cx->recoverFromOutOfMemory();
+    return nullptr;
+  }
+
+  return atom;
+}
+
+bool SetObjectHas(JSContext* cx, HandleObject obj, HandleValue key,
+                  bool* rval) {
+  return SetObject::has(cx, obj, key, rval);
+}
+
+bool MapObjectHas(JSContext* cx, HandleObject obj, HandleValue key,
+                  bool* rval) {
+  return MapObject::has(cx, obj, key, rval);
+}
+
+bool MapObjectGet(JSContext* cx, HandleObject obj, HandleValue key,
+                  MutableHandleValue rval) {
+  return MapObject::get(cx, obj, key, rval);
+}
+
+#ifdef DEBUG
+template <class OrderedHashTable>
+static mozilla::HashNumber HashValue(JSContext* cx, OrderedHashTable* hashTable,
+                                     const Value* value) {
+  RootedValue rootedValue(cx, *value);
+  HashableValue hashable;
+  MOZ_ALWAYS_TRUE(hashable.setValue(cx, rootedValue));
+
+  return hashTable->hash(hashable);
+}
+#endif
+
+void AssertSetObjectHash(JSContext* cx, SetObject* obj, const Value* value,
+                         mozilla::HashNumber actualHash) {
+  AutoUnsafeCallWithABI unsafe;
+
+  MOZ_ASSERT(actualHash == HashValue(cx, obj->getData(), value));
+}
+
+void AssertMapObjectHash(JSContext* cx, MapObject* obj, const Value* value,
+                         mozilla::HashNumber actualHash) {
+  AutoUnsafeCallWithABI unsafe;
+
+  MOZ_ASSERT(actualHash == HashValue(cx, obj->getData(), value));
 }
 
 void AssumeUnreachable(const char* output) {

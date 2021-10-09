@@ -10,8 +10,10 @@ const { XPCOMUtils } = ChromeUtils.import(
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
+  Region: "resource://gre/modules/Region.jsm",
   EveryWindow: "resource:///modules/EveryWindow.jsm",
   AboutReaderParent: "resource:///actors/AboutReaderParent.jsm",
+  ASRouterPreferences: "resource://activity-stream/lib/ASRouterPreferences.jsm",
 });
 
 const FEW_MINUTES = 15 * 60 * 1000; // 15 mins
@@ -593,12 +595,30 @@ this.ASRouterTriggerListeners = new Map([
       _initialized: false,
       _triggerHandler: null,
 
+      // XXX For the moment, the captive-portal-login trigger is assumed to be
+      // for the VPN promo, and we check to make sure that hasn't been
+      // disabled by pref for a region (or maybe partner or OS distro?).
+      ///
+      // Ultimately, we'd like to unstaple the VPN promo checks from here,
+      // perhaps even doing them entirely using both ASRouter message targeting
+      // and experimenter/rollout targeting.  This work is being tracked in
+      // bug 1731176.
+      _shouldShowCaptivePortalVPNPromo() {
+        const disablePromoPref =
+          ASRouterPreferences.disableCaptivePortalVPNPromo;
+        const homeRegion = Region.home || "";
+        const currentRegion = Region.current || "";
+
+        return (
+          !disablePromoPref &&
+          homeRegion.toLowerCase() !== "cn" &&
+          currentRegion.toLowerCase() !== "cn"
+        );
+      },
+
       init(triggerHandler) {
         if (!this._initialized) {
-          Services.obs.addObserver(
-            this,
-            "captive-portal-login-success-after-button-pressed"
-          );
+          Services.obs.addObserver(this, "captive-portal-login-success");
           this._initialized = true;
         }
         this._triggerHandler = triggerHandler;
@@ -606,9 +626,14 @@ this.ASRouterTriggerListeners = new Map([
 
       observe(aSubject, aTopic, aData) {
         switch (aTopic) {
-          case "captive-portal-login-success-after-button-pressed":
+          case "captive-portal-login-success":
             const browser = Services.wm.getMostRecentBrowserWindow();
-            if (browser) {
+            // The check is here rather than in init because some
+            // folks leave their browsers running for a long time,
+            // eg from before leaving on a plane trip to after landing
+            // in the new destination, and the current region may have
+            // changed since init time.
+            if (browser && this._shouldShowCaptivePortalVPNPromo()) {
               this._triggerHandler(browser.gBrowser.selectedBrowser, {
                 id: this.id,
               });
@@ -621,10 +646,7 @@ this.ASRouterTriggerListeners = new Map([
         if (this._initialized) {
           this._triggerHandler = null;
           this._initialized = false;
-          Services.obs.removeObserver(
-            this,
-            "captive-portal-login-success-after-button-pressed"
-          );
+          Services.obs.removeObserver(this, "captive-portal-login-success");
         }
       },
     },

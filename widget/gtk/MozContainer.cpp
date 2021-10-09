@@ -11,6 +11,7 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 #include <stdio.h>
+#include "mozilla/WidgetUtilsGtk.h"
 
 #ifdef ACCESSIBILITY
 #  include <atk/atk.h>
@@ -79,7 +80,7 @@ GType moz_container_get_type(void) {
     };
 
 #ifdef MOZ_WAYLAND
-    if (GdkIsWaylandDisplay()) {
+    if (mozilla::widget::GdkIsWaylandDisplay()) {
       moz_container_info.class_init =
           (GClassInitFunc)moz_container_wayland_class_init;
     }
@@ -150,11 +151,12 @@ void moz_container_init(MozContainer* container) {
   gtk_container_set_resize_mode(GTK_CONTAINER(container), GTK_RESIZE_IMMEDIATE);
   gtk_widget_set_redraw_on_allocate(GTK_WIDGET(container), FALSE);
 #ifdef MOZ_WAYLAND
-  if (GdkIsWaylandDisplay()) {
+  if (mozilla::widget::GdkIsWaylandDisplay()) {
     moz_container_wayland_init(&container->wl_container);
   }
 #endif
-  LOGCONTAINER(("%s [%p]\n", __FUNCTION__, (void*)container));
+  LOGCONTAINER(("%s [%p]\n", __FUNCTION__,
+                (void*)moz_container_get_nsWindow(container)));
 }
 
 void moz_container_map(GtkWidget* widget) {
@@ -220,7 +222,7 @@ void moz_container_realize(GtkWidget* widget) {
     window = gdk_window_new(parent, &attributes, attributes_mask);
 
     LOGCONTAINER(("moz_container_realize() [%p] GdkWindow %p\n",
-                  (void*)container, (void*)window));
+                  (void*)moz_container_get_nsWindow(container), (void*)window));
 
     gdk_window_set_user_data(window, widget);
   } else {
@@ -239,7 +241,8 @@ void moz_container_size_allocate(GtkWidget* widget, GtkAllocation* allocation) {
   g_return_if_fail(IS_MOZ_CONTAINER(widget));
 
   LOGCONTAINER(("moz_container_size_allocate [%p] %d,%d -> %d x %d\n",
-                (void*)widget, allocation->x, allocation->y, allocation->width,
+                (void*)moz_container_get_nsWindow(MOZ_CONTAINER(widget)),
+                allocation->x, allocation->y, allocation->width,
                 allocation->height));
 
   /* short circuit if you can */
@@ -370,6 +373,11 @@ static void moz_container_add(GtkContainer* container, GtkWidget* widget) {
 
 void moz_container_force_default_visual(MozContainer* container) {
   container->force_default_visual = true;
+}
+
+nsWindow* moz_container_get_nsWindow(MozContainer* container) {
+  gpointer user_data = g_object_get_data(G_OBJECT(container), "nsWindow");
+  return static_cast<nsWindow*>(user_data);
 }
 
 #undef LOGCONTAINER

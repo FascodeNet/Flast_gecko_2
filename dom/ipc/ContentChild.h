@@ -85,9 +85,9 @@ class ContentChild final : public PContentChild,
                            public mozilla::ipc::IShmemAllocator,
                            public mozilla::ipc::ChildToParentStreamActorManager,
                            public ProcessActor {
-  typedef mozilla::dom::ClonedMessageData ClonedMessageData;
-  typedef mozilla::ipc::FileDescriptor FileDescriptor;
-  typedef mozilla::ipc::PFileDescriptorSetChild PFileDescriptorSetChild;
+  using ClonedMessageData = mozilla::dom::ClonedMessageData;
+  using FileDescriptor = mozilla::ipc::FileDescriptor;
+  using PFileDescriptorSetChild = mozilla::ipc::PFileDescriptorSetChild;
 
   friend class PContentChild;
 
@@ -320,6 +320,9 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvCollectPerfStatsJSON(
       CollectPerfStatsJSONResolver&& aResolver);
 
+  mozilla::ipc::IPCResult RecvCollectScrollingMetrics(
+      CollectScrollingMetricsResolver&& aResolver);
+
   mozilla::ipc::IPCResult RecvNotifyAlertsObserver(const nsCString& aType,
                                                    const nsString& aData);
 
@@ -339,6 +342,7 @@ class ContentChild final : public PContentChild,
       nsTArray<IPCBlob>&& aBlobs, nsTArray<nsCString>&& aChangedKeys);
 
   mozilla::ipc::IPCResult RecvFontListChanged();
+  mozilla::ipc::IPCResult RecvForceGlobalReflow(bool aNeedsReframe);
 
   mozilla::ipc::IPCResult RecvGeolocationUpdate(nsIDOMGeoPosition* aPosition);
 
@@ -431,6 +435,7 @@ class ContentChild final : public PContentChild,
   mozilla::ipc::IPCResult RecvShutdown();
 
   mozilla::ipc::IPCResult RecvInvokeDragSession(
+      const MaybeDiscarded<WindowContext>& aSourceWindowContext,
       nsTArray<IPCDataTransfer>&& aTransfers, const uint32_t& aAction);
 
   MOZ_CAN_RUN_SCRIPT_BOUNDARY
@@ -529,8 +534,10 @@ class ContentChild final : public PContentChild,
       const bool& minimizeMemoryUsage, const Maybe<FileDescriptor>& DMDFile,
       const RequestMemoryReportResolver& aResolver);
 
+#if defined(XP_WIN)
   mozilla::ipc::IPCResult RecvGetUntrustedModulesData(
       GetUntrustedModulesDataResolver&& aResolver);
+#endif  // defined(XP_WIN)
 
   mozilla::ipc::IPCResult RecvSetXPCOMProcessAttributes(
       XPCOMInitData&& aXPCOMInit, const StructuredCloneData& aInitialData,
@@ -604,7 +611,7 @@ class ContentChild final : public PContentChild,
   static void FatalErrorIfNotUsingGPUProcess(const char* const aErrorMsg,
                                              base::ProcessId aOtherPid);
 
-  typedef std::function<void(PRFileDesc*)> AnonymousTemporaryFileCallback;
+  using AnonymousTemporaryFileCallback = std::function<void(PRFileDesc*)>;
   nsresult AsyncOpenAnonymousTemporaryFile(
       const AnonymousTemporaryFileCallback& aCallback);
 

@@ -167,7 +167,7 @@ struct PrefTraits;
 
 template <>
 struct PrefTraits<bool> {
-  typedef bool PrefValueType;
+  using PrefValueType = bool;
 
   static const PrefValueType kDefaultValue = false;
 
@@ -184,7 +184,7 @@ struct PrefTraits<bool> {
 
 template <>
 struct PrefTraits<int32_t> {
-  typedef int32_t PrefValueType;
+  using PrefValueType = int32_t;
 
   static inline PrefValueType Get(const char* aPref) {
     AssertIsOnMainThread();
@@ -203,7 +203,7 @@ T GetWorkerPref(const nsACString& aPref,
                 bool* aPresent = nullptr) {
   AssertIsOnMainThread();
 
-  typedef PrefTraits<T> PrefHelper;
+  using PrefHelper = PrefTraits<T>;
 
   T result;
   bool present = true;
@@ -299,15 +299,12 @@ void LoadContextOptions(const char* aPrefName, void* /* aClosure */) {
           GetWorkerPref<bool>("asyncstack_capture_debuggee_only"_ns))
       .setPrivateClassFields(
           GetWorkerPref<bool>("experimental.private_fields"_ns))
-#ifdef NIGHTLY_BUILD
       .setClassStaticBlocks(
           GetWorkerPref<bool>("experimental.class_static_blocks"_ns))
-#endif
       .setPrivateClassMethods(
           GetWorkerPref<bool>("experimental.private_methods"_ns))
       .setErgnomicBrandChecks(
-          GetWorkerPref<bool>("experimental.ergonomic_brand_checks"_ns))
-      .setTopLevelAwait(GetWorkerPref<bool>("experimental.top_level_await"_ns));
+          GetWorkerPref<bool>("experimental.ergonomic_brand_checks"_ns));
 
   nsCOMPtr<nsIXULRuntime> xr = do_GetService("@mozilla.org/xre/runtime;1");
   if (xr) {
@@ -427,6 +424,12 @@ void LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */) {
       PREF("gc_small_heap_size_max_mb", JSGC_SMALL_HEAP_SIZE_MAX),
       PREF("gc_large_heap_size_min_mb", JSGC_LARGE_HEAP_SIZE_MIN),
       PREF("gc_allocation_threshold_mb", JSGC_ALLOCATION_THRESHOLD),
+      PREF("gc_malloc_threshold_base_mb", JSGC_MALLOC_THRESHOLD_BASE),
+      PREF("gc_small_heap_incremental_limit",
+           JSGC_SMALL_HEAP_INCREMENTAL_LIMIT),
+      PREF("gc_large_heap_incremental_limit",
+           JSGC_LARGE_HEAP_INCREMENTAL_LIMIT),
+      PREF("gc_urgent_threshold_mb", JSGC_URGENT_THRESHOLD_MB),
       PREF("gc_incremental_slice_ms", JSGC_SLICE_TIME_BUDGET_MS),
       PREF("gc_min_empty_chunk_count", JSGC_MIN_EMPTY_CHUNK_COUNT),
       PREF("gc_max_empty_chunk_count", JSGC_MAX_EMPTY_CHUNK_COUNT),
@@ -492,6 +495,10 @@ void LoadJSGCMemoryOptions(const char* aPrefName, void* /* aClosure */) {
       case JSGC_SMALL_HEAP_SIZE_MAX:
       case JSGC_LARGE_HEAP_SIZE_MIN:
       case JSGC_ALLOCATION_THRESHOLD:
+      case JSGC_MALLOC_THRESHOLD_BASE:
+      case JSGC_SMALL_HEAP_INCREMENTAL_LIMIT:
+      case JSGC_LARGE_HEAP_INCREMENTAL_LIMIT:
+      case JSGC_URGENT_THRESHOLD_MB:
       case JSGC_MIN_EMPTY_CHUNK_COUNT:
       case JSGC_MAX_EMPTY_CHUNK_COUNT:
         UpdateCommonJSGCMemoryOption(rts, pref->name, pref->key);

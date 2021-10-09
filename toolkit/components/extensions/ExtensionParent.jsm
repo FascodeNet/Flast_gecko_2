@@ -274,15 +274,12 @@ const ProxyMessenger = {
 
   openNative(nativeApp, sender) {
     let context = ParentAPIManager.getContextById(sender.childId);
-    let { extension } = context;
-    if (extension.hasPermission("geckoViewAddons")) {
-      let allowMessagingFromContent = extension.hasPermission(
-        "nativeMessagingFromContent"
-      );
+    if (context.extension.hasPermission("geckoViewAddons")) {
       return new GeckoViewConnection(
-        sender,
+        this.getSender(context.extension, sender),
+        sender.actor.browsingContext.top.embedderElement,
         nativeApp,
-        allowMessagingFromContent
+        context.extension.hasPermission("nativeMessagingFromContent")
       );
     } else if (sender.verified) {
       return new NativeApp(context, nativeApp);
@@ -295,10 +292,20 @@ const ProxyMessenger = {
   },
 
   getSender(extension, source) {
-    let { extensionId, envType, frameId, url, actor, id } = source;
-    let sender = { id: extensionId, envType, frameId, url, contextId: id };
-    let target = actor.browsingContext.top.embedderElement;
-    apiManager.global.tabGetSender(extension, target, sender);
+    let sender = {
+      contextId: source.id,
+      id: source.extensionId,
+      envType: source.envType,
+      frameId: source.frameId,
+      url: source.url,
+    };
+
+    let browser = source.actor.browsingContext.top.embedderElement;
+    let data = browser && apiManager.global.tabTracker.getBrowserData(browser);
+    if (data?.tabId > 0) {
+      sender.tab = extension.tabManager.get(data.tabId, null)?.convert();
+    }
+
     return sender;
   },
 
@@ -582,15 +589,6 @@ class ExtensionPageContextParent extends ProxyContextParent {
   get currentWindow() {
     if (this.viewType !== "background") {
       return this.appWindow;
-    }
-  }
-
-  get windowId() {
-    let { currentWindow } = this;
-    let { windowTracker } = apiManager.global;
-
-    if (currentWindow && windowTracker) {
-      return windowTracker.getId(currentWindow);
     }
   }
 

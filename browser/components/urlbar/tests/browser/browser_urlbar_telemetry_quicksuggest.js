@@ -11,6 +11,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   CONTEXTUAL_SERVICES_PING_TYPES:
     "resource:///modules/PartnerLinkAttribution.jsm",
   PartnerLinkAttribution: "resource:///modules/PartnerLinkAttribution.jsm",
+  TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
   UrlbarProviderQuickSuggest:
     "resource:///modules/UrlbarProviderQuickSuggest.jsm",
   UrlbarQuickSuggest: "resource:///modules/UrlbarQuickSuggest.jsm",
@@ -46,6 +47,8 @@ const TELEMETRY_EVENT_CATEGORY = "contextservices.quicksuggest";
 const EXPERIMENT_PREF = "browser.urlbar.quicksuggest.enabled";
 const SUGGEST_PREF = "suggest.quicksuggest";
 
+const DEFAULT_SCENARIO = UrlbarPrefs.get("quicksuggest.scenario");
+
 // Spy for the custom impression/click sender
 let spy;
 
@@ -55,17 +58,10 @@ add_task(async function init() {
     PartnerLinkAttribution._pingCentre,
     "sendStructuredIngestionPing"
   );
-  sandbox.stub(UrlbarQuickSuggest, "_setupRemoteSettings").resolves(true);
 
   await PlacesUtils.history.clear();
+  await PlacesUtils.bookmarks.eraseEverything();
   await UrlbarTestUtils.formHistory.clear();
-  await SpecialPowers.pushPrefEnv({
-    set: [
-      [EXPERIMENT_PREF, true],
-      ["browser.urlbar.suggest.searches", true],
-      ["browser.urlbar.quicksuggest.showedOnboardingDialog", true],
-    ],
-  });
 
   // Add a mock engine so we don't hit the network.
   await SearchTestUtils.installSearchExtension();
@@ -73,8 +69,7 @@ add_task(async function init() {
   Services.search.setDefault(Services.search.getEngineByName("Example"));
 
   // Set up Quick Suggest.
-  await UrlbarQuickSuggest.init();
-  await UrlbarQuickSuggest._processSuggestionsJSON(TEST_DATA);
+  await UrlbarTestUtils.ensureQuickSuggestInit(TEST_DATA);
   UrlbarProviderQuickSuggest._helpUrl = TEST_HELP_URL;
 
   // Enable local telemetry recording for the duration of the test.
@@ -108,6 +103,38 @@ add_task(async function impression() {
     assertCustomImpression(index);
   });
   await PlacesUtils.history.clear();
+});
+
+// Tests the impression scalar and the custom impression ping for "online" scenario.
+add_task(async function impression_online() {
+  await UrlbarTestUtils.withExperiment({
+    valueOverrides: {
+      // Make sure Merino is disabled so we don't hit the network.
+      merinoEnabled: false,
+      quickSuggestScenario: "online",
+      quickSuggestShouldShowOnboardingDialog: false,
+    },
+    callback: async () => {
+      spy.resetHistory();
+      UrlbarPrefs.set("suggest.quicksuggest", true);
+      UrlbarPrefs.set("suggest.quicksuggest.sponsored", true);
+      await BrowserTestUtils.withNewTab("about:blank", async () => {
+        await UrlbarTestUtils.promiseAutocompleteResultPopup({
+          window,
+          value: TEST_SEARCH_STRING,
+          fireInputEvent: true,
+        });
+        let index = 1;
+        await assertIsQuickSuggest(index);
+        await UrlbarTestUtils.promisePopupClose(window, () => {
+          EventUtils.synthesizeKey("KEY_Enter");
+        });
+        assertScalars({ [TELEMETRY_SCALARS.IMPRESSION]: index + 1 });
+        assertCustomImpression(index, "online");
+      });
+      await PlacesUtils.history.clear();
+    },
+  });
 });
 
 // Makes sure the impression scalar and the custom impression are not incremented
@@ -292,8 +319,9 @@ add_task(async function help_mouse() {
   await PlacesUtils.history.clear();
 });
 
-// Tests the contextservices.quicksuggest enable_toggled event telemetry by
-// toggling the suggest.quicksuggest pref.
+// Tests telemetry recorded when toggling the `suggest.quicksuggest` pref:
+// * contextservices.quicksuggest enable_toggled event telemetry
+// * TelemetryEnvironment
 add_task(async function enableToggled() {
   Services.telemetry.clearEvents();
 
@@ -309,6 +337,13 @@ add_task(async function enableToggled() {
         object: enabled ? "enabled" : "disabled",
       },
     ]);
+    Assert.equal(
+      TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+        "browser.urlbar.suggest.quicksuggest"
+      ],
+      enabled,
+      "suggest.quicksuggest is correct in TelemetryEnvironment"
+    );
   }
 
   // Set the main quicksuggest.enabled pref to false and toggle the
@@ -321,7 +356,51 @@ add_task(async function enableToggled() {
   TelemetryTestUtils.assertEvents([], { category: TELEMETRY_EVENT_CATEGORY });
   await SpecialPowers.popPrefEnv();
 
-  UrlbarPrefs.clear(SUGGEST_PREF);
+  // Set the pref back to what it was at the start of the task.
+  UrlbarPrefs.set(SUGGEST_PREF, !enabled);
+});
+
+// Tests telemetry recorded when toggling the `suggest.quicksuggest.sponsored`
+// pref:
+// * contextservices.quicksuggest enable_toggled event telemetry *
+// * TelemetryEnvironment
+add_task(async function sponsoredToggled() {
+  Services.telemetry.clearEvents();
+
+  // Toggle the suggest.quicksuggest.sponsored pref twice. We should get two
+  // events.
+  let enabled = UrlbarPrefs.get("suggest.quicksuggest.sponsored");
+  for (let i = 0; i < 2; i++) {
+    enabled = !enabled;
+    UrlbarPrefs.set("suggest.quicksuggest.sponsored", enabled);
+    TelemetryTestUtils.assertEvents([
+      {
+        category: TELEMETRY_EVENT_CATEGORY,
+        method: "sponsored_toggled",
+        object: enabled ? "enabled" : "disabled",
+      },
+    ]);
+    Assert.equal(
+      TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+        "browser.urlbar.suggest.quicksuggest.sponsored"
+      ],
+      enabled,
+      "suggest.quicksuggest.sponsored is correct in TelemetryEnvironment"
+    );
+  }
+
+  // Set the main quicksuggest.enabled pref to false and toggle the
+  // suggest.quicksuggest pref again. We shouldn't get any events.
+  await SpecialPowers.pushPrefEnv({
+    set: [[EXPERIMENT_PREF, false]],
+  });
+  enabled = !enabled;
+  UrlbarPrefs.set("suggest.quicksuggest.sponsored", enabled);
+  TelemetryTestUtils.assertEvents([], { category: TELEMETRY_EVENT_CATEGORY });
+  await SpecialPowers.popPrefEnv();
+
+  // Set the pref back to what it was at the start of the task.
+  UrlbarPrefs.set("suggest.quicksuggest.sponsored", !enabled);
 });
 
 // Tests the Nimbus "exposure" event gets recorded when the user is enrolled in
@@ -337,6 +416,8 @@ add_task(async function nimbusExposure() {
   UrlbarProviderQuickSuggest._recordedExposureEvent = false;
   let doExperimentCleanup = await UrlbarTestUtils.enrollExperiment({
     valueOverrides: {
+      // Make sure Merino is disabled so we don't hit the network.
+      merinoEnabled: false,
       quickSuggestEnabled: true,
       quickSuggestShouldShowOnboardingDialog: false,
     },
@@ -411,6 +492,192 @@ add_task(async function nimbusExposure() {
   await doExperimentCleanup();
 });
 
+// The contextservices.quicksuggest enable_toggled and sponsored_toggled events
+// should not be recorded when the scenario changes. TelemetryEnvironment should
+// record the new `suggest.quicksuggest` pref values.
+add_task(async function updateScenario() {
+  // Make sure the prefs don't have user values that would mask the default
+  // values set below.
+  UrlbarPrefs.clear("quicksuggest.scenario");
+  UrlbarPrefs.clear("suggest.quicksuggest");
+  UrlbarPrefs.clear("suggest.quicksuggest.sponsored");
+  Services.telemetry.clearEvents();
+
+  // check initial defaults
+  let defaults = Services.prefs.getDefaultBranch("browser.urlbar.");
+  Assert.equal(
+    defaults.getCharPref("quicksuggest.scenario"),
+    "offline",
+    "Default scenario is offline initially"
+  );
+  Assert.ok(
+    defaults.getBoolPref("suggest.quicksuggest"),
+    "suggest.quicksuggest is true initially"
+  );
+  Assert.ok(
+    defaults.getBoolPref("suggest.quicksuggest.sponsored"),
+    "suggest.quicksuggest.sponsored is true initially"
+  );
+  Assert.ok(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest"
+    ],
+    "suggest.quicksuggest is true in TelemetryEnvironment"
+  );
+  Assert.ok(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest.sponsored"
+    ],
+    "suggest.quicksuggest.sponsored is true in TelemetryEnvironment"
+  );
+
+  // set online
+  defaults.setCharPref("quicksuggest.scenario", "online");
+  Assert.ok(
+    !defaults.getBoolPref("suggest.quicksuggest"),
+    "suggest.quicksuggest is false after setting online scenario"
+  );
+  Assert.ok(
+    !defaults.getBoolPref("suggest.quicksuggest.sponsored"),
+    "suggest.quicksuggest.sponsored is false after setting online scenario"
+  );
+  TelemetryTestUtils.assertEvents([]);
+  Assert.ok(
+    !TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest"
+    ],
+    "suggest.quicksuggest is false in TelemetryEnvironment"
+  );
+  Assert.ok(
+    !TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest.sponsored"
+    ],
+    "suggest.quicksuggest.sponsored is false in TelemetryEnvironment"
+  );
+
+  // set back to offline
+  defaults.setCharPref("quicksuggest.scenario", "offline");
+  Assert.ok(
+    defaults.getBoolPref("suggest.quicksuggest"),
+    "suggest.quicksuggest is true after setting offline again"
+  );
+  Assert.ok(
+    defaults.getBoolPref("suggest.quicksuggest.sponsored"),
+    "suggest.quicksuggest.sponsored is true after setting offline again"
+  );
+  TelemetryTestUtils.assertEvents([]);
+  Assert.ok(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest"
+    ],
+    "suggest.quicksuggest is true in TelemetryEnvironment again"
+  );
+  Assert.ok(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest.sponsored"
+    ],
+    "suggest.quicksuggest.sponsored is true in TelemetryEnvironment again"
+  );
+});
+
+// The "firefox-suggest-update" notification should cause TelemetryEnvironment
+// to re-cache the `suggest.quicksuggest` prefs.
+add_task(async function telemetryEnvironmentUpdateNotification() {
+  // Make sure the prefs don't have user values that would mask the default
+  // values set below.
+  UrlbarPrefs.clear("quicksuggest.scenario");
+  UrlbarPrefs.clear("suggest.quicksuggest");
+  UrlbarPrefs.clear("suggest.quicksuggest.sponsored");
+
+  // Check the initial defaults.
+  let defaults = Services.prefs.getDefaultBranch("browser.urlbar.");
+  Assert.ok(
+    defaults.getBoolPref("suggest.quicksuggest"),
+    "suggest.quicksuggest is true initially"
+  );
+  Assert.ok(
+    defaults.getBoolPref("suggest.quicksuggest.sponsored"),
+    "suggest.quicksuggest.sponsored is true initially"
+  );
+
+  // Tell TelemetryEnvironment to clear its pref cache and stop observing prefs.
+  await TelemetryEnvironment.testWatchPreferences(new Map());
+
+  // Set the prefs to false. They should remain absent in TelemetryEnvironment.
+  defaults.setBoolPref("suggest.quicksuggest", false);
+  defaults.setBoolPref("suggest.quicksuggest.sponsored", false);
+  Assert.ok(
+    !(
+      "browser.urlbar.suggest.quicksuggest" in
+      TelemetryEnvironment.currentEnvironment.settings.userPrefs
+    ),
+    "suggest.quicksuggest not in TelemetryEnvironment"
+  );
+  Assert.ok(
+    !(
+      "browser.urlbar.suggest.quicksuggest.sponsored" in
+      TelemetryEnvironment.currentEnvironment.settings.userPrefs
+    ),
+    "suggest.quicksuggest.sponsored not in TelemetryEnvironment"
+  );
+
+  // Send the notification. TelemetryEnvironment should record the current
+  // values.
+  Services.obs.notifyObservers(null, "firefox-suggest-update");
+  Assert.strictEqual(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest"
+    ],
+    false,
+    "suggest.quicksuggest is false in TelemetryEnvironment"
+  );
+  Assert.strictEqual(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest.sponsored"
+    ],
+    false,
+    "suggest.quicksuggest.sponsored is false in TelemetryEnvironment"
+  );
+
+  // Set the prefs to true. TelemetryEnvironment should keep the old values.
+  defaults.setBoolPref("suggest.quicksuggest", true);
+  defaults.setBoolPref("suggest.quicksuggest.sponsored", true);
+  Assert.strictEqual(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest"
+    ],
+    false,
+    "suggest.quicksuggest remains false in TelemetryEnvironment"
+  );
+  Assert.strictEqual(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest.sponsored"
+    ],
+    false,
+    "suggest.quicksuggest.sponsored remains false in TelemetryEnvironment"
+  );
+
+  // Send the notification again. TelemetryEnvironment should record the new
+  // values.
+  Services.obs.notifyObservers(null, "firefox-suggest-update");
+  Assert.strictEqual(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest"
+    ],
+    true,
+    "suggest.quicksuggest is false in TelemetryEnvironment"
+  );
+  Assert.strictEqual(
+    TelemetryEnvironment.currentEnvironment.settings.userPrefs[
+      "browser.urlbar.suggest.quicksuggest.sponsored"
+    ],
+    true,
+    "suggest.quicksuggest.sponsored is false in TelemetryEnvironment"
+  );
+
+  await TelemetryEnvironment.testCleanRestart().onInitialized();
+});
+
 /**
  * Checks the values of all the Quick Suggest scalars.
  *
@@ -479,11 +746,17 @@ async function assertNoQuickSuggestResults() {
  *
  * @param {number} [index]
  *   The expected index of the Quick Suggest result.
+ * @param {string} [scenario]
+ *   The scenario of the Quick Suggest, should be one of "offline", "history", "online".
  */
-function assertCustomImpression(index) {
+function assertCustomImpression(index, scenario = DEFAULT_SCENARIO) {
   Assert.ok(spy.calledOnce, "Should send a custom impression ping");
   // Validate the impression ping
   let [payload, endpoint] = spy.firstCall.args;
+  let expectedSearchQuery = scenario === "online" ? TEST_SEARCH_STRING : "";
+  let expectedMatchedKeywords = scenario === "online" ? TEST_SEARCH_STRING : "";
+  let expectedScenario = scenario;
+
   Assert.ok(
     endpoint.includes(CONTEXTUAL_SERVICES_PING_TYPES.QS_IMPRESSION),
     "Should set the endpoint for QuickSuggest impression"
@@ -503,14 +776,15 @@ function assertCustomImpression(index) {
   Assert.equal(payload.position, index + 1, "Should set the position");
   Assert.equal(
     payload.search_query,
-    "",
-    "Should set the search_query to an empty string"
+    expectedSearchQuery,
+    "Should set the search_query"
   );
   Assert.equal(
     payload.matched_keywords,
-    "",
-    "Should set the matched_keywords to an empty string"
+    expectedMatchedKeywords,
+    "Should set the matched_keywords"
   );
+  Assert.equal(payload.scenario, expectedScenario, "Should set the scenario");
 }
 
 /**
@@ -548,6 +822,7 @@ function assertCustomClick(index) {
   );
   Assert.equal(payload.block_id, 1, "Should set the block_id");
   Assert.equal(payload.position, index + 1, "Should set the position");
+  Assert.equal(payload.scenario, DEFAULT_SCENARIO, "Should set the scenario");
 }
 
 /**

@@ -325,6 +325,9 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
   void storePrivateValue(Register src, const Address& dest) {
     storePtr(src, dest);
   }
+  void storePrivateValue(ImmGCPtr imm, const Address& dest) {
+    storePtr(imm, dest);
+  }
 
   void loadValue(Address src, Register val) {
     Ldr(ARMRegister(val, 64), MemOperand(src));
@@ -1922,17 +1925,6 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
     splitSignExtTag(src, scratch);
     return testBigInt(cond, scratch);
   }
-  Condition testBigIntTruthy(bool truthy, const ValueOperand& value) {
-    vixl::UseScratchRegisterScope temps(this);
-    const Register scratch = temps.AcquireX().asUnsized();
-
-    MOZ_ASSERT(value.valueReg() != scratch);
-
-    unboxBigInt(value, scratch);
-    load32(Address(scratch, BigInt::offsetOfDigitLength()), scratch);
-    cmp32(scratch, Imm32(0));
-    return truthy ? Condition::NonZero : Condition::Zero;
-  }
   Condition testInt32(Condition cond, const BaseIndex& src) {
     vixl::UseScratchRegisterScope temps(this);
     const Register scratch = temps.AcquireX().asUnsized();
@@ -1985,19 +1977,10 @@ class MacroAssemblerCompat : public vixl::MacroAssembler {
     Tst(payload32, payload32);
     return truthy ? NonZero : Zero;
   }
-  Condition testStringTruthy(bool truthy, const ValueOperand& value) {
-    vixl::UseScratchRegisterScope temps(this);
-    const Register scratch = temps.AcquireX().asUnsized();
-    const ARMRegister scratch32(scratch, 32);
-    const ARMRegister scratch64(scratch, 64);
 
-    MOZ_ASSERT(value.valueReg() != scratch);
+  Condition testBigIntTruthy(bool truthy, const ValueOperand& value);
+  Condition testStringTruthy(bool truthy, const ValueOperand& value);
 
-    unboxString(value, scratch);
-    Ldr(scratch32, MemOperand(scratch64, JSString::offsetOfLength()));
-    Cmp(scratch32, Operand(0));
-    return truthy ? Condition::NonZero : Condition::Zero;
-  }
   void int32OrDouble(Register src, ARMFPRegister dest) {
     Label isInt32;
     Label join;

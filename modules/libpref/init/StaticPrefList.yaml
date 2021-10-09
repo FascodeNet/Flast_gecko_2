@@ -1194,6 +1194,12 @@
   type: RelaxedAtomicUint32
   value: 3000
   mirror: always
+  
+# Maximum delay between scroll input events that will be considered a scrolling interaction (milliseconds).
+- name: browser.places.interactions.scrolling_timeout_ms
+  type: RelaxedAtomicUint32
+  value: 5000
+  mirror: always
 
 # Force usage of in-memory (rather than file on disk) media cache for video streaming when private browsing
 - name: browser.privatebrowsing.forceMediaMemoryCache
@@ -1283,6 +1289,22 @@
   value: false
   mirror: always
 
+# Testing-only pref which makes data: URIs be loaded in a "web" content process
+# instead of within a process based on the URI's loader.
+- name: browser.tabs.remote.dataUriInDefaultWebProcess
+  type: bool
+  value: false
+  mirror: always
+
+# Testing-only pref to force system-triggered about:blank loads to not change
+# content processes. This is used for performance tests which load an
+# about:blank document between navigations for historical reasons to avoid
+# unnecessary process switches.
+- name: browser.tabs.remote.systemTriggeredAboutBlankAnywhere
+  type: bool
+  value: false
+  mirror: always
+
 - name: browser.tabs.remote.desktopbehavior
   type: bool
   value: false
@@ -1324,6 +1346,23 @@
 #else
   value: false
 #endif
+  mirror: always
+
+# Pref to control whether we use a separate privileged content process
+# for certain mozilla webpages (which are listed in the pref
+# browser.tabs.remote.separatedMozillaDomains).
+- name: browser.tabs.remote.separatePrivilegedMozillaWebContentProcess
+  type: bool
+  value: false
+  mirror: always
+
+# Whether or not process selection for subframes will prefer re-using an
+# existing content process over creating a new one. Enabling this pref should
+# reduce the number of processes allocated for non-first-party domains if
+# dom.ipc.processCount.webIsolated > 1.
+- name: browser.tabs.remote.subframesPreferUsed
+  type: bool
+  value: true
   mirror: always
 
 # When this pref is enabled, opaque response is only allowed to enter the
@@ -1743,7 +1782,7 @@
 # Block Insecure downloads from Secure Origins
 - name: dom.block_download_insecure
   type: bool
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
   mirror: always
 
 # Block all downloads in iframes with the sandboxed attribute
@@ -2046,6 +2085,12 @@
 # events to be further coalesced in the child side after they
 # are sent.
 - name: dom.events.coalesce.touchmove
+  type: bool
+  value: true
+  mirror: always
+
+# Allow mousemove events to be coalesced in the child side after they are sent.
+- name: dom.events.coalesce.mousemove
   type: bool
   value: true
   mirror: always
@@ -2414,13 +2459,13 @@
 # Support for input type=datetime-local.
 - name: dom.forms.datetime-local
   type: bool
-  value: @IS_ANDROID@
+  value: true
   mirror: always
 
 # Support for input type=datetime-local widget. Disabled for now.
 - name: dom.forms.datetime-local.widget
   type: bool
-  value: false
+  value: true
   mirror: always
 
 # Support for input type=month, type=week. By default, disabled.
@@ -2485,6 +2530,19 @@
 # even during composition (keypress events are never fired during composition
 # even if this is true).
 - name: dom.keyboardevent.dispatch_during_composition
+  type: bool
+  value: true
+  mirror: always
+
+# Enable/disable KeyboardEvent.initKeyEvent function
+- name: dom.keyboardevent.init_key_event.enabled
+  type: bool
+  value: false
+  mirror: always
+
+# Enable/disable KeyboardEvent.initKeyEvent function in addons even if it's
+# disabled.
+- name: dom.keyboardevent.init_key_event.enabled_in_addons
   type: bool
   value: true
   mirror: always
@@ -2747,6 +2805,17 @@
   value: "storage"
   mirror: never
 
+# An upper limit for the "age" of an origin. Any origin which is older than the
+# threshold is considered as unaccessed. That doesn't necessarily mean that
+# such origins will be immediatelly archived. They will be archived only when
+# dom.quotaManager.checkQuotaInfoLoadTime is true and loading of quota info
+# takes a long time (dom.quotaManager.longQuotaInfoLoadTimeThresholdMs is used
+# to decide what is a long quota info load time).
+- name: dom.quotaManager.unaccessedForLongTimeThresholdSec
+  type: RelaxedAtomicUint32
+  value: 33696000 # 13 months
+  mirror: always
+
 # Should we try to load origin information from the cache?
 # See bug 1563023 for more details.
 - name: dom.quotaManager.loadQuotaFromCache
@@ -2765,6 +2834,20 @@
 - name: dom.quotaManager.caching.checkBuildId
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# Should we check quota info load time and eventually archive some unaccessed
+# origins if loading of quota info takes a long time ?
+- name: dom.quotaManager.checkQuotaInfoLoadTime
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# An upper limit for quota info load time, anything which takes longer than the
+# threshold is considered as long quota info load time.
+- name: dom.quotaManager.longQuotaInfoLoadTimeThresholdMs
+  type: RelaxedAtomicUint32
+  value: 21000 # 21 seconds
   mirror: always
 
 # Preference that users can set to override temporary storage smart limit
@@ -3050,6 +3133,13 @@
   value: true
   mirror: always
 
+# If true, when checking if it's upgrade downgrade cycles, the URI path will be
+# also checked.
+- name: dom.security.https_only_check_path_upgrade_downgrade_endless_loop
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # If true and HTTPS-only mode is enabled, requests
 # to local IP addresses are also upgraded
 - name: dom.security.https_only_mode.upgrade_local
@@ -3160,6 +3250,15 @@
 - name: dom.serviceWorkers.mitigations.navigation_fault_threshold
   type: uint32_t
   value: 3
+  mirror: always
+
+# This is the group usage head room for service workers.
+# The quota usage mitigation algorithm uses this preference to determine if the
+# origin or also group data should be cleared or not.
+# The default value is 400 MiB.
+- name: dom.serviceWorkers.mitigations.group_usage_headroom_kb
+  type: uint32_t
+  value: 400 * 1024
   mirror: always
 
 - name: dom.serviceWorkers.testing.enabled
@@ -3435,7 +3534,7 @@
 # Should VR sessions always be reported as supported, without first
 # checking for VR runtimes?  This will prevent permission prompts
 # from being suppressed on machines without VR runtimes and cause
-# navigatior.xr.isSessionSupported to always report that immersive-vr
+# navigator.xr.isSessionSupported to always report that immersive-vr
 # is supported.
 - name: dom.vr.always_support_vr
   type: RelaxedAtomicBool
@@ -3445,7 +3544,7 @@
 # Should AR sessions always be reported as supported, without first
 # checking for AR runtimes?  This will prevent permission prompts
 # from being suppressed on machines without AR runtimes and cause
-# navigatior.xr.isSessionSupported to always report that immersive-ar
+# navigator.xr.isSessionSupported to always report that immersive-ar
 # is supported.
 - name: dom.vr.always_support_ar
   type: RelaxedAtomicBool
@@ -3710,6 +3809,12 @@
   value: true
   mirror: always
 
+# Is support for custom element elementInternals enabled?
+- name: dom.webcomponents.elementInternals.enabled
+  type: bool
+  value: true
+  mirror: always
+
 # Is support for form-associated custom element enabled?
 - name: dom.webcomponents.formAssociatedCustomElement.enabled
   type: bool
@@ -3726,6 +3831,12 @@
 - name: dom.webkitBlink.filesystem.enabled
   type: bool
   value: @IS_NOT_ANDROID@
+  mirror: always
+
+# Whether the Web Locks API is enabled
+- name: dom.weblocks.enabled
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 # Whether the WebMIDI API is enabled
@@ -3957,7 +4068,7 @@
 # element, and then, another Backspace can delete it.
 - name: editor.hr_element.allow_to_delete_from_following_line
   type: bool
-  value: false
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
 # Delay to mask last input character in password fields.
@@ -4807,11 +4918,6 @@
   value: true
   mirror: always
 
-- name: gfx.basic_layer_manager.force_enabled
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
 #  Whether to enable LayerScope tool and default listening port.
 - name: gfx.layerscope.enabled
   type: RelaxedAtomicBool
@@ -4937,13 +5043,6 @@
   value: false
   mirror: once
 
-# Disable surface sharing due to issues with compatible FBConfigs on
-# NVIDIA drivers as described in bug 1193015.
-- name: gfx.use-glx-texture-from-pixmap
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
 - name: gfx.use-iosurface-textures
   type: bool
   value: false
@@ -5026,38 +5125,30 @@
   value: false
   mirror: always
 
-- name: gfx.webrender.blob.paint-flashing
+- name: gfx.webrender.debug.blob.paint-flashing
   type: RelaxedAtomicBool
   value: false
   mirror: always
 
-- name: gfx.webrender.enable-capture
+- name: gfx.webrender.debug.enable-capture
   type: bool
   value: false
   mirror: once
 
-- name: gfx.webrender.dl.dump-parent
+- name: gfx.webrender.debug.dl.dump-parent
   type: RelaxedAtomicBool
   value: false
   mirror: always
 
-- name: gfx.webrender.dl.dump-content
+- name: gfx.webrender.debug.dl.dump-content
   type: RelaxedAtomicBool
   value: false
   mirror: always
 
-- name: gfx.webrender.dl.dump-content-serialized
+- name: gfx.webrender.debug.dl.dump-content-serialized
   type: RelaxedAtomicBool
   value: false
   mirror: always
-
-# Also expose a pref to allow users to force-disable WR. This is exposed
-# on all channels because WR can be enabled on qualified hardware on all
-# channels.
-- name: gfx.webrender.force-legacy-layers
-  type: bool
-  value: false
-  mirror: once
 
 #ifdef MOZ_WIDGET_GTK
 - name: gfx.webrender.reject-software-driver
@@ -5066,7 +5157,7 @@
   mirror: once
 #endif
 
-- name: gfx.webrender.highlight-painted-layers
+- name: gfx.webrender.debug.highlight-painted-layers
   type: RelaxedAtomicBool
   value: false
   mirror: always
@@ -5146,12 +5237,6 @@
 - name: gfx.webrender.enable-item-cache
   type: bool
   value: true
-  mirror: once
-
-# Whether or not to fallback from WebRender/WebRender Software to Basic.
-- name: gfx.webrender.fallback.basic
-  type: bool
-  value: false
   mirror: once
 
 # Whether or not to fallback from WebRender to Software WebRender.
@@ -5234,6 +5319,14 @@
     mirror: always
 #endif
 
+#ifdef XP_MACOSX
+  # Files show up in $HOME/Desktop/nativelayerdumps-PID/frame-123.html
+-   name: gfx.webrender.debug.dump-native-layer-tree-to-file
+    type: RelaxedAtomicBool
+    value: false
+    mirror: always
+#endif
+
 - name: gfx.webrender.enable-low-priority-pool
   type: RelaxedAtomicBool
 #if defined(ANDROID)
@@ -5302,13 +5395,6 @@
 - name: gfx.webrender.software.d3d11.upload-mode
   type: RelaxedAtomicInt32
   value: 4
-  mirror: always
-
-# Whether to allow widgets that don't support acceleration to use WebRender
-# software backend
-- name: gfx.webrender.software.unaccelerated-widget.allow
-  type: RelaxedAtomicBool
-  value: true
   mirror: always
 
 # Whether to force widgets to don't support acceleration to use WebRender
@@ -5648,7 +5734,7 @@
 - name: image.avif.enabled
   type: RelaxedAtomicBool
 #if defined(MOZ_AV1)
-  value: false
+  value: true
 #else
   value: false
 #endif
@@ -5661,7 +5747,7 @@
 # 2 = Strict: reject violations of "should" specification directives
 - name: image.avif.compliance_strictness
   type: RelaxedAtomicInt32
-  value: 0
+  value: 1
   mirror: always
 
 # Whether we apply container-level transforms like mirroring and rotation
@@ -5874,13 +5960,13 @@
     type: bool
     value: false
     mirror: always
+#endif  // NIGHTLY_BUILD
 
 # Experimental support for class static blocks in JavaScript.
 -   name: javascript.options.experimental.class_static_blocks
     type: bool
-    value: false
+    value: true
     mirror: always
-#endif  // NIGHTLY_BUILD
 
   # Support for Private Fields in JavaScript.
 - name: javascript.options.experimental.private_fields
@@ -6130,6 +6216,14 @@
   mirror: always
   do_not_use_directly: true
 
+# Whether to use fdlibm for Math.sin, Math.cos, and Math.tan. When
+# privacy.resistFingerprinting is true, this pref is ignored and fdlibm is used
+# anyway.
+- name: javascript.options.use_fdlibm_for_sin_cos_tan
+  type: bool
+  value: false
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "layers."
 #---------------------------------------------------------------------------
@@ -6318,15 +6412,6 @@
 #endif
   mirror: once
 
-- name: layers.enable-tiles-if-skia-pomtp
-  type: bool
-#if defined(XP_WIN)
-  value: true
-#else
-  value: false
-#endif
-  mirror: once
-
 - name: layers.flash-borders
   type: RelaxedAtomicBool
   value: false
@@ -6492,26 +6577,6 @@
   value: -1
   mirror: always
 
-- name: layers.omtp.capture-limit
-  type: uint32_t
-  value: 25 * 1024 * 1024
-  mirror: once
-
-- name: layers.omtp.dump-capture
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
-- name: layers.omtp.paint-workers
-  type: int32_t
-  value: -1
-  mirror: once
-
-- name: layers.omtp.release-capture-on-main-thread
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-
 - name: layers.orientation.sync.timeout
   type: RelaxedAtomicUint32
   value: (uint32_t)0
@@ -6523,12 +6588,6 @@
     value: false
     mirror: once
 #endif
-
-- name: layers.progressive-paint
-  type: RelaxedAtomicBool
-  value: false
-  mirror: always
-  do_not_use_directly: true
 
 # Copy-on-write canvas.
 - name: layers.shared-buffer-provider.enabled
@@ -6787,6 +6846,13 @@
   mirror: always
   rust: true
 
+# Whether @layer is enabled
+- name: layout.css.cascade-layers.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+  rust: true
+
 # Whether Constructable Stylesheets are enabled in script.
 - name: layout.css.constructable-stylesheets.enabled
   type: bool
@@ -6890,14 +6956,14 @@
   value: true
   mirror: always
 
-# Whether we should throw on invalid pseudo-elements passed to
-# getComputedStyle() as per spec.
+# Whether we should return an empty style on invalid pseudo-elements starting
+# with a colon.
 #
-# Old behavior is a bit odd: returning an empty style if the string starts with
-# a double colon, and return the regular style otherwise.
-- name: layout.css.computed-style.throw-on-invalid-pseudo
+# Old behavior is returning an empty style if the string starts with a double
+# colon, and return the regular style otherwise.
+- name: layout.css.computed-style.new-invalid-pseudo-element-behavior
   type: bool
-  value: false
+  value: true
   mirror: always
 
 # Are implicit tracks in computed grid templates serialized?
@@ -6913,9 +6979,9 @@
   mirror: always
   rust: true
 
-# Whether the bloom filter optimization is applied to attribute names too, not
+# Whether the rule hash is applied to attribute names too, not
 # only classes / id / namespaces / etc.
-- name: layout.css.bloom-filter-attribute-names.enabled
+- name: layout.css.bucket-attribute-names.enabled
   type: RelaxedAtomicBool
   value: true
   mirror: always
@@ -6962,23 +7028,12 @@
   mirror: always
   rust: true
 
-# Is support for DOMMatrix enabled?
-- name: layout.css.DOMMatrix.enabled
+# Is support for color-mix with non-SRGB color spaces on content enabled?
+- name: layout.css.color-mix.color-spaces.enabled
   type: RelaxedAtomicBool
-  value: true
+  value: @IS_NIGHTLY_BUILD@
   mirror: always
-
-# Is support for DOMQuad enabled?
-- name: layout.css.DOMQuad.enabled
-  type: RelaxedAtomicBool
-  value: true
-  mirror: always
-
-# Is support for DOMPoint enabled?
-- name: layout.css.DOMPoint.enabled
-  type: RelaxedAtomicBool
-  value: true
-  mirror: always
+  rust: true
 
 # Is support for d property for SVG path element?
 - name: layout.css.d-property.enabled
@@ -7177,6 +7232,14 @@
   value: false
   mirror: always
   rust: true
+
+# An override for prefers-color-scheme for content documents.
+#
+# Dark (0), light (1), or system (2).
+- name: layout.css.prefers-color-scheme.content-override
+  type: RelaxedAtomicInt32
+  value: 2
+  mirror: always
 
 # Dictates whether or not the forced-colors media query is enabled.
 - name: layout.css.forced-colors.enabled
@@ -7604,20 +7667,17 @@
   value: true
   mirror: always
 
-# Whether :is() and :where() ignore errors inside their selector lists
-# internally, rather than failing to parse altogether.
-#
-# See https://github.com/w3c/csswg-drafts/issues/3264
-- name: layout.css.is-and-where-better-error-recovery.enabled
-  type: RelaxedAtomicBool
-  value: true
-  mirror: always
-  rust: true
-
 # Is 'content:none' supported on (non-pseudo) elements?
 - name: layout.css.element-content-none.enabled
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+  rust: true
+
+# Is 'font-synthesis: small-caps' supported?
+- name: layout.css.font-synthesis-small-caps.enabled
+  type: RelaxedAtomicBool
+  value: true
   mirror: always
   rust: true
 
@@ -8016,7 +8076,18 @@
   value: false
   mirror: always
 
+- name: media.eme.max-throughput-ms
+  type: RelaxedAtomicUint32
+  value: 200
+  mirror: always
+
 - name: media.clearkey.persistent-license.enabled
+  type: bool
+  value: false
+  mirror: always
+
+# Are test specific clearkey key systems enabled and exposed?
+- name: media.clearkey.test-key-systems.enabled
   type: bool
   value: false
   mirror: always
@@ -9062,6 +9133,18 @@
   value: true
   mirror: always
 
+# Whether to use new implementation of ParseReasm
+- name: network.auth.use_new_parse_realm
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# Whether to use new implementation of ParseReasm
+- name: network.auth.allow_multiple_challenges_same_line
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # See the full list of values in nsICookieService.idl.
 - name: network.cookie.cookieBehavior
   type: RelaxedAtomicInt32
@@ -9250,6 +9333,15 @@
 - name: network.http.referer.disallowCrossSiteRelaxingDefault
   type: bool
   value: @IS_EARLY_BETA_OR_EARLIER@
+  mirror: always
+
+
+# Set to ignore referrer policies which is less restricted than the default for
+# cross-site requests in the private browsing mode, including 'unsafe-url',
+# 'no-referrer-when-downgrade' and 'origin-when-cross-origin'.
+- name: network.http.referer.disallowCrossSiteRelaxingDefault.pbmode
+  type: bool
+  value: true
   mirror: always
 
 # Set the Private Browsing Default Referrer Policy applied to third-party
@@ -9549,7 +9641,7 @@
 # Whether to cache SSL resumption tokens in necko.
 - name: network.ssl_tokens_cache_enabled
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 
 # Capacity of the above cache, in kilobytes.
@@ -9856,6 +9948,18 @@
 - name: network.http.http3.parallel_fallback_conn_limit
   type: RelaxedAtomicUint32
   value: 32
+  mirror: always
+
+# Receive buffer size of QUIC socket
+- name: network.http.http3.max_data
+  type: RelaxedAtomicUint32
+  value: 25165824
+  mirror: always
+
+# Receive buffer size of QUIC socket
+- name: network.http.http3.max_stream_data
+  type: RelaxedAtomicUint32
+  value: 12582912
   mirror: always
 
 # When true, a http request will be upgraded to https when HTTPS RR is
@@ -10438,6 +10542,24 @@
   value: false
   mirror: always
 
+# Whether the storage allowed check should be cached on the inner window.
+- name: privacy.antitracking.cacheStorageAllowedForWindow
+  type: bool
+  value: true
+  mirror: always
+
+# Controls the anti-tracking webcompat features. This includes:
+# - All URL-Classifier and state partitioning skip lists (prefs and remote
+#   settings)
+# - Storage access heuristics (opener, redirect, etc.)
+# - StorageAccessAPI automatic grants (skips the prompt)
+# - Allowing specific tracking channels on user opt-in (e.g. facebook login
+#   shim).
+- name: privacy.antitracking.enableWebcompat
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # Enable the heuristic to allow storage access for recent visited pages
 - name: privacy.restrict3rdpartystorage.heuristic.recently_visited
   type: bool
@@ -10461,11 +10583,6 @@
 - name: privacy.documentCookies.maxage
   type: uint32_t
   value: 0
-  mirror: always
-
-- name: privacy.storagePrincipal.enabledForTrackers
-  type: RelaxedAtomicBool
-  value: false
   mirror: always
 
 - name: privacy.window.maxInnerWidth
@@ -10505,7 +10622,7 @@
 
 - name: privacy.partition.bloburl_per_agent_cluster
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: false
   mirror: always
 
 - name: privacy.window.name.update.enabled
@@ -10727,12 +10844,12 @@
 
 -   name: security.sandbox.rdd.shadow-stack.enabled
     type: RelaxedAtomicBool
-    value: false
+    value: true
     mirror: always
 
 -   name: security.sandbox.socket.shadow-stack.enabled
     type: RelaxedAtomicBool
-    value: @IS_NIGHTLY_BUILD@
+    value: true
     mirror: always
 
 -   name: security.sandbox.gpu.shadow-stack.enabled
@@ -10799,6 +10916,20 @@
 
 # Cancel outgoing requests from SystemPrincipal
 - name: security.cancel_non_local_loads_triggered_by_systemprincipal
+  type: bool
+  value: false
+  mirror: always
+
+# Cancel outgoing requests from SystemPrincipal:
+# but only with scheme http(s) and contentpolicytype subdocument
+- name: security.disallow_privileged_https_subdocuments_loads
+  type: bool
+  value: true
+  mirror: always
+
+# Cancel outgoing requests from SystemPrincipal:
+# but only with scheme data and contentpolicytype subdocument
+- name: security.disallow_privileged_data_subdocuments_loads
   type: bool
   value: false
   mirror: always
@@ -11362,6 +11493,16 @@
   value: false
   mirror: always
 
+- name: webgl.auto-flush
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+- name: webgl.auto-flush.gl
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 - name: webgl.can-lose-context-in-foreground
   type: RelaxedAtomicBool
   value: true
@@ -11798,6 +11939,18 @@
   type: RelaxedAtomicBool
   value: true
   mirror: always
+
+# Use async clipboard on Wayland
+- name: widget.wayland.async-clipboard.enabled
+  type: bool
+  value: false
+  mirror: once
+
+# Use async data getter on Wayland Clipboard
+- name: widget.wayland.async-data-transfer.enabled
+  type: bool
+  value: false
+  mirror: once
 
 # Force fractional scaling using wp_viewporter. Valid values: 0.5 - 8
 - name: widget.wayland.fractional_buffer_scale

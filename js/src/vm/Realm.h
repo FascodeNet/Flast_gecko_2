@@ -21,6 +21,7 @@
 #include "builtin/Array.h"
 #include "gc/Barrier.h"
 #include "js/GCVariant.h"
+#include "js/TelemetryTimers.h"
 #include "js/UniquePtr.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/Compartment.h"
@@ -44,6 +45,7 @@ class JitRealm;
 
 class AutoRestoreRealmDebugMode;
 class GlobalObject;
+class GlobalObjectData;
 class GlobalLexicalEnvironmentObject;
 class MapObject;
 class NonSyntacticLexicalEnvironmentObject;
@@ -306,23 +308,9 @@ class JS::Realm : public JS::shadow::Realm {
   friend struct ::JSContext;
   js::WeakHeapPtrGlobalObject global_;
 
-  // The global lexical environment. This is stored here instead of in
-  // GlobalObject for easier/faster JIT access.
-  js::WeakHeapPtr<js::GlobalLexicalEnvironmentObject*> lexicalEnv_;
-
   // Note: this is private to enforce use of ObjectRealm::get(obj).
   js::ObjectRealm objects_;
   friend js::ObjectRealm& js::ObjectRealm::get(const JSObject*);
-
-  // The global environment record's [[VarNames]] list that contains all
-  // names declared using FunctionDeclaration, GeneratorDeclaration, and
-  // VariableDeclaration declarations in global code in this realm.
-  // Names are only removed from this list by a |delete IdentifierReference|
-  // that successfully removes that global property.
-  using VarNamesSet =
-      GCHashSet<js::WeakHeapPtr<JSAtom*>, js::DefaultHasher<JSAtom*>,
-                js::ZoneAllocPolicy>;
-  VarNamesSet varNames_;
 
   friend class js::AutoSetNewObjectMetadata;
   js::NewObjectMetadataState objectMetadataState_{js::ImmediateMetadata()};
@@ -469,7 +457,7 @@ class JS::Realm : public JS::shadow::Realm {
                               size_t* realmObject, size_t* realmTables,
                               size_t* innerViewsArg,
                               size_t* objectMetadataTablesArg,
-                              size_t* savedStacksSet, size_t* varNamesSet,
+                              size_t* savedStacksSet,
                               size_t* nonSyntacticLexicalEnvironmentsArg,
                               size_t* jitRealm);
 
@@ -515,17 +503,13 @@ class JS::Realm : public JS::shadow::Realm {
     return global_.unbarrieredGet();
   }
 
-  inline js::GlobalLexicalEnvironmentObject* unbarrieredLexicalEnvironment()
-      const;
-
   /* True if a global object exists, but it's being collected. */
   inline bool globalIsAboutToBeFinalized();
 
   /* True if a global exists and it's not being collected. */
   inline bool hasLiveGlobal() const;
 
-  inline void initGlobal(js::GlobalObject& global,
-                         js::GlobalLexicalEnvironmentObject& lexicalEnv);
+  inline void initGlobal(js::GlobalObject& global);
 
   /*
    * This method traces data that is live iff we know that this realm's
@@ -560,15 +544,6 @@ class JS::Realm : public JS::shadow::Realm {
   void purge();
 
   void fixupAfterMovingGC(JSTracer* trc);
-
-  // Add a name to [[VarNames]].  Reports OOM on failure.
-  [[nodiscard]] bool addToVarNames(JSContext* cx, JS::Handle<JSAtom*> name);
-  void tracekWeakVarNames(JSTracer* trc);
-
-  void removeFromVarNames(JS::Handle<JSAtom*> name) { varNames_.remove(name); }
-
-  // Whether the given name is in [[VarNames]].
-  bool isInVarNames(JS::Handle<JSAtom*> name) { return varNames_.has(name); }
 
   void enter() { enterRealmDepthIgnoringJit_++; }
   void leave() {
@@ -786,10 +761,12 @@ class JS::Realm : public JS::shadow::Realm {
   }
   static constexpr uint32_t debugModeIsDebuggeeBit() { return IsDebuggee; }
 
-  static constexpr size_t offsetOfActiveLexicalEnvironment() {
-    static_assert(sizeof(lexicalEnv_) == sizeof(uintptr_t),
+  // Note: similar to cx->global(), JIT code can omit the read barrier for the
+  // context's active global.
+  static constexpr size_t offsetOfActiveGlobal() {
+    static_assert(sizeof(global_) == sizeof(uintptr_t),
                   "JIT code assumes field is pointer-sized");
-    return offsetof(JS::Realm, lexicalEnv_);
+    return offsetof(JS::Realm, global_);
   }
 };
 

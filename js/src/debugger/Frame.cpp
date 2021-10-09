@@ -21,7 +21,6 @@
 #include <string.h>  // for strlen
 #include <utility>   // for std::move
 
-#include "jsapi.h"  // for CallArgs, Handle
 #include "jsnum.h"  // for Int32ToString
 
 #include "builtin/Array.h"      // for NewDenseCopiedArray
@@ -42,9 +41,11 @@
 #include "gc/ZoneAllocator.h"              // for AddCellMemory
 #include "jit/JSJitFrameIter.h"            // for InlineFrameIterator
 #include "jit/RematerializedFrame.h"       // for RematerializedFrame
+#include "js/CallArgs.h"                   // for CallArgs
 #include "js/friend/ErrorMessages.h"       // for GetErrorMessage, JSMSG_*
 #include "js/Object.h"                     // for SetReservedSlot
 #include "js/Proxy.h"                      // for PrivateValue
+#include "js/RootingAPI.h"                 // for Handle
 #include "js/SourceText.h"                 // for SourceText, SourceOwnership
 #include "js/StableStringChars.h"          // for AutoStableStringChars
 #include "vm/ArgumentsObject.h"            // for ArgumentsObject
@@ -69,7 +70,7 @@
 #include "vm/Stack.h"                      // for AbstractFramePtr, FrameIter
 #include "vm/StringType.h"                 // for PropertyName, JSString
 #include "wasm/WasmDebug.h"                // for DebugState
-#include "wasm/WasmFrame.h"                // for DebugFrame
+#include "wasm/WasmDebugFrame.h"           // for DebugFrame
 #include "wasm/WasmInstance.h"             // for Instance
 #include "wasm/WasmJS.h"                   // for WasmInstanceObject
 
@@ -1044,8 +1045,7 @@ Result<Completion> js::DebuggerGenericEval(
 
   // If evalWithBindings, create the inner environment.
   if (bindings) {
-    RootedPlainObject nenv(cx,
-                           NewObjectWithGivenProto<PlainObject>(cx, nullptr));
+    RootedPlainObject nenv(cx, NewPlainObjectWithProto(cx, nullptr));
     if (!nenv) {
       return cx->alreadyReportedError();
     }

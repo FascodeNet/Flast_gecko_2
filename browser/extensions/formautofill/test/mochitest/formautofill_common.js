@@ -123,6 +123,18 @@ async function checkFieldPreview(elem, expectedValue) {
   is(isTextColorApplied, !!expectedValue, `Checking #${elem.id} preview style`);
 }
 
+async function checkFormFieldsStyle(profile, isPreviewing = true) {
+  const elems = document.querySelectorAll("input, select");
+
+  for (const elem of elems) {
+    const fillableValue = profile && profile[elem.id];
+    const previewValue = (isPreviewing && fillableValue) || "";
+
+    await checkFieldHighlighted(elem, !!fillableValue);
+    await checkFieldPreview(elem, previewValue);
+  }
+}
+
 function checkFieldValue(elem, expectedValue) {
   if (typeof elem === "string") {
     elem = document.querySelector(elem);
@@ -131,9 +143,8 @@ function checkFieldValue(elem, expectedValue) {
 }
 
 async function triggerAutofillAndCheckProfile(profile) {
-  const adaptedProfile = _getAdaptedProfile(profile);
+  let adaptedProfile = _getAdaptedProfile(profile);
   const promises = [];
-
   for (const [fieldName, value] of Object.entries(adaptedProfile)) {
     info(`triggerAutofillAndCheckProfile: ${fieldName}`);
     const element = document.getElementById(fieldName);

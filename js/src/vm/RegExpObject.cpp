@@ -757,7 +757,7 @@ bool RegExpShared::initializeNamedCaptures(JSContext* cx, HandleRegExpShared re,
 
   // Create a plain template object.
   RootedPlainObject templateObject(
-      cx, NewTenuredObjectWithGivenProto<PlainObject>(cx, nullptr));
+      cx, NewPlainObjectWithProto(cx, nullptr, TenuredObject));
   if (!templateObject) {
     return false;
   }
@@ -891,8 +891,8 @@ ArrayObject* RegExpRealm::createMatchResultTemplateObject(
 
   /* Create template array object */
   RootedArrayObject templateObject(
-      cx, NewDenseUnallocatedArray(cx, RegExpObject::MaxPairCount, nullptr,
-                                   TenuredObject));
+      cx,
+      NewDenseUnallocatedArray(cx, RegExpObject::MaxPairCount, TenuredObject));
   if (!templateObject) {
     return nullptr;
   }

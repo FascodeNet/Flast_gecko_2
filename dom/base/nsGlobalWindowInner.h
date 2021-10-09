@@ -44,6 +44,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/OwningNonNull.h"
+#include "mozilla/StorageAccess.h"
 #include "mozilla/TimeStamp.h"
 #include "nsWrapperCacheInlines.h"
 #include "mozilla/dom/EventTarget.h"
@@ -55,6 +56,7 @@
 #include "nsComponentManagerUtils.h"
 #include "nsSize.h"
 #include "nsCheapSets.h"
+#include "mozilla/dom/ImageBitmapBinding.h"
 #include "mozilla/dom/ImageBitmapSource.h"
 #include "mozilla/UniquePtr.h"
 #include "nsRefreshObservers.h"
@@ -714,6 +716,12 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   MOZ_CAN_RUN_SCRIPT
   void ClearInterval(int32_t aHandle);
   void GetOrigin(nsAString& aOrigin);
+
+  MOZ_CAN_RUN_SCRIPT
+  void ReportError(JSContext* aCx, JS::Handle<JS::Value> aError,
+                   mozilla::dom::CallerType aCallerType,
+                   mozilla::ErrorResult& aRv);
+
   void Atob(const nsAString& aAsciiBase64String, nsAString& aBinaryData,
             mozilla::ErrorResult& aError);
   void Btoa(const nsAString& aBinaryData, nsAString& aAsciiBase64String,
@@ -877,11 +885,15 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
                   mozilla::ErrorResult& aError);
 
   already_AddRefed<mozilla::dom::Promise> CreateImageBitmap(
-      const mozilla::dom::ImageBitmapSource& aImage, mozilla::ErrorResult& aRv);
+      const mozilla::dom::ImageBitmapSource& aImage,
+      const mozilla::dom::ImageBitmapOptions& aOptions,
+      mozilla::ErrorResult& aRv);
 
   already_AddRefed<mozilla::dom::Promise> CreateImageBitmap(
       const mozilla::dom::ImageBitmapSource& aImage, int32_t aSx, int32_t aSy,
-      int32_t aSw, int32_t aSh, mozilla::ErrorResult& aRv);
+      int32_t aSw, int32_t aSh,
+      const mozilla::dom::ImageBitmapOptions& aOptions,
+      mozilla::ErrorResult& aRv);
 
   // ChromeWindow bits.  Do NOT call these unless your window is in
   // fact chrome.
@@ -1150,11 +1162,6 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   // Get the toplevel principal, returns null if this is a toplevel window.
   nsIPrincipal* GetTopLevelAntiTrackingPrincipal();
 
-  // Get the parent principal, returns null if this or the parent are not a
-  // toplevel window. This is mainly used to determine the anti-tracking storage
-  // area.
-  nsIPrincipal* GetTopLevelStorageAreaPrincipal();
-
   // This method is called if this window loads a 3rd party tracking resource
   // and the storage is just been granted. The window can reset the partitioned
   // storage objects and switch to the first party cookie jar.
@@ -1289,6 +1296,25 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   nsTArray<uint32_t>& GetScrollMarks() { return mScrollMarks; }
   void SetScrollMarks(const nsTArray<uint32_t>& aScrollMarks);
 
+  // Don't use this value directly, call StorageAccess::StorageAllowedForWindow
+  // instead.
+  mozilla::Maybe<mozilla::StorageAccess> GetStorageAllowedCache(
+      uint32_t& aRejectedReason) {
+    if (mStorageAllowedCache.isSome()) {
+      aRejectedReason = mStorageAllowedReasonCache;
+    }
+    return mStorageAllowedCache;
+  }
+  void SetStorageAllowedCache(const mozilla::StorageAccess& storageAllowed,
+                              uint32_t aRejectedReason) {
+    mStorageAllowedCache = Some(storageAllowed);
+    mStorageAllowedReasonCache = aRejectedReason;
+  }
+  void ClearStorageAllowedCache() {
+    mStorageAllowedCache = mozilla::Nothing();
+    mStorageAllowedReasonCache = 0;
+  }
+
  private:
   RefPtr<mozilla::dom::ContentMediaController> mContentMediaController;
 
@@ -1401,6 +1427,12 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
   nsCOMPtr<nsIPrincipal> mDocumentStoragePrincipal;
   nsCOMPtr<nsIPrincipal> mDocumentPartitionedPrincipal;
   nsCOMPtr<nsIContentSecurityPolicy> mDocumentCsp;
+
+  // Used to cache the result of StorageAccess::StorageAllowedForWindow.
+  // Don't use this field directly, use StorageAccess::StorageAllowedForWindow
+  // instead.
+  mozilla::Maybe<mozilla::StorageAccess> mStorageAllowedCache;
+  uint32_t mStorageAllowedReasonCache;
 
   RefPtr<mozilla::dom::DebuggerNotificationManager>
       mDebuggerNotificationManager;

@@ -211,6 +211,7 @@
 #  include <unistd.h>
 #endif
 
+#include "jsapi.h"
 #include "jstypes.h"
 
 #include "builtin/FinalizationRegistryObject.h"
@@ -226,13 +227,13 @@
 #include "gc/ParallelWork.h"
 #include "gc/Policy.h"
 #include "gc/WeakMap.h"
-#include "jit/BaselineJIT.h"
+#include "jit/Assembler.h"
+#include "jit/ExecutableAllocator.h"
 #include "jit/JitCode.h"
-#include "jit/JitcodeMap.h"
 #include "jit/JitRealm.h"
 #include "jit/JitRuntime.h"
 #include "jit/JitZone.h"
-#include "jit/MacroAssembler.h"     // js::jit::CodeAlignment
+#include "jit/ProcessExecutableMemory.h"
 #include "js/HeapAPI.h"             // JS::GCCellPtr
 #include "js/Object.h"              // JS::GetClass
 #include "js/PropertyAndElement.h"  // JS_DefineProperty
@@ -1888,6 +1889,8 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       return tunables.zoneAllocDelayBytes() / 1024;
     case JSGC_MALLOC_THRESHOLD_BASE:
       return tunables.mallocThresholdBase() / 1024 / 1024;
+    case JSGC_URGENT_THRESHOLD_MB:
+      return tunables.urgentThresholdBytes() / 1024 / 1024;
     case JSGC_CHUNK_BYTES:
       return ChunkSize;
     case JSGC_HELPER_THREAD_RATIO:
@@ -2141,6 +2144,12 @@ bool js::gc::IsCurrentlyAnimating(const TimeStamp& lastAnimationTime,
   static const auto oneSecond = TimeDuration::FromSeconds(1);
   return !lastAnimationTime.IsNull() &&
          currentTime < (lastAnimationTime + oneSecond);
+}
+
+static bool DiscardedCodeRecently(Zone* zone, const TimeStamp& currentTime) {
+  static const auto thirtySeconds = TimeDuration::FromSeconds(30);
+  return !zone->lastDiscardedCodeTime().IsNull() &&
+         currentTime < (zone->lastDiscardedCodeTime() + thirtySeconds);
 }
 
 bool GCRuntime::shouldCompact() {
@@ -2582,7 +2591,6 @@ void GCRuntime::sweepZoneAfterCompacting(MovingTracer* trc, Zone* zone) {
   for (RealmsInZoneIter r(zone); !r.done(); r.next()) {
     r->traceWeakRegExps(trc);
     r->traceWeakSavedStacks(trc);
-    r->tracekWeakVarNames(trc);
     r->traceWeakObjects(trc);
     r->traceWeakSelfHostingScriptSource(trc);
     r->sweepDebugEnvironments();
@@ -4142,7 +4150,8 @@ bool GCRuntime::shouldPreserveJITCode(Realm* realm,
   if (realm->preserveJitCode()) {
     return true;
   }
-  if (IsCurrentlyAnimating(realm->lastAnimationTime, currentTime)) {
+  if (IsCurrentlyAnimating(realm->lastAnimationTime, currentTime) &&
+      DiscardedCodeRecently(realm->zone(), currentTime)) {
     return true;
   }
   if (reason == JS::GCReason::DEBUG_GC) {
@@ -5493,10 +5502,6 @@ void GCRuntime::updateAtomsBitmap() {
   // For convenience sweep these tables non-incrementally as part of bitmap
   // sweeping; they are likely to be much smaller than the main atoms table.
   rt->symbolRegistry().sweep();
-  SweepingTracer trc(rt);
-  for (RealmsIter realm(this); !realm.done(); realm.next()) {
-    realm->tracekWeakVarNames(&trc);
-  }
 }
 
 void GCRuntime::sweepCCWrappers() {
@@ -6851,13 +6856,13 @@ void GCRuntime::maybeStopPretenuring() {
 void GCRuntime::updateGCThresholdsAfterCollection(const AutoLockGC& lock) {
   for (GCZonesIter zone(this); !zone.done(); zone.next()) {
     zone->clearGCSliceThresholds();
-    zone->updateGCStartThresholds(*this, gcOptions, lock);
+    zone->updateGCStartThresholds(*this, lock);
   }
 }
 
 void GCRuntime::updateAllGCStartThresholds(const AutoLockGC& lock) {
   for (ZonesIter zone(this, WithAtoms); !zone.done(); zone.next()) {
-    zone->updateGCStartThresholds(*this, JS::GCOptions::Normal, lock);
+    zone->updateGCStartThresholds(*this, lock);
   }
 }
 
@@ -9538,6 +9543,6 @@ void GCRuntime::setPerformanceHint(PerformanceHint hint) {
 
   AutoLockGC lock(this);
   schedulingState.inPageLoad = inPageLoad;
-  atomsZone->updateGCStartThresholds(*this, gcOptions, lock);
+  atomsZone->updateGCStartThresholds(*this, lock);
   maybeTriggerGCAfterAlloc(atomsZone);
 }

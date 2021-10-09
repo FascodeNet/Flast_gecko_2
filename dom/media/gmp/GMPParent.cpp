@@ -12,6 +12,7 @@
 #include "GMPTimerParent.h"
 #include "MediaResult.h"
 #include "mozIGeckoMediaPluginService.h"
+#include "mozilla/dom/KeySystemNames.h"
 #include "mozilla/dom/WidevineCDMManifestBinding.h"
 #include "mozilla/ipc/CrashReporterHost.h"
 #include "mozilla/ipc/Endpoint.h"
@@ -31,7 +32,6 @@
 #include "nsPrintfCString.h"
 #include "nsThreadUtils.h"
 #include "runnable_utils.h"
-#include "VideoUtils.h"
 #ifdef XP_WIN
 #  include "WMFDecoderModule.h"
 #endif
@@ -539,7 +539,7 @@ bool GMPCapability::Supports(const nsTArray<GMPCapability>& aCapabilities,
         // file, but uses Windows Media Foundation to decode. That's not present
         // on Windows XP, and on some Vista, Windows N, and KN variants without
         // certain services packs.
-        if (tag.EqualsLiteral(EME_KEY_SYSTEM_CLEARKEY)) {
+        if (tag.EqualsLiteral(kClearKeyKeySystemName)) {
           if (capabilities.mAPIName.EqualsLiteral(GMP_API_VIDEO_DECODER)) {
             if (!WMFDecoderModule::HasH264()) {
               continue;
@@ -842,12 +842,14 @@ RefPtr<GenericPromise> GMPParent::ParseChromiumManifest(
   }
 #endif
 
-  nsCString kEMEKeySystem;
+  GMPCapability video;
 
   // We hard code a few of the settings because they can't be stored in the
   // widevine manifest without making our API different to widevine's.
   if (mDisplayName.EqualsASCII("clearkey")) {
-    kEMEKeySystem.AssignLiteral(EME_KEY_SYSTEM_CLEARKEY);
+    video.mAPITags.AppendElement(nsCString{kClearKeyKeySystemName});
+    video.mAPITags.AppendElement(
+        nsCString{kClearKeyWithProtectionQueryKeySystemName});
 #if XP_WIN
     mLibs = nsLiteralCString(
         "dxva2.dll, evr.dll, freebl3.dll, mfh264dec.dll, mfplat.dll, "
@@ -856,14 +858,15 @@ RefPtr<GenericPromise> GMPParent::ParseChromiumManifest(
     mLibs = "libfreeblpriv3.so, libsoftokn3.so"_ns;
 #endif
   } else if (mDisplayName.EqualsASCII("WidevineCdm")) {
-    kEMEKeySystem.AssignLiteral(EME_KEY_SYSTEM_WIDEVINE);
+    video.mAPITags.AppendElement(nsCString{kWidevineKeySystemName});
 #if XP_WIN
     // psapi.dll added for GetMappedFileNameW, which could possibly be avoided
     // in future versions, see bug 1383611 for details.
     mLibs = "dxva2.dll, psapi.dll"_ns;
 #endif
   } else if (mDisplayName.EqualsASCII("fake")) {
-    kEMEKeySystem.AssignLiteral("fake");
+    // The fake CDM just exposes a key system with id "fake".
+    video.mAPITags.AppendElement(nsCString{"fake"});
 #if XP_WIN
     mLibs = "dxva2.dll"_ns;
 #endif
@@ -872,8 +875,6 @@ RefPtr<GenericPromise> GMPParent::ParseChromiumManifest(
                          __FUNCTION__, mDisplayName.get());
     return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
-
-  GMPCapability video;
 
   nsCString codecsString = NS_ConvertUTF16toUTF8(m.mX_cdm_codecs);
   nsTArray<nsCString> codecs;
@@ -909,8 +910,6 @@ RefPtr<GenericPromise> GMPParent::ParseChromiumManifest(
 
     video.mAPITags.AppendElement(codec);
   }
-
-  video.mAPITags.AppendElement(kEMEKeySystem);
 
   video.mAPIName = nsLiteralCString(CHROMIUM_CDM_API);
   mAdapter = u"chromium"_ns;

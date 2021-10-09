@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "nsLookAndFeel.h"
+#include <stdint.h>
 #include <windows.h>
 #include <shellapi.h>
 #include "nsStyleConsts.h"
@@ -149,16 +150,6 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
     case ColorID::TextForeground:
       idx = COLOR_WINDOWTEXT;
       break;
-    case ColorID::TextSelectBackground:
-    case ColorID::IMESelectedRawTextBackground:
-    case ColorID::IMESelectedConvertedTextBackground:
-      idx = COLOR_HIGHLIGHT;
-      break;
-    case ColorID::TextSelectForeground:
-    case ColorID::IMESelectedRawTextForeground:
-    case ColorID::IMESelectedConvertedTextForeground:
-      idx = COLOR_HIGHLIGHTTEXT;
-      break;
     case ColorID::IMERawInputBackground:
     case ColorID::IMEConvertedTextBackground:
       aColor = NS_TRANSPARENT;
@@ -209,12 +200,20 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
     case ColorID::Captiontext:
       idx = COLOR_CAPTIONTEXT;
       break;
+    case ColorID::MozCellhighlighttext:
+      aColor = NS_RGB(0, 0, 0);
+      return NS_OK;
+    case ColorID::MozCellhighlight:
+      aColor = NS_RGB(206, 206, 206);
+      return NS_OK;
     case ColorID::Graytext:
       idx = COLOR_GRAYTEXT;
       break;
     case ColorID::Highlight:
-    case ColorID::MozHtmlCellhighlight:
+    case ColorID::Selecteditem:
     case ColorID::MozMenuhover:
+    case ColorID::IMESelectedRawTextBackground:
+    case ColorID::IMESelectedConvertedTextBackground:
       idx = COLOR_HIGHLIGHT;
       break;
     case ColorID::MozMenubarhovertext:
@@ -231,7 +230,9 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
       }
       // Fall through
     case ColorID::Highlighttext:
-    case ColorID::MozHtmlCellhighlighttext:
+    case ColorID::Selecteditemtext:
+    case ColorID::IMESelectedRawTextForeground:
+    case ColorID::IMESelectedConvertedTextForeground:
       idx = COLOR_HIGHLIGHTTEXT;
       break;
     case ColorID::Inactiveborder:
@@ -294,7 +295,6 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
       idx = COLOR_WINDOWTEXT;
       break;
     case ColorID::MozDialog:
-    case ColorID::MozCellhighlight:
       idx = COLOR_3DFACE;
       break;
     case ColorID::MozAccentColor:
@@ -329,7 +329,6 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
       idx = COLOR_WINDOWTEXT;
       break;
     case ColorID::MozDialogtext:
-    case ColorID::MozCellhighlighttext:
     case ColorID::MozColheadertext:
     case ColorID::MozColheaderhovertext:
       idx = COLOR_WINDOWTEXT;
@@ -369,6 +368,18 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
     case IntID::CaretBlinkTime:
       aResult = static_cast<int32_t>(::GetCaretBlinkTime());
       break;
+    case IntID::CaretBlinkCount: {
+      int32_t timeout = GetSystemParam(SPI_GETCARETTIMEOUT, 5000);
+      auto blinkTime = ::GetCaretBlinkTime();
+      if (timeout <= 0 || blinkTime <= 0) {
+        aResult = -1;
+        break;
+      }
+      // 2 * blinkTime because this integer is a full blink cycle.
+      aResult = std::ceil(float(timeout) / (2.0f * float(blinkTime)));
+      break;
+    }
+
     case IntID::CaretWidth:
       aResult = 1;
       break;
@@ -578,6 +589,9 @@ nsresult nsLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
           static_cast<int32_t>(widget::WinUtils::GetAllPointerCapabilities());
       break;
     }
+    case IntID::TouchDeviceSupportPresent:
+      aResult = WinUtils::IsTouchDeviceSupportPresent() ? 1 : 0;
+      break;
     default:
       aResult = 0;
       res = NS_ERROR_FAILURE;

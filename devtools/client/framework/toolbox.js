@@ -846,7 +846,6 @@ Toolbox.prototype = {
       this._buildTabs();
       this._applyCacheSettings();
       this._applyServiceWorkersTestingSettings();
-      this._forwardJavascriptEnabledToTargetConfiguration();
       this._addWindowListeners();
       this._addChromeEventHandlerEvents();
 
@@ -1896,7 +1895,7 @@ Toolbox.prototype = {
       id: "command-button-frames",
       description: L10N.getStr("toolbox.frames.tooltip"),
       isTargetSupported: target => {
-        return target.traits.frames;
+        return target.getTrait("frames");
       },
       isCurrentlyVisible: () => {
         const hasFrames = this.frameMap.size > 1;
@@ -2039,7 +2038,7 @@ Toolbox.prototype = {
       onClick: this._onPickerClick,
       isInStartContainer: true,
       isTargetSupported: target => {
-        return target.traits.frames;
+        return target.getTrait("frames");
       },
     });
 
@@ -2095,28 +2094,6 @@ Toolbox.prototype = {
     this.commands.targetConfigurationCommand.updateConfiguration({
       serviceWorkersTestingEnabled,
     });
-  },
-
-  /**
-   * If we have an older version of the server which handles `javascriptEnabled`
-   * in the browsing-context target, read the initial javascriptEnabled
-   * configuration from the current target and forward it to the configuration
-   * actor.
-   *
-   * !!! This is not setting anything on the target, we are only updating the
-   * !!! internal configuration of the target configuration actor so that it
-   * !!! knows the current value.
-   *
-   * @backward-compat { version 91 } This method can be removed when Firefox 91
-   *                  is on the release channel.
-   */
-  _forwardJavascriptEnabledToTargetConfiguration: function() {
-    if (!this.target.traits.javascriptEnabledHandledInParent) {
-      const javascriptEnabled = this.target._javascriptEnabled;
-      this.commands.targetConfigurationCommand.updateConfiguration({
-        javascriptEnabled,
-      });
-    }
   },
 
   /**
@@ -2206,7 +2183,16 @@ Toolbox.prototype = {
 
     // Highlight the button when a child frame is selected and visible.
     const selectedFrame = this.frameMap.get(this.selectedFrameId) || {};
-    const isVisible = this._commandIsVisible(this.frameButton);
+
+    // We need to do something a bit different to avoid some test failures. This function
+    // can be called from onWillNavigate, and the current target might have this `traits`
+    // property nullifed, which is unfortunate as that's what isTargetSupported is checking,
+    // so it will throw.
+    // So here, we check first if the button isn't going to be visible anyway (it only checks
+    // for this.frameMap size) so we don't call _commandIsVisible.
+    const isVisible = !this.frameButton.isCurrentlyVisible()
+      ? false
+      : this._commandIsVisible(this.frameButton);
 
     this.frameButton.isVisible = isVisible;
 
@@ -3012,7 +2998,7 @@ Toolbox.prototype = {
   /**
    * Fired when user just started navigating away to another web page.
    */
-  async _onWillNavigate() {
+  async _onWillNavigate({ isFrameSwitching } = {}) {
     // On navigate, the server will resume all paused threads, but due to an
     // issue which can cause loosing outgoing messages/RDP packets, the THREAD_STATE
     // resources for the resumed state might not get received. So let assume it happens
@@ -3025,8 +3011,11 @@ Toolbox.prototype = {
       }
     }
 
-    // Clearing the error count as soon as we navigate
+    // Clearing the error count and the iframe list as soon as we navigate
     this.setErrorCount(0);
+    if (!isFrameSwitching) {
+      this._updateFrames({ destroyAll: true });
+    }
     this.updateToolboxButtons();
     const toolId = this.currentToolId;
     // For now, only inspector, webconsole, netmonitor and accessibility fire "reloaded" event
@@ -3137,7 +3126,7 @@ Toolbox.prototype = {
   },
 
   _listFrames: async function(event) {
-    if (!this.target.traits.frames) {
+    if (!this.target.getTrait("frames")) {
       // We are not targetting a regular BrowsingContextTargetActor
       // it can be either an addon or browser toolbox actor
       return promise.resolve();
@@ -3227,27 +3216,13 @@ Toolbox.prototype = {
     }
 
     // We may need to hide/show the frames button now.
-    const wasVisible = this.frameButton.isVisible;
-    const wasDisabled = this.frameButton.disabled;
     this.updateFrameButton();
 
-    const toolbarUpdate = () => {
-      if (
-        this.frameButton.isVisible === wasVisible &&
-        this.frameButton.disabled === wasDisabled
-      ) {
-        return;
-      }
-      this.component.setToolboxButtons(this.toolbarButtons);
-    };
-
-    // If we are navigating/reloading, however (in which case data.destroyAll
-    // will be true), we should debounce the update to avoid unnecessary
-    // flickering/rendering.
-    if (data.destroyAll && !this.debouncedToolbarUpdate) {
+    // Debounce the update to avoid unnecessary flickering/rendering.
+    if (!this.debouncedToolbarUpdate) {
       this.debouncedToolbarUpdate = debounce(
         () => {
-          toolbarUpdate();
+          this.component.setToolboxButtons(this.toolbarButtons);
           this.debouncedToolbarUpdate = null;
         },
         200,
@@ -3257,8 +3232,6 @@ Toolbox.prototype = {
 
     if (this.debouncedToolbarUpdate) {
       this.debouncedToolbarUpdate();
-    } else {
-      toolbarUpdate();
     }
   },
 
@@ -3940,9 +3913,11 @@ Toolbox.prototype = {
       false
     );
     if (isNewPerfPanel || !this.target.hasActor("performance")) {
-      return promise.resolve();
+      return;
     }
-
+    if (this.target.isDestroyed()) {
+      return;
+    }
     const performanceFront = await this.target.getFront("performance");
     performanceFront.once("console-profile-start", () =>
       this._onPerformanceFrontEvent(performanceFront)
@@ -4373,7 +4348,9 @@ Toolbox.prototype = {
         resource.name === "will-navigate" &&
         resource.targetFront.isTopLevel
       ) {
-        this._onWillNavigate();
+        this._onWillNavigate({
+          isFrameSwitching: resource.isFrameSwitching,
+        });
         // While we will call `setErrorCount(0)` from onWillNavigate, we also need to reset
         // `errors` local variable in order to clear previous errors processed in the same
         // throttling bucket as this will-navigate resource.

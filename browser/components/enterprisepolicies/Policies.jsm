@@ -554,7 +554,7 @@ var Policies = {
       }
       if ("TLS_RSA_WITH_3DES_EDE_CBC_SHA" in param) {
         setAndLockPref(
-          "security.ssl3.rsa_des_ede3_sha",
+          "security.ssl3.deprecated.rsa_des_ede3_sha",
           !param.TLS_RSA_WITH_3DES_EDE_CBC_SHA
         );
       }
@@ -1564,6 +1564,7 @@ var Policies = {
         "security.mixed_content.block_active_content",
         "security.osclientcerts.autoload",
         "security.ssl.errorReporting.enabled",
+        "security.tls.enable_0rtt_data",
         "security.tls.hello_downgrade_check",
         "security.tls.version.enable-deprecated",
         "security.warn_submit_secure_to_insecure",
@@ -1707,16 +1708,14 @@ var Policies = {
     onBeforeUIStartup(manager, param) {
       if (typeof param === "boolean") {
         setAndLockPref("privacy.sanitize.sanitizeOnShutdown", param);
-        if (param) {
-          setAndLockPref("privacy.clearOnShutdown.cache", true);
-          setAndLockPref("privacy.clearOnShutdown.cookies", true);
-          setAndLockPref("privacy.clearOnShutdown.downloads", true);
-          setAndLockPref("privacy.clearOnShutdown.formdata", true);
-          setAndLockPref("privacy.clearOnShutdown.history", true);
-          setAndLockPref("privacy.clearOnShutdown.sessions", true);
-          setAndLockPref("privacy.clearOnShutdown.siteSettings", true);
-          setAndLockPref("privacy.clearOnShutdown.offlineApps", true);
-        }
+        setAndLockPref("privacy.clearOnShutdown.cache", param);
+        setAndLockPref("privacy.clearOnShutdown.cookies", param);
+        setAndLockPref("privacy.clearOnShutdown.downloads", param);
+        setAndLockPref("privacy.clearOnShutdown.formdata", param);
+        setAndLockPref("privacy.clearOnShutdown.history", param);
+        setAndLockPref("privacy.clearOnShutdown.sessions", param);
+        setAndLockPref("privacy.clearOnShutdown.siteSettings", param);
+        setAndLockPref("privacy.clearOnShutdown.offlineApps", param);
       } else {
         let locked = true;
         // Needed to preserve original behavior in perpetuity.

@@ -17,7 +17,6 @@
 
 #include "mozilla/Attributes.h"
 #include "mozilla/gfx/gfxVars.h"
-#include "mozilla/layers/AsyncCompositionManager.h"  // for ViewTransform
 #include "mozilla/layers/GeckoContentController.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/LayerMetricsWrapper.h"
@@ -939,14 +938,6 @@ void APZCTesterBase::PinchWithPinchInputAndCheckStatus(
                                      : nsEventStatus_eIgnore;
   EXPECT_EQ(expectedStatus, statuses[0]);
   EXPECT_EQ(expectedStatus, statuses[1]);
-}
-
-AsyncPanZoomController* TestAPZCTreeManager::NewAPZCInstance(
-    LayersId aLayersId, GeckoContentController* aController) {
-  MockContentControllerDelayed* mcc =
-      static_cast<MockContentControllerDelayed*>(aController);
-  return new TestAsyncPanZoomController(
-      aLayersId, mcc, this, AsyncPanZoomController::USE_GESTURE_DETECTOR);
 }
 
 inline FrameMetrics TestFrameMetrics() {

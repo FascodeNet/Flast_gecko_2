@@ -7,6 +7,8 @@
 include protocol PFileDescriptorSet;
 include protocol PBrowser;
 
+include DocAccessibleTypes;
+
 include "mozilla/GfxMessageUtils.h";
 
 using mozilla::a11y::role from "mozilla/a11y/IPCTypes.h";
@@ -14,6 +16,7 @@ using mozilla::a11y::IAccessibleHolder from "mozilla/a11y/IPCTypes.h";
 using mozilla::a11y::IDispatchHolder from "mozilla/a11y/IPCTypes.h";
 using mozilla::a11y::AccType from "mozilla/a11y/IPCTypes.h";
 using mozilla::a11y::AccGenericType from "mozilla/a11y/IPCTypes.h";
+using mozilla::a11y::CacheUpdateType from "mozilla/a11y/IPCTypes.h";
 using mozilla::WindowsHandle from "mozilla/ipc/IPCTypes.h";
 using mozilla::LayoutDeviceIntRect from "Units.h";
 
@@ -79,6 +82,13 @@ parent:
    * document.
    */
   async BindChildDoc(PDocAccessible aChildDoc, uint64_t aID);
+
+  /*
+   * Cache The World
+   * aFinal is false when paginating cache into several pushes,
+   * and then true on the final push.
+   */
+  async Cache(CacheUpdateType aUpdateType, CacheData[] aData, bool aFinal);
 
 child:
   /**

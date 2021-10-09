@@ -63,6 +63,14 @@ ProfileBufferEntry::ProfileBufferEntry(Kind aKind, uint64_t aUint64)
   memcpy(mStorage, &aUint64, sizeof(aUint64));
 }
 
+ProfileBufferEntry::ProfileBufferEntry(Kind aKind,
+                                       BaseProfilerThreadId aThreadId)
+    : mKind(aKind) {
+  static_assert(std::is_trivially_copyable_v<BaseProfilerThreadId>);
+  static_assert(sizeof(aThreadId) <= sizeof(mStorage));
+  memcpy(mStorage, &aThreadId, sizeof(aThreadId));
+}
+
 const char* ProfileBufferEntry::GetString() const {
   const char* result;
   memcpy(&result, mStorage, sizeof(result));
@@ -95,6 +103,13 @@ int64_t ProfileBufferEntry::GetInt64() const {
 
 uint64_t ProfileBufferEntry::GetUint64() const {
   uint64_t result;
+  memcpy(&result, mStorage, sizeof(result));
+  return result;
+}
+
+BaseProfilerThreadId ProfileBufferEntry::GetThreadId() const {
+  BaseProfilerThreadId result;
+  static_assert(std::is_trivially_copyable_v<BaseProfilerThreadId>);
   memcpy(&result, mStorage, sizeof(result));
   return result;
 }
@@ -155,6 +170,11 @@ class MOZ_RAII AutoArraySchemaWriter {
   void DoubleElement(uint32_t aIndex, double aValue) {
     FillUpTo(aIndex);
     mJSONWriter.DoubleElement(aValue);
+  }
+
+  void TimeMsElement(uint32_t aIndex, double aTime_ms) {
+    FillUpTo(aIndex);
+    mJSONWriter.TimeDoubleMsElement(aTime_ms);
   }
 
   void BoolElement(uint32_t aIndex, bool aValue) {
@@ -328,7 +348,7 @@ static void WriteSample(SpliceableJSONWriter& aWriter,
 
   writer.IntElement(STACK, aSample.mStack);
 
-  writer.DoubleElement(TIME, aSample.mTime);
+  writer.TimeMsElement(TIME, aSample.mTime);
 
   if (aSample.mResponsiveness.isSome()) {
     writer.DoubleElement(EVENT_DELAY, *aSample.mResponsiveness);
@@ -582,8 +602,7 @@ BaseProfilerThreadId ProfileBuffer::StreamSamplesToJSON(
       // must be a ThreadId entry.
       MOZ_ASSERT(e.Get().IsThreadId());
 
-      BaseProfilerThreadId threadId =
-          BaseProfilerThreadId::FromNumber(e.Get().GetInt());
+      BaseProfilerThreadId threadId = e.Get().GetThreadId();
       e.Next();
 
       // Ignore samples that are for the wrong thread.
@@ -895,7 +914,7 @@ void ProfileBuffer::StreamProfilerOverheadToJSON(
           threads.Count(thread);
 
           AutoArraySchemaWriter writer(aWriter);
-          writer.DoubleElement(TIME, time);
+          writer.TimeMsElement(TIME, time);
           writer.DoubleElement(LOCKING, locking);
           writer.DoubleElement(MARKER_CLEANING, cleaning);
           writer.DoubleElement(COUNTERS, counter);
@@ -1100,7 +1119,7 @@ void ProfileBuffer::StreamCountersToJSON(SpliceableJSONWriter& aWriter,
                          uint64_t(std::numeric_limits<int64_t>::max()));
 
               AutoArraySchemaWriter writer(aWriter);
-              writer.DoubleElement(TIME, samples[i].mTime);
+              writer.TimeMsElement(TIME, samples[i].mTime);
               writer.IntElement(
                   NUMBER,
                   static_cast<int64_t>(samples[i].mNumber - previousNumber));
@@ -1128,12 +1147,12 @@ static void AddPausedRange(SpliceableJSONWriter& aWriter, const char* aReason,
                            const Maybe<double>& aEndTime) {
   aWriter.Start();
   if (aStartTime) {
-    aWriter.DoubleProperty("startTime", *aStartTime);
+    aWriter.TimeDoubleMsProperty("startTime", *aStartTime);
   } else {
     aWriter.NullProperty("startTime");
   }
   if (aEndTime) {
-    aWriter.DoubleProperty("endTime", *aEndTime);
+    aWriter.TimeDoubleMsProperty("endTime", *aEndTime);
   } else {
     aWriter.NullProperty("endTime");
   }
@@ -1209,8 +1228,7 @@ bool ProfileBuffer::DuplicateLastSample(BaseProfilerThreadId aThreadId,
     }
 
     MOZ_RELEASE_ASSERT(e.Has() && e.Get().IsThreadId() &&
-                       BaseProfilerThreadId::FromNumber(e.Get().GetInt()) ==
-                           aThreadId);
+                       e.Get().GetThreadId() == aThreadId);
 
     e.Next();
 

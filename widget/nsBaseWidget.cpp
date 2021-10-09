@@ -9,9 +9,6 @@
 
 #include <utility>
 
-#include "BasicLayers.h"
-#include "ClientLayerManager.h"
-#include "FrameLayerBuilder.h"
 #include "GLConsts.h"
 #include "InputData.h"
 #include "LiveResizeListener.h"
@@ -55,7 +52,6 @@
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/ImageBridgeChild.h"
 #include "mozilla/layers/InputAPZContext.h"
-#include "mozilla/layers/PLayerTransactionChild.h"
 #include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/webrender/WebRenderTypes.h"
 #include "nsAppDirectoryServiceDefs.h"
@@ -389,10 +385,10 @@ void nsBaseWidget::DestroyCompositor() {
 // This prevents the layer manager from starting a new transaction during
 // shutdown.
 void nsBaseWidget::RevokeTransactionIdAllocator() {
-  if (!mWindowRenderer || !mWindowRenderer->AsLayerManager()) {
+  if (!mWindowRenderer || !mWindowRenderer->AsWebRender()) {
     return;
   }
-  mWindowRenderer->AsLayerManager()->SetTransactionIdAllocator(nullptr);
+  mWindowRenderer->AsWebRender()->SetTransactionIdAllocator(nullptr);
 }
 
 void nsBaseWidget::ReleaseContentController() {
@@ -434,13 +430,6 @@ void nsBaseWidget::FreeLocalesChangedObserver() {
 
 nsBaseWidget::~nsBaseWidget() {
   IMEStateManager::WidgetDestroyed(this);
-
-  if (mWindowRenderer && mWindowRenderer->AsLayerManager()) {
-    if (BasicLayerManager* mgr =
-            mWindowRenderer->AsLayerManager()->AsBasicLayerManager()) {
-      mgr->ClearRetainerWidget();
-    }
-  }
 
   FreeLocalesChangedObserver();
   FreeShutdownObserver();
@@ -887,28 +876,10 @@ nsBaseWidget::AutoLayerManagerSetup::AutoLayerManagerSetup(
   if (renderer->AsFallback()) {
     mRenderer = renderer->AsFallback();
     mRenderer->SetTarget(aTarget, aDoubleBuffering);
-    return;
-  }
-  LayerManager* lm = renderer ? renderer->AsLayerManager() : nullptr;
-  NS_ASSERTION(
-      !lm || lm->GetBackendType() == LayersBackend::LAYERS_BASIC,
-      "AutoLayerManagerSetup instantiated for non-basic layer backend!");
-  if (lm) {
-    mLayerManager = lm->AsBasicLayerManager();
-    if (mLayerManager) {
-      mLayerManager->SetDefaultTarget(aTarget);
-      mLayerManager->SetDefaultTargetConfiguration(aDoubleBuffering,
-                                                   ROTATION_0);
-    }
   }
 }
 
 nsBaseWidget::AutoLayerManagerSetup::~AutoLayerManagerSetup() {
-  if (mLayerManager) {
-    mLayerManager->SetDefaultTarget(nullptr);
-    mLayerManager->SetDefaultTargetConfiguration(
-        mozilla::layers::BufferMode::BUFFER_NONE, ROTATION_0);
-  }
   if (mRenderer) {
     mRenderer->SetTarget(nullptr, mozilla::layers::BufferMode::BUFFER_NONE);
   }
@@ -1313,7 +1284,7 @@ nsBaseWidget::GetCompositorVsyncDispatcher() {
   return dispatcher.forget();
 }
 
-already_AddRefed<LayerManager> nsBaseWidget::CreateCompositorSession(
+already_AddRefed<WebRenderLayerManager> nsBaseWidget::CreateCompositorSession(
     int aWidth, int aHeight, CompositorOptions* aOptionsOut) {
   MOZ_ASSERT(aOptionsOut);
 
@@ -1337,15 +1308,12 @@ already_AddRefed<LayerManager> nsBaseWidget::CreateCompositorSession(
         StaticPrefs::gfx_webrender_unaccelerated_widget_force()) {
       enableWR = gfx::gfxVars::UseWebRender();
       enableSWWR = gfx::gfxVars::UseSoftwareWebRender();
-    } else if (gfxPlatform::DoesFissionForceWebRender() ||
-               StaticPrefs::
-                   gfx_webrender_software_unaccelerated_widget_allow()) {
-      enableWR = enableSWWR = gfx::gfxVars::UseWebRender();
     } else {
-      enableWR = enableSWWR = false;
+      enableWR = enableSWWR = gfx::gfxVars::UseWebRender();
     }
+    MOZ_RELEASE_ASSERT(enableWR);
     bool enableAPZ = UseAPZ();
-    CompositorOptions options(enableAPZ, enableWR, enableSWWR);
+    CompositorOptions options(enableAPZ, enableSWWR);
 
 #ifdef XP_WIN
     if (supportsAcceleration) {
@@ -1363,6 +1331,8 @@ already_AddRefed<LayerManager> nsBaseWidget::CreateCompositorSession(
     }
 #endif
 
+    options.SetUseWebGPU(StaticPrefs::dom_webgpu_enabled());
+
 #ifdef MOZ_WIDGET_ANDROID
     if (!GetNativeData(NS_JAVA_SURFACE)) {
       options.SetInitiallyPaused(true);
@@ -1371,42 +1341,25 @@ already_AddRefed<LayerManager> nsBaseWidget::CreateCompositorSession(
     options.SetInitiallyPaused(CompositorInitiallyPaused());
 #endif
 
-    RefPtr<LayerManager> lm;
-    if (options.UseWebRender()) {
-      lm = new WebRenderLayerManager(this);
-    } else {
-      lm = new ClientLayerManager(this);
-    }
+    RefPtr<WebRenderLayerManager> lm = new WebRenderLayerManager(this);
 
     bool retry = false;
     mCompositorSession = gpu->CreateTopLevelCompositor(
         this, lm, GetDefaultScale(), options, UseExternalCompositingSurface(),
         gfx::IntSize(aWidth, aHeight), &retry);
 
-    if (lm->AsWebRenderLayerManager() && mCompositorSession) {
+    if (mCompositorSession) {
       TextureFactoryIdentifier textureFactoryIdentifier;
       nsCString error;
-      lm->AsWebRenderLayerManager()->Initialize(
-          mCompositorSession->GetCompositorBridgeChild(),
-          wr::AsPipelineId(mCompositorSession->RootLayerTreeId()),
-          &textureFactoryIdentifier, error);
+      lm->Initialize(mCompositorSession->GetCompositorBridgeChild(),
+                     wr::AsPipelineId(mCompositorSession->RootLayerTreeId()),
+                     &textureFactoryIdentifier, error);
       if (textureFactoryIdentifier.mParentBackend != LayersBackend::LAYERS_WR) {
         retry = true;
         DestroyCompositor();
         // gfxVars::UseDoubleBufferingWithCompositor() is also disabled.
         gfx::GPUProcessManager::Get()->DisableWebRender(
             wr::WebRenderError::INITIALIZE, error);
-      }
-    } else if (lm->AsClientLayerManager() && mCompositorSession) {
-      bool shouldAccelerate = ComputeShouldAccelerate();
-      TextureFactoryIdentifier textureFactoryIdentifier;
-      lm->AsClientLayerManager()->Initialize(
-          mCompositorSession->GetCompositorBridgeChild(), shouldAccelerate,
-          &textureFactoryIdentifier);
-      if (textureFactoryIdentifier.mParentBackend ==
-          LayersBackend::LAYERS_NONE) {
-        DestroyCompositor();
-        lm = nullptr;
       }
     }
 
@@ -1444,7 +1397,8 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight) {
   }
 
   CompositorOptions options;
-  RefPtr<LayerManager> lm = CreateCompositorSession(aWidth, aHeight, &options);
+  RefPtr<WebRenderLayerManager> lm =
+      CreateCompositorSession(aWidth, aHeight, &options);
   if (!lm) {
     return;
   }
@@ -1468,24 +1422,12 @@ void nsBaseWidget::CreateCompositor(int aWidth, int aHeight) {
     mInitialZoomConstraints.reset();
   }
 
-  if (lm->AsWebRenderLayerManager()) {
-    TextureFactoryIdentifier textureFactoryIdentifier =
-        lm->GetTextureFactoryIdentifier();
-    MOZ_ASSERT(textureFactoryIdentifier.mParentBackend ==
-               LayersBackend::LAYERS_WR);
-    ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
-    gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
-  } else if (lm->AsClientLayerManager()) {
-    TextureFactoryIdentifier textureFactoryIdentifier =
-        lm->GetTextureFactoryIdentifier();
-    // Some popup or transparent widgets may use a different backend than the
-    // compositors used with ImageBridge and VR (and more generally web
-    // content).
-    if (WidgetTypeSupportsAcceleration()) {
-      ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
-      gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
-    }
-  }
+  TextureFactoryIdentifier textureFactoryIdentifier =
+      lm->GetTextureFactoryIdentifier();
+  MOZ_ASSERT(textureFactoryIdentifier.mParentBackend ==
+             LayersBackend::LAYERS_WR);
+  ImageBridgeChild::IdentifyCompositorTextureHost(textureFactoryIdentifier);
+  gfx::VRManagerChild::IdentifyTextureHost(textureFactoryIdentifier);
 
   WindowUsesOMTC();
 
@@ -1533,11 +1475,7 @@ WindowRenderer* nsBaseWidget::GetWindowRenderer() {
 }
 
 WindowRenderer* nsBaseWidget::CreateBasicLayerManager() {
-  if (StaticPrefs::gfx_basic_layer_manager_force_enabled()) {
-    return new BasicLayerManager(this);
-  } else {
-    return new FallbackRenderer;
-  }
+  return new FallbackRenderer;
 }
 
 CompositorBridgeChild* nsBaseWidget::GetRemoteRenderer() {

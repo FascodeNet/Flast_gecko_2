@@ -10,8 +10,10 @@
 
 #if defined(_WIN32)
     // Ensure the min/max macro in the header doesn't collide with functions in std::
+    #ifndef NOMINMAX
     #define NOMINMAX
-    #include <Windows.h>
+    #endif
+    #include <windows.h>
     #define LINETERM "\r\n"
 #else
     #include <dlfcn.h>

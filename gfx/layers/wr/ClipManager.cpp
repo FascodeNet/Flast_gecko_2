@@ -275,7 +275,7 @@ Maybe<wr::WrSpatialId> ClipManager::DefineScrollLayers(
 
   Maybe<ScrollMetadata> metadata =
       aASR->mScrollableFrame->ComputeScrollMetadata(
-          mManager, aItem->ReferenceFrame(), Nothing(), nullptr);
+          mManager, aItem->ReferenceFrame(), nullptr);
   if (!metadata) {
     MOZ_ASSERT_UNREACHABLE("Expected scroll metadata to be available!");
     return ancestorSpace;
@@ -323,7 +323,8 @@ Maybe<wr::WrSpatialId> ClipManager::DefineScrollLayers(
 
   return Some(mBuilder->DefineScrollLayer(
       viewId, parent, wr::ToLayoutRect(contentRect),
-      wr::ToLayoutRect(clipBounds), wr::ToLayoutPoint(scrollOffset)));
+      wr::ToLayoutRect(clipBounds), wr::ToLayoutPoint(scrollOffset),
+      wr::SpatialKey(uint64_t(scrollFrame), 0, wr::SpatialKeyKind::Scroll)));
 }
 
 Maybe<wr::WrClipChainId> ClipManager::DefineClipChain(

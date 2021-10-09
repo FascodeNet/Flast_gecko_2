@@ -640,8 +640,11 @@ function BuildConditionSandbox(aURL) {
     sandbox.serviceWorkerE10s = true;
 
     if (!g.dumpedConditionSandbox) {
-        g.logger.info("Dumping JSON representation of sandbox");
-        g.logger.info(JSON.stringify(Cu.waiveXrays(sandbox)));
+        g.logger.info("Dumping representation of sandbox which can be used for expectation annotations");
+        for (let entry of Object.entries(Cu.waiveXrays(sandbox)).sort((a, b) => a[0].localeCompare(b[0]))) {
+            let value = typeof entry[1] === "object" ? JSON.stringify(entry[1]) : entry[1];
+            g.logger.info(`    ${entry[0]}: ${value}`);
+        }
         g.dumpedConditionSandbox = true;
     }
 
@@ -713,6 +716,8 @@ function ServeTestBase(aURL, depth) {
     g.count++;
     var path = "/" + Date.now() + "/" + g.count;
     g.server.registerDirectory(path + "/", directory);
+    // this one is needed so tests can use example.org urls for cross origin testing
+    g.server.registerDirectory("/", directory);
 
     var secMan = Cc[NS_SCRIPTSECURITYMANAGER_CONTRACTID]
                      .getService(Ci.nsIScriptSecurityManager);

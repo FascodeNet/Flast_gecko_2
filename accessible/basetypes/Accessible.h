@@ -6,9 +6,9 @@
 #ifndef _Accessible_H_
 #define _Accessible_H_
 
-#include <stdint.h>
 #include "mozilla/a11y/Role.h"
 #include "mozilla/a11y/AccTypes.h"
+#include "nsString.h"
 
 class nsAtom;
 
@@ -19,6 +19,34 @@ namespace a11y {
 
 class LocalAccessible;
 class RemoteAccessible;
+
+/**
+ * Name type flags.
+ */
+enum ENameValueFlag {
+  /**
+   * Name either
+   *  a) present (not empty): !name.IsEmpty()
+   *  b) no name (was missed): name.IsVoid()
+   */
+  eNameOK,
+
+  /**
+   * Name was left empty by the author on purpose:
+   * name.IsEmpty() && !name.IsVoid().
+   */
+  eNoNameOnPurpose,
+
+  /**
+   * Name was computed from the subtree.
+   */
+  eNameFromSubtree,
+
+  /**
+   * Tooltip was used as a name.
+   */
+  eNameFromTooltip
+};
 
 class Accessible {
  protected:
@@ -79,6 +107,23 @@ class Accessible {
    * Return true if the accessible belongs to the given accessible type.
    */
   bool HasGenericType(AccGenericType aType) const;
+
+  // Methods that potentially access a cache.
+
+  /*
+   * Get the name of this accessible.
+   */
+  virtual ENameValueFlag Name(nsString& aName) const = 0;
+
+  /*
+   * Get the description of this accessible.
+   */
+  virtual void Description(nsString& aDescription) const = 0;
+
+  virtual double CurValue() const = 0;
+  virtual double MinValue() const = 0;
+  virtual double MaxValue() const = 0;
+  virtual double Step() const = 0;
 
   // Type "is" methods
 

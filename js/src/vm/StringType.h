@@ -14,7 +14,6 @@
 
 #include <type_traits>  // std::is_same
 
-#include "jsapi.h"
 #include "jstypes.h"  // js::Bit
 
 #include "gc/Allocator.h"
@@ -1214,6 +1213,8 @@ class NormalAtom : public JSAtom {
  public:
   HashNumber hash() const { return hash_; }
   void initHash(HashNumber hash) { hash_ = hash; }
+
+  static constexpr size_t offsetOfHash() { return offsetof(NormalAtom, hash_); }
 };
 
 static_assert(sizeof(NormalAtom) == sizeof(JSString) + sizeof(uint64_t),
@@ -1230,6 +1231,10 @@ class FatInlineAtom : public JSAtom {
   void initHash(HashNumber hash) { hash_ = hash; }
 
   inline void finalize(JSFreeOp* fop);
+
+  static constexpr size_t offsetOfHash() {
+    return offsetof(FatInlineAtom, hash_);
+  }
 };
 
 static_assert(
@@ -1667,7 +1672,8 @@ extern bool EqualStrings(JSContext* cx, JSLinearString* str1,
                          JSLinearString* str2, bool* result) = delete;
 
 /* EqualStrings is infallible on linear strings. */
-extern bool EqualStrings(JSLinearString* str1, JSLinearString* str2);
+extern bool EqualStrings(const JSLinearString* str1,
+                         const JSLinearString* str2);
 
 /**
  * Compare two strings that are known to be the same length.
@@ -1675,7 +1681,7 @@ extern bool EqualStrings(JSLinearString* str1, JSLinearString* str2);
  *
  * Precondition: str1->length() == str2->length().
  */
-extern bool EqualChars(JSLinearString* str1, JSLinearString* str2);
+extern bool EqualChars(const JSLinearString* str1, const JSLinearString* str2);
 
 /*
  * Return less than, equal to, or greater than zero depending on whether
@@ -1690,6 +1696,12 @@ extern int32_t CompareChars(const char16_t* s1, size_t len1,
  */
 extern bool CompareStrings(JSContext* cx, JSString* str1, JSString* str2,
                            int32_t* result);
+
+/*
+ * Compare two strings, like CompareChars.
+ */
+extern int32_t CompareStrings(const JSLinearString* str1,
+                              const JSLinearString* str2);
 
 /*
  * Same as CompareStrings but for atoms.  Don't use this to just test

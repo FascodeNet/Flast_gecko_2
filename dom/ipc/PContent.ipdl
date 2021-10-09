@@ -109,9 +109,13 @@ using mozilla::Telemetry::ScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::KeyedScalarAction from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::DynamicScalarDefinition from "mozilla/TelemetryComms.h";
 using mozilla::Telemetry::ChildEventData from "mozilla/TelemetryComms.h";
+
+#if defined(XP_WIN)
 [MoveOnly] using mozilla::UntrustedModulesData from "mozilla/UntrustedModulesData.h";
 [MoveOnly] using mozilla::ModulePaths from "mozilla/UntrustedModulesData.h";
 [MoveOnly] using mozilla::ModulesMapResult from "mozilla/UntrustedModulesData.h";
+#endif  // defined(XP_WIN)
+
 using mozilla::Telemetry::DiscardedData from "mozilla/TelemetryComms.h";
 using mozilla::CrossProcessMutexHandle from "mozilla/ipc/CrossProcessMutex.h";
 using mozilla::dom::MaybeDiscardedBrowsingContext from "mozilla/dom/BrowsingContext.h";
@@ -562,11 +566,13 @@ child:
 
     async RequestPerformanceMetrics(nsID aID);
 
+#if defined(XP_WIN)
     /**
      * Used by third-party modules telemetry (aka "untrusted modules" telemetry)
      * to pull data from content processes.
      */
     async GetUntrustedModulesData() returns (UntrustedModulesData? data);
+#endif  // defined(XP_WIN)
 
     /**
      * Communication between the PuppetBidiKeyboard and the actual
@@ -621,6 +627,8 @@ child:
     async UpdatePerfStatsCollectionMask(uint64_t aMask);
     async CollectPerfStatsJSON() returns (nsCString aStats);
 
+    async CollectScrollingMetrics() returns (uint32_t pixelsScrolled, uint32_t scrollDurationMS);
+
     async NotifyAlertsObserver(nsCString topic, nsString data);
 
     async GeolocationUpdate(nsIDOMGeoPosition aPosition);
@@ -639,7 +647,7 @@ child:
      * This message has raised priority so that it will take precedence over
      * vsync messages to the child.
      */
-    [Priority=mediumhigh] async RebuildFontList(bool aFulLRebuild);
+    [Priority=mediumhigh] async RebuildFontList(bool aFullRebuild);
 
     /**
      * The shared font list has been modified, potentially adding matches
@@ -647,6 +655,12 @@ child:
      * may need to be reflowed.
      */
     async FontListChanged();
+
+    /**
+     * The font list or prefs have been updated in such a way that we might need
+     * to do a reflow and maybe reframe.
+     */
+    async ForceGlobalReflow(bool aNeedsReframe);
 
     /**
      * A new shmem block has been added to the font list; the child process
@@ -747,7 +761,8 @@ child:
      */
     async NotifyIdleObserver(uint64_t observerId, nsCString topic, nsString str);
 
-    async InvokeDragSession(IPCDataTransfer[] transfers, uint32_t action);
+    async InvokeDragSession(MaybeDiscardedWindowContext aContext,
+                            IPCDataTransfer[] transfers, uint32_t action);
 
     async EndDragSession(bool aDoneDrag, bool aUserCancelled,
                          LayoutDeviceIntPoint aDragEndPoint,
@@ -1665,6 +1680,7 @@ parent:
     async AddOrRemovePageAwakeRequest(MaybeDiscardedBrowsingContext aContext,
                                       bool aShouldAddCount);
 
+#if defined(XP_WIN)
     /**
      * Due to sandboxing, a child process's UntrustedModulesProcessor cannot
      * obtain enough information about a DLL file to determine its
@@ -1673,6 +1689,7 @@ parent:
      */
     async GetModulesTrust(ModulePaths aModPaths, bool aRunAtNormalPriority)
         returns (ModulesMapResult? modMapResult);
+#endif  // defined(XP_WIN)
 
     /**
      * Used to route shutdown diagnostic info from the content process

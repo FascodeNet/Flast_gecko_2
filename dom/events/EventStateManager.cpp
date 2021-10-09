@@ -484,7 +484,7 @@ static void OnTypingInteractionEnded() {
   if (gTypingInteractionKeyPresses > 1) {
     gTypingInteraction.mInteractionCount += gTypingInteractionKeyPresses;
     gTypingInteraction.mInteractionTimeInMilliseconds += static_cast<uint32_t>(
-        (gTypingEndTime - gTypingStartTime).ToMilliseconds());
+        std::ceil((gTypingEndTime - gTypingStartTime).ToMilliseconds()));
   }
 
   gTypingInteractionKeyPresses = 0;
@@ -1161,8 +1161,10 @@ bool EventStateManager::LookForAccessKeyAndExecute(
           }
         }
 
-        if (element->PerformAccesskey(shouldActivate, aIsTrustedEvent)) {
-          if (aIsTrustedEvent) {
+        auto result =
+            element->PerformAccesskey(shouldActivate, aIsTrustedEvent);
+        if (result.isOk()) {
+          if (result.unwrap() && aIsTrustedEvent) {
             // If this is a child process, inform the parent that we want the
             // focus, but pass false since we don't want to change the window
             // order.
@@ -1961,7 +1963,7 @@ void EventStateManager::MaybeFirePointerCancel(WidgetInputEvent* aEvent) {
                              aTouchEvent->mWidget);
 
     PointerEventHandler::InitPointerEventFromTouch(
-        &event, aTouchEvent, aTouchEvent->mTouches[0], true);
+        event, *aTouchEvent, *aTouchEvent->mTouches[0], true);
 
     event.convertToPointer = false;
     presShell->HandleEventWithTarget(&event, targetFrame, content, &status);
@@ -2827,7 +2829,7 @@ nsIFrame* EventStateManager::ComputeScrollTargetAndMayAdjustWheelEvent(
     // event, continue the loop to check its parent, if any.
   }
 
-  nsIFrame* newFrame = nsLayoutUtils::GetCrossDocParentFrame(
+  nsIFrame* newFrame = nsLayoutUtils::GetCrossDocParentFrameInProcess(
       aTargetFrame->PresShell()->GetRootFrame());
   aOptions =
       static_cast<ComputeScrollTargetOptions>(aOptions & ~START_FROM_PARENT);
@@ -3838,18 +3840,18 @@ nsresult EventStateManager::PostHandleEvent(nsPresContext* aPresContext,
         if (nsCOMPtr<nsIDragSession> dragSession =
                 nsContentUtils::GetDragSession()) {
           MOZ_ASSERT(dragSession->IsSynthesizedForTests());
-          RefPtr<Document> sourceDocument;
+          RefPtr<WindowContext> sourceWC;
           DebugOnly<nsresult> rvIgnored =
-              dragSession->GetSourceDocument(getter_AddRefs(sourceDocument));
+              dragSession->GetSourceWindowContext(getter_AddRefs(sourceWC));
           NS_WARNING_ASSERTION(
               NS_SUCCEEDED(rvIgnored),
               "nsIDragSession::GetSourceDocument() failed, but ignored");
-          // If source document hasn't been initialized, i.e., dragstart was
+          // If the drag source hasn't been initialized, i.e., dragstart was
           // consumed by the test, the test needs to dispatch "dragend" event
           // instead of the drag session.  Therefore, it does not make sense
           // to set drag end point in such case (you hit assersion if you do
           // it).
-          if (sourceDocument) {
+          if (sourceWC) {
             CSSIntPoint dropPointInScreen =
                 Event::GetScreenCoords(aPresContext, aEvent, aEvent->mRefPoint);
             dragSession->SetDragEndPointForTests(dropPointInScreen.x,

@@ -29,8 +29,8 @@ namespace dom {
 
 namespace {
 
-typedef nsClassHashtable<nsCStringHashKey, nsTArray<LocalStorageCacheParent*>>
-    LocalStorageCacheParentHashtable;
+using LocalStorageCacheParentHashtable =
+    nsClassHashtable<nsCStringHashKey, nsTArray<LocalStorageCacheParent*>>;
 
 StaticAutoPtr<LocalStorageCacheParentHashtable> gLocalStorageCacheParents;
 

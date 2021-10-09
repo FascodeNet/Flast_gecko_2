@@ -438,6 +438,129 @@ static XDRResult XDRInnerObject(XDRState<mode>* xdr,
   return Ok();
 }
 
+static bool GetShapeProperties(HandleShape shape,
+                               MutableHandle<IdVector> properties) {
+  MOZ_ASSERT(properties.empty());
+  MOZ_ASSERT(shape->getObjectClass() == &PlainObject::class_);
+
+  // This function relies on the fact that all slots are used for data
+  // properties.
+  MOZ_ASSERT(JSCLASS_RESERVED_SLOTS(&PlainObject::class_) == 0);
+
+  if (!properties.growBy(shape->slotSpan())) {
+    return false;
+  }
+
+  for (ShapePropertyIter<NoGC> iter(shape); !iter.done(); iter++) {
+    MOZ_ASSERT(iter->isDataProperty());
+    uint32_t slot = iter->slot();
+    properties[slot].get() = iter->key();
+  }
+
+  return true;
+}
+
+static Shape* NewShapeFromProperties(JSContext* cx, Handle<IdVector> properties,
+                                     uint32_t numFixedSlots) {
+  Rooted<SharedPropMap*> map(cx);
+  uint32_t mapLength = 0;
+
+  constexpr PropertyFlags propFlags = PropertyFlags::defaultDataPropFlags;
+  ObjectFlags objectFlags = {};
+
+  for (size_t i = 0; i < properties.length(); i++) {
+    MOZ_ASSERT(properties[i].isString());
+    if (!SharedPropMap::addPropertyWithKnownSlot(cx, &PlainObject::class_, &map,
+                                                 &mapLength, properties[i],
+                                                 propFlags, i, &objectFlags)) {
+      return nullptr;
+    }
+  }
+
+  RootedObject proto(cx,
+                     GlobalObject::getOrCreatePrototype(cx, JSProto_Object));
+  if (!proto) {
+    return nullptr;
+  }
+
+  // In cases involving off-thread XDR, Object.prototype is not always marked
+  // used-as-prototype, so do that now.
+  if (!JSObject::setIsUsedAsPrototype(cx, proto)) {
+    return nullptr;
+  }
+
+  return SharedShape::getInitialOrPropMapShape(
+      cx, &PlainObject::class_, cx->realm(), AsTaggedProto(proto),
+      numFixedSlots, map, mapLength, objectFlags);
+}
+
+static Shape* CloneScriptObjectShape(JSContext* cx, HandleShape shape) {
+  MOZ_ASSERT(shape->getObjectClass() == &PlainObject::class_);
+
+  Rooted<IdVector> properties(cx, IdVector(cx));
+
+  if (!GetShapeProperties(shape, &properties)) {
+    return nullptr;
+  }
+
+  for (size_t i = 0; i < properties.length(); i++) {
+    cx->markId(properties[i]);
+  }
+
+  return NewShapeFromProperties(cx, properties, shape->numFixedSlots());
+}
+
+template <XDRMode mode>
+static XDRResult XDRShape(XDRState<mode>* xdr, MutableHandleShape shape) {
+  JSContext* cx = xdr->cx();
+
+  // Code the properties in the object.
+  Rooted<IdVector> properties(cx, IdVector(cx));
+  if (mode == XDR_ENCODE && !GetShapeProperties(shape, &properties)) {
+    return xdr->fail(JS::TranscodeResult::Throw);
+  }
+
+  uint32_t nproperties = 0;
+  uint32_t numFixedSlots = 0;
+  if (mode == XDR_ENCODE) {
+    nproperties = properties.length();
+    numFixedSlots = shape->numFixedSlots();
+  }
+  MOZ_TRY(xdr->codeUint32(&nproperties));
+  MOZ_TRY(xdr->codeUint32(&numFixedSlots));
+
+  if (mode == XDR_DECODE && !properties.growBy(nproperties)) {
+    return xdr->fail(JS::TranscodeResult::Throw);
+  }
+
+  RootedValue tmpKeyValue(cx);
+  Rooted<PropertyKey> tmpKey(cx);
+
+  for (size_t i = 0; i < nproperties; i++) {
+    if (mode == XDR_ENCODE) {
+      tmpKeyValue = IdToValue(properties[i]);
+    }
+
+    MOZ_TRY(XDRScriptConst(xdr, &tmpKeyValue));
+
+    if (mode == XDR_DECODE) {
+      if (!PrimitiveValueToId<CanGC>(cx, tmpKeyValue, &tmpKey)) {
+        return xdr->fail(JS::TranscodeResult::Throw);
+      }
+      properties[i].get() = tmpKey;
+    }
+  }
+
+  if (mode == XDR_DECODE) {
+    shape.set(NewShapeFromProperties(cx, properties, numFixedSlots));
+    if (!shape) {
+      return xdr->fail(JS::TranscodeResult::Throw);
+    }
+  }
+
+  return Ok();
+}
+
 template <XDRMode mode>
 static XDRResult XDRScope(XDRState<mode>* xdr, js::PrivateScriptData* data,
                           HandleScope scriptEnclosingScope,
@@ -562,6 +685,18 @@ static XDRResult XDRScriptGCThing(XDRState<mode>* xdr, PrivateScriptData* data,
       MOZ_TRY(XDRInnerObject(xdr, data, sourceObject, &obj));
       if (mode == XDR_DECODE) {
         *thingp = JS::GCCellPtr(obj.get());
+      }
+      break;
+    }
+
+    case JS::TraceKind::Shape: {
+      RootedShape shape(cx);
+      if (mode == XDR_ENCODE) {
+        shape = &thingp->as<Shape>();
+      }
+      MOZ_TRY(XDRShape(xdr, &shape));
+      if (mode == XDR_DECODE) {
+        *thingp = JS::GCCellPtr(shape.get());
       }
       break;
     }
@@ -942,65 +1077,6 @@ ImmutableScriptData::ImmutableScriptData(uint32_t codeLength,
   // Sanity check
   MOZ_ASSERT(endOffset() == cursor);
 }
-
-template <XDRMode mode>
-XDRResult js::XDRImmutableScriptData(XDRState<mode>* xdr,
-                                     SharedImmutableScriptData& sisd) {
-  static_assert(frontend::CanCopyDataToDisk<ImmutableScriptData>::value,
-                "ImmutableScriptData cannot be bulk-copied to disk");
-  static_assert(frontend::CanCopyDataToDisk<jsbytecode>::value,
-                "jsbytecode cannot be bulk-copied to disk");
-  static_assert(frontend::CanCopyDataToDisk<SrcNote>::value,
-                "SrcNote cannot be bulk-copied to disk");
-  static_assert(frontend::CanCopyDataToDisk<ScopeNote>::value,
-                "ScopeNote cannot be bulk-copied to disk");
-  static_assert(frontend::CanCopyDataToDisk<TryNote>::value,
-                "TryNote cannot be bulk-copied to disk");
-
-  uint32_t size;
-  if (mode == XDR_ENCODE) {
-    size = sisd.immutableDataLength();
-  }
-  MOZ_TRY(xdr->codeUint32(&size));
-
-  MOZ_TRY(xdr->align32());
-  static_assert(alignof(ImmutableScriptData) <= alignof(uint32_t));
-
-  if (mode == XDR_ENCODE) {
-    uint8_t* data = const_cast<uint8_t*>(sisd.get()->immutableData().data());
-    MOZ_ASSERT(data == reinterpret_cast<const uint8_t*>(sisd.get()),
-               "Decode below relies on the data placement");
-    MOZ_TRY(xdr->codeBytes(data, size));
-  } else {
-    MOZ_ASSERT(!sisd.get());
-
-    if (xdr->hasOptions() && xdr->options().usePinnedBytecode) {
-      ImmutableScriptData* isd;
-      MOZ_TRY(xdr->borrowedData(&isd, size));
-      sisd.setExternal(isd);
-    } else {
-      auto isd = ImmutableScriptData::new_(xdr->cx(), size);
-      if (!isd) {
-        return xdr->fail(JS::TranscodeResult::Throw);
-      }
-      uint8_t* data = reinterpret_cast<uint8_t*>(isd.get());
-      MOZ_TRY(xdr->codeBytes(data, size));
-      sisd.setOwn(std::move(isd));
-    }
-
-    if (size != sisd.get()->computedSize()) {
-      MOZ_ASSERT(false, "Bad ImmutableScriptData");
-      return xdr->fail(JS::TranscodeResult::Failure_BadDecode);
-    }
-  }
-
-  return Ok();
-}
-
-template XDRResult js::XDRImmutableScriptData(XDRState<XDR_ENCODE>* xdr,
-                                              SharedImmutableScriptData& sisd);
-template XDRResult js::XDRImmutableScriptData(XDRState<XDR_DECODE>* xdr,
-                                              SharedImmutableScriptData& sisd);
 
 template <XDRMode mode>
 XDRResult js::XDRSourceExtent(XDRState<mode>* xdr, SourceExtent* extent) {
@@ -3413,11 +3489,26 @@ js::UniquePtr<ImmutableScriptData> js::ImmutableScriptData::new_(
   return result;
 }
 
-uint32_t js::ImmutableScriptData::computedSize() {
+bool js::ImmutableScriptData::validateLayout(uint32_t expectedSize) {
+  constexpr size_t HeaderSize = sizeof(js::ImmutableScriptData);
+  constexpr size_t OptionalOffsetsMaxSize = 3 * sizeof(Offset);
+
+  // Check that the optional-offsets array lies within the allocation before we
+  // try to read from it while computing sizes. Remember that the array *ends*
+  // at the `optArrayOffset_`.
+  static_assert(OptionalOffsetsMaxSize <= HeaderSize);
+  if (HeaderSize > optArrayOffset_) {
+    return false;
+  }
+  if (optArrayOffset_ > expectedSize) {
+    return false;
+  }
+
+  // Round-trip the size computation using `CheckedInt` to detect overflow. This
+  // should indirectly validate most alignment, size, and ordering requirments.
   auto size = sizeFor(codeLength(), noteLength(), resumeOffsets().size(),
                       scopeNotes().size(), tryNotes().size());
-  MOZ_ASSERT(size.isValid());
-  return size.value();
+  return size.isValid() && (size.value() == expectedSize);
 }
 
 /* static */
@@ -4268,6 +4359,7 @@ bool PrivateScriptData::Clone(JSContext* cx, HandleScript src, HandleScript dst,
   size_t scopeIndex = 0;
   Rooted<ScriptSourceObject*> sourceObject(cx, dst->sourceObject());
   RootedObject obj(cx);
+  RootedShape shape(cx);
   RootedScope scope(cx);
   RootedScope enclosingScope(cx);
   RootedBigInt bigint(cx);
@@ -4276,6 +4368,12 @@ bool PrivateScriptData::Clone(JSContext* cx, HandleScript src, HandleScript dst,
       obj = &gcThing.as<JSObject>();
       JSObject* clone =
           CloneScriptObject(cx, srcData, obj, sourceObject, gcThings);
+      if (!clone || !gcThings.append(JS::GCCellPtr(clone))) {
+        return false;
+      }
+    } else if (gcThing.is<Shape>()) {
+      shape = &gcThing.as<Shape>();
+      Shape* clone = CloneScriptObjectShape(cx, shape);
       if (!clone || !gcThings.append(JS::GCCellPtr(clone))) {
         return false;
       }

@@ -120,6 +120,27 @@ class SharedDataMap extends EventEmitter {
     this._notifyUpdate();
   }
 
+  /**
+   * Replace the stored data with an updated filtered dataset for cleanup
+   * purposes. We don't notify of update because we're only filtering out
+   * old unused entries.
+   *
+   * @param {string[]} keysToRemove - list of keys to remove from the persistent store
+   */
+  _removeEntriesByKeys(keysToRemove) {
+    if (!keysToRemove.length) {
+      return;
+    }
+    for (let key of keysToRemove) {
+      try {
+        delete this._store.data[key];
+      } catch (e) {
+        // It's ok if this fails
+      }
+    }
+    this._store.saveSoon();
+  }
+
   setNonPersistent(key, value) {
     if (!this.isParent) {
       throw new Error(

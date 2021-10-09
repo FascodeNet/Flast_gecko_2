@@ -1,20 +1,9 @@
-commit afe217b318df5f197e64b30a8b5a4b391c777359
-Author: jugglinmike <mike@mikepennisi.com>
-Date:   Thu Jul 15 08:49:12 2021 -0400
+commit 45a913c057892bdd26f7bc06a59a0c7420f2d3ec
+Author: Philip Chimento <pchimento@igalia.com>
+Date:   Wed Aug 11 12:31:23 2021 -0700
 
-    Add tests for "Class Static Init. Blocks" proposal (#2968)
+    Add branding tests from Temporal (#3138)
     
-    * Add tests for "Class Static Init. Blocks" proposal
+    Closes: #3137
     
-    This proposal is currently at "stage 3" in TC39's standardization
-    process.
-    
-    * fixup! Add tests for "Class Static Init. Blocks" proposal
-    
-    * Correct identifier reference
-    
-    * Update tests for grammar
-    
-    * Update tests for identifiers
-    
-    * Add tests for scope derivation
+    Co-authored-by: Ms2ger <Ms2ger@igalia.com>

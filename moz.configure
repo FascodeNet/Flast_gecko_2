@@ -179,6 +179,17 @@ add_old_configure_assignment("DEVELOPER_OPTIONS", developer_options)
 set_config("DEVELOPER_OPTIONS", developer_options)
 
 
+# hybrid build handling
+# ==============================================================
+
+option(
+    "--disable-unified-build",
+    help="Enable building modules that are not marked with `REQUIRES_UNIFIED_BUILD` in non unified context",
+)
+
+set_config("ENABLE_UNIFIED_BUILD", True, when="--disable-unified-build")
+
+
 option(
     env="MOZ_FETCHES_DIR",
     nargs=1,
@@ -249,6 +260,7 @@ def original_path():
 
 @depends(host, when="--enable-bootstrap")
 @imports("os")
+@imports("traceback")
 @imports(_from="mozbuild.toolchains", _import="toolchain_task_definitions")
 @imports(_from="__builtin__", _import="Exception")
 def bootstrap_toolchain_tasks(host):
@@ -260,7 +272,10 @@ def bootstrap_toolchain_tasks(host):
     }.get((host.cpu, host.os, host.kernel))
     try:
         return namespace(prefix=prefix, tasks=toolchain_task_definitions())
-    except Exception:
+    except Exception as e:
+        message = traceback.format_exc()
+        log.warning(str(e))
+        log.debug(message)
         return None
 
 
@@ -630,42 +645,38 @@ def check_objdir_backend_reuse(build_env, backends):
                 )
 
 
-option(
-    "--disable-gtest-in-build",
-    help="Force disable building the gtest libxul during the build.",
-    when="--enable-compile-environment",
-)
-
 # Determine whether to build the gtest xul. This happens in automation
 # on Android and Desktop platforms with the exception of:
 #  - Windows PGO, where linking xul-gtest.dll takes too long;
 #  - Android other than x86_64, where gtest is not required.
-
-
 @depends(
     "MOZ_PGO",
     build_project,
     target,
     "MOZ_AUTOMATION",
-    "--disable-gtest-in-build",
     enable_tests,
     when="--enable-compile-environment",
 )
-def build_gtest(pgo, build_project, target, automation, enabled, enable_tests):
-    if not enable_tests or not enabled:
-        return None
-    if (
-        automation
+def build_gtest(pgo, build_project, target, automation, enable_tests):
+    return bool(
+        enable_tests
+        and automation
         and build_project in ("browser", "comm/mail", "mobile/android")
         and not (
             (pgo and target.os == "WINNT")
             or (target.os == "Android" and target.cpu != "x86_64")
         )
-    ):
-        return True
+    )
 
 
-set_config("LINK_GTEST_DURING_COMPILE", build_gtest)
+option(
+    "--enable-gtest-in-build",
+    default=build_gtest,
+    help="{Enable|Force disable} building the gtest libxul during the build.",
+    when="--enable-compile-environment",
+)
+
+set_config("LINK_GTEST_DURING_COMPILE", True, when="--enable-gtest-in-build")
 
 # Localization
 # ==============================================================
@@ -1086,7 +1097,7 @@ set_config("STRIP_FLAGS", strip_flags)
 
 @depends(js_standalone, target)
 def system_zlib_default(js_standalone, target):
-    return js_standalone and target.kernel != "WINNT"
+    return js_standalone and target.kernel not in ("WINNT", "Darwin")
 
 
 option(

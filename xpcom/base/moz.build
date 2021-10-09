@@ -76,6 +76,7 @@ EXPORTS += [
     "nsGZFileWriter.h",
     "nsIClassInfoImpl.h",
     "nsID.h",
+    "nsIDUtils.h",
     "nsIInterfaceRequestorUtils.h",
     "nsINIParser.h",
     "nsInterfaceRequestorAgg.h",
@@ -256,3 +257,5 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "gtk":
 
 if CONFIG["MOZ_BACKGROUNDTASKS"]:
     DEFINES["MOZ_BACKGROUNDTASKS"] = True
+
+REQUIRES_UNIFIED_BUILD = True

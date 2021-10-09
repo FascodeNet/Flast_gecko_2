@@ -841,6 +841,24 @@ void MacroAssembler::branch64(Condition cond, const Address& lhs, Imm64 val,
 }
 
 void MacroAssembler::branch64(Condition cond, const Address& lhs,
+                              Register64 rhs, Label* label) {
+  MOZ_ASSERT(cond == Assembler::NotEqual || cond == Assembler::Equal,
+             "other condition codes not supported");
+
+  Label done;
+
+  if (cond == Assembler::Equal) {
+    branch32(Assembler::NotEqual, lhs, rhs.low, &done);
+  } else {
+    branch32(Assembler::NotEqual, lhs, rhs.low, label);
+  }
+  branch32(cond, Address(lhs.base, lhs.offset + sizeof(uint32_t)), rhs.high,
+           label);
+
+  bind(&done);
+}
+
+void MacroAssembler::branch64(Condition cond, const Address& lhs,
                               const Address& rhs, Register scratch,
                               Label* label) {
   MOZ_ASSERT(cond == Assembler::NotEqual || cond == Assembler::Equal,
@@ -1119,7 +1137,11 @@ void MacroAssembler::anyTrueSimd128(FloatRegister src, Register dest) {
 
 void MacroAssembler::extractLaneInt64x2(uint32_t lane, FloatRegister src,
                                         Register64 dest) {
-  vpextrd(2 * lane, src, dest.low);
+  if (lane == 0) {
+    vmovd(src, dest.low);
+  } else {
+    vpextrd(2 * lane, src, dest.low);
+  }
   vpextrd(2 * lane + 1, src, dest.high);
 }
 

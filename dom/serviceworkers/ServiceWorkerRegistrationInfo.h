@@ -76,7 +76,7 @@ class ServiceWorkerRegistrationInfo final
   NS_DECL_ISUPPORTS
   NS_DECL_NSISERVICEWORKERREGISTRATIONINFO
 
-  typedef std::function<void()> TryToActivateCallback;
+  using TryToActivateCallback = std::function<void()>;
 
   ServiceWorkerRegistrationInfo(
       const nsACString& aScope, nsIPrincipal* aPrincipal,
@@ -261,6 +261,8 @@ class ServiceWorkerRegistrationInfo final
   // call to `aFunc`, so `aFunc` will always get a reference to a non-null
   // pointer.
   void ForEachWorker(void (*aFunc)(RefPtr<ServiceWorkerInfo>&));
+
+  void CheckQuotaUsage();
 };
 
 }  // namespace dom

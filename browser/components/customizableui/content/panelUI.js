@@ -468,6 +468,9 @@ const PanelUI = {
       if (aAnchor.getAttribute("tabspecific")) {
         tempPanel.setAttribute("tabspecific", true);
       }
+      if (aAnchor.getAttribute("locationspecific")) {
+        tempPanel.setAttribute("locationspecific", true);
+      }
       if (this._disableAnimations) {
         tempPanel.setAttribute("animate", "false");
       }
@@ -972,7 +975,7 @@ const PanelUI = {
 
   _addedShortcuts: false,
   _formatPrintButtonShortcuts() {
-    let printButton = this.mainView.querySelector("#appMenu-print-button");
+    let printButton = this.mainView.querySelector("#appMenu-print-button2");
     if (printButton) {
       if (
         !Services.prefs.getBoolPref("print.tab_modal.enabled") &&

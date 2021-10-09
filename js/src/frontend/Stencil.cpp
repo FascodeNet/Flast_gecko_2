@@ -776,7 +776,8 @@ bool CompilationSyntaxParseCache::copyClosedOverBindings(
     closedOverBindings[i - start] = parserAtom;
   }
 
-  closedOverBindings_ = ClosedOverBindingsSpan(closedOverBindings, length - start);
+  closedOverBindings_ =
+      ClosedOverBindingsSpan(closedOverBindings, length - start);
   return true;
 }
 
@@ -971,9 +972,10 @@ static JSFunction* CreateFunctionFast(JSContext* cx,
                                 ? gc::AllocKind::FUNCTION_EXTENDED
                                 : gc::AllocKind::FUNCTION;
 
-  JSFunction* fun;
-  JS_TRY_VAR_OR_RETURN_NULL(
-      cx, fun, JSFunction::create(cx, allocKind, gc::TenuredHeap, shape));
+  JSFunction* fun = JSFunction::create(cx, allocKind, gc::TenuredHeap, shape);
+  if (!fun) {
+    return nullptr;
+  }
 
   fun->setArgCount(scriptExtra.nargs);
   fun->setFlags(flags);
@@ -985,10 +987,6 @@ static JSFunction* CreateFunctionFast(JSContext* cx,
     JSAtom* atom = atomCache.getExistingAtomAt(cx, script.functionAtom);
     MOZ_ASSERT(atom);
     fun->initAtom(atom);
-  }
-
-  if (flags.isExtended()) {
-    fun->initializeExtended();
   }
 
   return fun;
@@ -1115,19 +1113,18 @@ static bool InstantiateFunctions(JSContext* cx, CompilationAtomCache& atomCache,
     return false;
   }
 
-  // Most JSFunctions will be have the same Shape / Group so we can compute it
-  // now to allow fast object creation. Generators / Async will use the slow
-  // path instead.
-  RootedObject proto(cx,
-                     GlobalObject::getOrCreatePrototype(cx, JSProto_Function));
-  if (!proto) {
+  // Most JSFunctions will be have the same Shape so we can compute it now to
+  // allow fast object creation. Generators / Async will use the slow path
+  // instead.
+  RootedShape functionShape(cx, GlobalObject::getFunctionShapeWithDefaultProto(
+                                    cx, /* extended = */ false));
+  if (!functionShape) {
     return false;
   }
-  RootedShape shape(
-      cx, SharedShape::getInitialShape(cx, &JSFunction::class_, cx->realm(),
-                                       TaggedProto(proto),
-                                       /* nfixed = */ 0, ObjectFlags()));
-  if (!shape) {
+
+  RootedShape extendedShape(cx, GlobalObject::getFunctionShapeWithDefaultProto(
+                                    cx, /* extended = */ true));
+  if (!extendedShape) {
     return false;
   }
 
@@ -1145,11 +1142,18 @@ static bool InstantiateFunctions(JSContext* cx, CompilationAtomCache& atomCache,
         !scriptExtra.immutableFlags.hasFlag(ImmutableFlags::IsGenerator) &&
         !scriptStencil.functionFlags.isAsmJSNative();
 
-    JSFunction* fun = useFastPath
-                          ? CreateFunctionFast(cx, atomCache, shape,
-                                               scriptStencil, scriptExtra)
-                          : CreateFunction(cx, atomCache, stencil,
-                                           scriptStencil, scriptExtra, index);
+    JSFunction* fun;
+    if (useFastPath) {
+      HandleShape shape = scriptStencil.functionFlags.isExtended()
+                              ? extendedShape
+                              : functionShape;
+      fun =
+          CreateFunctionFast(cx, atomCache, shape, scriptStencil, scriptExtra);
+    } else {
+      fun = CreateFunction(cx, atomCache, stencil, scriptStencil, scriptExtra,
+                           index);
+    }
+
     if (!fun) {
       return false;
     }
@@ -1563,7 +1567,6 @@ bool CompilationStencil::instantiateStencilAfterPreparation(
   // !! Must be infallible from here forward !!
 
   // Phase 6: Update lazy scripts.
-  MOZ_ASSERT(stencil.canLazilyParse == CanLazilyParse(input.options));
   if (stencil.canLazilyParse) {
     UpdateEmittedInnerFunctions(cx, input.atomCache, stencil, gcOutput);
 
@@ -2327,8 +2330,8 @@ bool ExtensibleCompilationStencil::steal(JSContext* cx,
         return false;
       }
       memcpy(code, data.code().data(), length);
-      objLiteralData.infallibleEmplaceBack(code, length, data.flags(),
-                                           data.propertyCount());
+      objLiteralData.infallibleEmplaceBack(code, length, data.kind(),
+                                           data.flags(), data.propertyCount());
     }
   } else {
     if (!CopySpanToVector(cx, objLiteralData, other.objLiteralData)) {
@@ -3814,8 +3817,8 @@ bool CompilationStencilMerger::addDelazification(
     ObjLiteralModifier modifier(mozilla::Span(code, length));
     modifier.mapAtom(mapAtomIndex);
 
-    initial_->objLiteralData.infallibleEmplaceBack(code, length, data.flags(),
-                                                   data.propertyCount());
+    initial_->objLiteralData.infallibleEmplaceBack(
+        code, length, data.kind(), data.flags(), data.propertyCount());
   }
 
   // Append scopeData, with mapping indices in ScopeStencil fields.

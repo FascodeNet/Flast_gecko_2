@@ -18,6 +18,7 @@
 #  include "Compatibility.h"
 #  include "mozilla/mscom/PassthruProxy.h"
 #  include "mozilla/mscom/Ptr.h"
+#  include "mozilla/StaticPrefs_accessibility.h"
 #  include "nsWinUtils.h"
 #  include "RootAccessible.h"
 #else
@@ -468,6 +469,22 @@ mozilla::ipc::IPCResult DocAccessibleParent::RecvScrollingEvent(
       new xpcAccScrollingEvent(aType, xpcAcc, doc, node, fromUser, aScrollX,
                                aScrollY, aMaxScrollX, aMaxScrollY);
   nsCoreUtils::DispatchAccEvent(std::move(event));
+
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult DocAccessibleParent::RecvCache(
+    const mozilla::a11y::CacheUpdateType& aUpdateType,
+    nsTArray<CacheData>&& aData, const bool& aFinal) {
+  for (auto& entry : aData) {
+    RemoteAccessible* remote = GetAccessible(entry.ID());
+    if (!remote) {
+      MOZ_ASSERT_UNREACHABLE("No remote found!");
+      continue;
+    }
+
+    remote->ApplyCache(aUpdateType, entry.Fields());
+  }
 
   return IPC_OK();
 }

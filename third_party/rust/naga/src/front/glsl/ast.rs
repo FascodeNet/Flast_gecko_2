@@ -1,310 +1,162 @@
-use super::{super::Typifier, constants::ConstantSolver, error::ErrorKind};
+use std::fmt;
+
+use super::{builtins::MacroCall, context::ExprPos, SourceMetadata};
 use crate::{
-    proc::ResolveContext, Arena, ArraySize, BinaryOperator, Binding, Constant, Expression,
-    FastHashMap, Function, FunctionArgument, GlobalVariable, Handle, Interpolation, LocalVariable,
-    Module, RelationalFunction, ResourceBinding, Sampling, ShaderStage, Statement, StorageClass,
-    Type, UnaryOperator,
+    BinaryOperator, Binding, Constant, Expression, Function, GlobalVariable, Handle, Interpolation,
+    Sampling, StorageAccess, StorageClass, Type, UnaryOperator,
 };
 
-#[derive(Debug)]
-pub struct Program<'a> {
-    pub version: u16,
-    pub profile: Profile,
-    pub entry_points: &'a FastHashMap<String, ShaderStage>,
-    pub lookup_function: FastHashMap<String, Handle<Function>>,
-    pub lookup_type: FastHashMap<String, Handle<Type>>,
-    pub lookup_global_variables: FastHashMap<String, Handle<GlobalVariable>>,
-    pub lookup_constants: FastHashMap<String, Handle<Constant>>,
-    pub context: Context,
-    pub module: Module,
+#[derive(Debug, Clone, Copy)]
+pub enum GlobalLookupKind {
+    Variable(Handle<GlobalVariable>),
+    Constant(Handle<Constant>),
+    BlockSelect(Handle<GlobalVariable>, u32),
 }
 
-impl<'a> Program<'a> {
-    pub fn new(entry_points: &'a FastHashMap<String, ShaderStage>) -> Program<'a> {
-        Program {
-            version: 0,
-            profile: Profile::Core,
-            entry_points,
-            lookup_function: FastHashMap::default(),
-            lookup_type: FastHashMap::default(),
-            lookup_global_variables: FastHashMap::default(),
-            lookup_constants: FastHashMap::default(),
-            context: Context {
-                expressions: Arena::<Expression>::new(),
-                local_variables: Arena::<LocalVariable>::new(),
-                arguments: Vec::new(),
-                scopes: vec![FastHashMap::default()],
-                lookup_global_var_exps: FastHashMap::default(),
-                lookup_constant_exps: FastHashMap::default(),
-                typifier: Typifier::new(),
-            },
-            module: Module::default(),
+#[derive(Debug, Clone, Copy)]
+pub struct GlobalLookup {
+    pub kind: GlobalLookupKind,
+    pub entry_arg: Option<usize>,
+    pub mutable: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ParameterInfo {
+    pub qualifier: ParameterQualifier,
+    /// Wether the parameter should be treated as a depth image instead of a
+    /// sampled image
+    pub depth: bool,
+}
+
+/// How the function is implemented
+#[derive(Clone, Copy)]
+pub enum FunctionKind {
+    /// The function is user defined
+    Call(Handle<Function>),
+    /// The function is a buitin
+    Macro(MacroCall),
+}
+
+impl fmt::Debug for FunctionKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::Call(_) => write!(f, "Call"),
+            Self::Macro(_) => write!(f, "Macro"),
         }
     }
+}
 
-    pub fn binary_expr(
-        &mut self,
+#[derive(Debug)]
+pub struct Overload {
+    /// Normalized function parameters, modifiers are not applied
+    pub parameters: Vec<Handle<Type>>,
+    pub parameters_info: Vec<ParameterInfo>,
+    /// How the function is implemented
+    pub kind: FunctionKind,
+    /// Wheter this function was already defined or is just a prototype
+    pub defined: bool,
+    /// Wheter or not this function returns void (nothing)
+    pub void: bool,
+}
+
+#[derive(Debug, Default)]
+pub struct FunctionDeclaration {
+    pub overloads: Vec<Overload>,
+    /// Wether or not this function has the name of a builtin
+    pub builtin: bool,
+    /// In case [`builtin`](Self::builtin) is true, this field indicates wether
+    /// this function already has double overloads added or not, otherwise is unused
+    pub double: bool,
+}
+
+#[derive(Debug)]
+pub struct EntryArg {
+    pub name: Option<String>,
+    pub binding: Binding,
+    pub handle: Handle<GlobalVariable>,
+    pub storage: StorageQualifier,
+}
+
+#[derive(Debug, Clone)]
+pub struct VariableReference {
+    pub expr: Handle<Expression>,
+    pub load: bool,
+    pub mutable: bool,
+    pub entry_arg: Option<usize>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HirExpr {
+    pub kind: HirExprKind,
+    pub meta: SourceMetadata,
+}
+
+#[derive(Debug, Clone)]
+pub enum HirExprKind {
+    Access {
+        base: Handle<HirExpr>,
+        index: Handle<HirExpr>,
+    },
+    Select {
+        base: Handle<HirExpr>,
+        field: String,
+    },
+    Constant(Handle<Constant>),
+    Binary {
+        left: Handle<HirExpr>,
         op: BinaryOperator,
-        left: &ExpressionRule,
-        right: &ExpressionRule,
-    ) -> ExpressionRule {
-        ExpressionRule::from_expression(self.context.expressions.append(Expression::Binary {
-            op,
-            left: left.expression,
-            right: right.expression,
-        }))
-    }
-
-    pub fn unary_expr(&mut self, op: UnaryOperator, tgt: &ExpressionRule) -> ExpressionRule {
-        ExpressionRule::from_expression(self.context.expressions.append(Expression::Unary {
-            op,
-            expr: tgt.expression,
-        }))
-    }
-
-    /// Helper function to insert equality expressions, this handles the special
-    /// case of `vec1 == vec2` and `vec1 != vec2` since in the IR they are
-    /// represented as `all(equal(vec1, vec2))` and `any(notEqual(vec1, vec2))`
-    pub fn equality_expr(
-        &mut self,
-        equals: bool,
-        left: &ExpressionRule,
-        right: &ExpressionRule,
-    ) -> Result<ExpressionRule, ErrorKind> {
-        let left_is_vector = match *self.resolve_type(left.expression)? {
-            crate::TypeInner::Vector { .. } => true,
-            _ => false,
-        };
-
-        let right_is_vector = match *self.resolve_type(right.expression)? {
-            crate::TypeInner::Vector { .. } => true,
-            _ => false,
-        };
-
-        let (op, fun) = match equals {
-            true => (BinaryOperator::Equal, RelationalFunction::All),
-            false => (BinaryOperator::NotEqual, RelationalFunction::Any),
-        };
-
-        let expr =
-            ExpressionRule::from_expression(self.context.expressions.append(Expression::Binary {
-                op,
-                left: left.expression,
-                right: right.expression,
-            }));
-
-        Ok(if left_is_vector && right_is_vector {
-            ExpressionRule::from_expression(self.context.expressions.append(
-                Expression::Relational {
-                    fun,
-                    argument: expr.expression,
-                },
-            ))
-        } else {
-            expr
-        })
-    }
-
-    pub fn resolve_type(
-        &mut self,
-        handle: Handle<Expression>,
-    ) -> Result<&crate::TypeInner, ErrorKind> {
-        let resolve_ctx = ResolveContext {
-            constants: &self.module.constants,
-            global_vars: &self.module.global_variables,
-            local_vars: &self.context.local_variables,
-            functions: &self.module.functions,
-            arguments: &self.context.arguments,
-        };
-        match self.context.typifier.grow(
-            handle,
-            &self.context.expressions,
-            &mut self.module.types,
-            &resolve_ctx,
-        ) {
-            //TODO: better error report
-            Err(error) => Err(ErrorKind::SemanticError(
-                format!("Can't resolve type: {:?}", error).into(),
-            )),
-            Ok(()) => Ok(self.context.typifier.get(handle, &self.module.types)),
-        }
-    }
-
-    pub fn solve_constant(
-        &mut self,
-        root: Handle<Expression>,
-    ) -> Result<Handle<Constant>, ErrorKind> {
-        let mut solver = ConstantSolver {
-            types: &self.module.types,
-            expressions: &self.context.expressions,
-            constants: &mut self.module.constants,
-        };
-
-        solver
-            .solve(root)
-            .map_err(|_| ErrorKind::SemanticError("Can't solve constant".into()))
-    }
-
-    pub fn type_size(&self, ty: Handle<Type>) -> Result<u8, ErrorKind> {
-        Ok(match self.module.types[ty].inner {
-            crate::TypeInner::Scalar { width, .. } => width,
-            crate::TypeInner::Vector { size, width, .. } => size as u8 * width,
-            crate::TypeInner::Matrix {
-                columns,
-                rows,
-                width,
-            } => columns as u8 * rows as u8 * width,
-            crate::TypeInner::Pointer { .. } => {
-                return Err(ErrorKind::NotImplemented("type size of pointer"))
-            }
-            crate::TypeInner::ValuePointer { .. } => {
-                return Err(ErrorKind::NotImplemented("type size of value pointer"))
-            }
-            crate::TypeInner::Array { size, stride, .. } => {
-                stride as u8
-                    * match size {
-                        ArraySize::Dynamic => {
-                            return Err(ErrorKind::NotImplemented("type size of dynamic array"))
-                        }
-                        ArraySize::Constant(constant) => {
-                            match self.module.constants[constant].inner {
-                                crate::ConstantInner::Scalar { width, .. } => width,
-                                crate::ConstantInner::Composite { .. } => {
-                                    return Err(ErrorKind::NotImplemented(
-                                        "type size of array with composite item size",
-                                    ))
-                                }
-                            }
-                        }
-                    }
-            }
-            crate::TypeInner::Struct { .. } => {
-                return Err(ErrorKind::NotImplemented("type size of struct"))
-            }
-            crate::TypeInner::Image { .. } => {
-                return Err(ErrorKind::NotImplemented("type size of image"))
-            }
-            crate::TypeInner::Sampler { .. } => {
-                return Err(ErrorKind::NotImplemented("type size of sampler"))
-            }
-        })
-    }
-}
-
-#[derive(Debug)]
-pub enum Profile {
-    Core,
-}
-
-#[derive(Debug)]
-pub struct Context {
-    pub expressions: Arena<Expression>,
-    pub local_variables: Arena<LocalVariable>,
-    pub arguments: Vec<FunctionArgument>,
-    //TODO: Find less allocation heavy representation
-    pub scopes: Vec<FastHashMap<String, Handle<Expression>>>,
-    pub lookup_global_var_exps: FastHashMap<String, Handle<Expression>>,
-    pub lookup_constant_exps: FastHashMap<String, Handle<Expression>>,
-    pub typifier: Typifier,
-}
-
-impl Context {
-    pub fn lookup_local_var(&self, name: &str) -> Option<Handle<Expression>> {
-        for scope in self.scopes.iter().rev() {
-            if let Some(var) = scope.get(name) {
-                return Some(*var);
-            }
-        }
-        None
-    }
-
-    #[cfg(feature = "glsl-validate")]
-    pub fn lookup_local_var_current_scope(&self, name: &str) -> Option<Handle<Expression>> {
-        if let Some(current) = self.scopes.last() {
-            current.get(name).cloned()
-        } else {
-            None
-        }
-    }
-
-    pub fn clear_scopes(&mut self) {
-        self.scopes.clear();
-        self.scopes.push(FastHashMap::default());
-    }
-
-    /// Add variable to current scope
-    pub fn add_local_var(&mut self, name: String, handle: Handle<Expression>) {
-        if let Some(current) = self.scopes.last_mut() {
-            let expr = self
-                .expressions
-                .append(Expression::Load { pointer: handle });
-            (*current).insert(name, expr);
-        }
-    }
-
-    /// Add function argument to current scope
-    pub fn add_function_arg(&mut self, name: String, expr: Handle<Expression>) {
-        if let Some(current) = self.scopes.last_mut() {
-            (*current).insert(name, expr);
-        }
-    }
-
-    /// Add new empty scope
-    pub fn push_scope(&mut self) {
-        self.scopes.push(FastHashMap::default());
-    }
-
-    pub fn remove_current_scope(&mut self) {
-        self.scopes.pop();
-    }
-}
-
-#[derive(Debug)]
-pub struct ExpressionRule {
-    pub expression: Handle<Expression>,
-    pub statements: Vec<Statement>,
-    pub sampler: Option<Handle<Expression>>,
-}
-
-impl ExpressionRule {
-    pub fn from_expression(expression: Handle<Expression>) -> ExpressionRule {
-        ExpressionRule {
-            expression,
-            statements: vec![],
-            sampler: None,
-        }
-    }
+        right: Handle<HirExpr>,
+    },
+    Unary {
+        op: UnaryOperator,
+        expr: Handle<HirExpr>,
+    },
+    Variable(VariableReference),
+    Call(FunctionCall),
+    Conditional {
+        condition: Handle<HirExpr>,
+        accept: Handle<HirExpr>,
+        reject: Handle<HirExpr>,
+    },
+    Assign {
+        tgt: Handle<HirExpr>,
+        value: Handle<HirExpr>,
+    },
+    IncDec {
+        increment: bool,
+        postfix: bool,
+        expr: Handle<HirExpr>,
+    },
 }
 
 #[derive(Debug)]
 pub enum TypeQualifier {
     StorageQualifier(StorageQualifier),
-    ResourceBinding(ResourceBinding),
-    Binding(Binding),
     Interpolation(Interpolation),
+    Set(u32),
+    Binding(u32),
+    Location(u32),
+    WorkGroupSize(usize, u32),
     Sampling(Sampling),
+    Layout(StructLayout),
+    Precision(Precision),
+    EarlyFragmentTests,
+    StorageAccess(StorageAccess),
 }
 
-#[derive(Debug)]
-pub struct VarDeclaration {
-    pub type_qualifiers: Vec<TypeQualifier>,
-    pub ids_initializers: Vec<(Option<String>, Option<ExpressionRule>)>,
-    pub ty: Handle<Type>,
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FunctionCallKind {
     TypeConstructor(Handle<Type>),
     Function(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FunctionCall {
     pub kind: FunctionCallKind,
-    pub args: Vec<ExpressionRule>,
+    pub args: Vec<Handle<HirExpr>>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StorageQualifier {
     StorageClass(StorageClass),
     Input,
@@ -312,9 +164,69 @@ pub enum StorageQualifier {
     Const,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StructLayout {
-    Binding(Binding),
-    Resource(ResourceBinding),
-    PushConstant,
+    Std140,
+    Std430,
+}
+
+// TODO: Encode precision hints in the IR
+/// A precision hint used in glsl declarations
+///
+/// Precision hints can be used to either speed up shader execution or control
+/// the precision of arithmetic operations.
+///
+/// To use a precision hint simply add it before the type in the declaration.
+/// ```glsl
+/// mediump float a;
+/// ```
+///
+/// The default when no precision is declared is `highp` which means that all
+/// operations operate with the type defined width.
+///
+/// For `mediump` and `lowp` operations follow the spir-v
+/// [`RelaxedPrecision`][RelaxedPrecision] decoration semantics.
+///
+/// [RelaxedPrecision]: https://www.khronos.org/registry/SPIR-V/specs/unified1/SPIRV.html#_a_id_relaxedprecisionsection_a_relaxed_precision
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum Precision {
+    /// `lowp` precision
+    Low,
+    /// `mediump` precision
+    Medium,
+    /// `highp` precision
+    High,
+}
+
+#[derive(Debug, Clone, PartialEq, Copy)]
+pub enum ParameterQualifier {
+    In,
+    Out,
+    InOut,
+    Const,
+}
+
+impl ParameterQualifier {
+    /// Returns true if the argument should be passed as a lhs expression
+    pub fn is_lhs(&self) -> bool {
+        match *self {
+            ParameterQualifier::Out | ParameterQualifier::InOut => true,
+            _ => false,
+        }
+    }
+
+    /// Converts from a parameter qualifier into a [`ExprPos`](ExprPos)
+    pub fn as_pos(&self) -> ExprPos {
+        match *self {
+            ParameterQualifier::Out | ParameterQualifier::InOut => ExprPos::Lhs,
+            _ => ExprPos::Rhs,
+        }
+    }
+}
+
+/// The glsl profile used by a shader
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Profile {
+    /// The `core` profile, default when no profile is specified.
+    Core,
 }

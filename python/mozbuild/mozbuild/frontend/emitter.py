@@ -361,17 +361,9 @@ class TreeMetadataEmitter(LoggingMixin):
         "wasm": "SANDBOXED_WASM_LIBRARY_NAME",
     }
 
-    LIBSTDCXX_VAR = {
-        "host": "MOZ_LIBSTDCXX_HOST_VERSION",
-        "target": "MOZ_LIBSTDCXX_TARGET_VERSION",
-        "wasm": "MOZ_LIBSTDCXX_TARGET_VERSION",
-    }
+    ARCH_VAR = {"host": "HOST_OS_ARCH", "target": "OS_TARGET"}
 
-    STDCXXCOMPAT_NAME = {
-        "host": "host_stdc++compat",
-        "target": "stdc++compat",
-        "wasm": "stdc++compat",
-    }
+    STDCXXCOMPAT_NAME = {"host": "host_stdc++compat", "target": "stdc++compat"}
 
     def _link_libraries(self, context, obj, variable, extra_sources):
         """Add linkage declarations to a given object."""
@@ -399,7 +391,10 @@ class TreeMetadataEmitter(LoggingMixin):
             )
             and obj.cxx_link
         ):
-            if context.config.substs.get(self.LIBSTDCXX_VAR[obj.KIND]):
+            if (
+                context.config.substs.get("MOZ_STDCXX_COMPAT")
+                and context.config.substs.get(self.ARCH_VAR.get(obj.KIND)) == "Linux"
+            ):
                 self._link_library(
                     context, obj, variable, self.STDCXXCOMPAT_NAME[obj.KIND]
                 )
@@ -653,6 +648,8 @@ class TreeMetadataEmitter(LoggingMixin):
         linkables = []
         host_linkables = []
         wasm_linkables = []
+
+        unified_build = context.config.substs.get("ENABLE_UNIFIED_BUILD", False)
 
         def add_program(prog, var):
             if var.startswith("HOST_"):
@@ -1134,7 +1131,13 @@ class TreeMetadataEmitter(LoggingMixin):
                         self._asm_compile_dirs.add(context.objdir)
                     arglist = [context, list(files), canonical_suffix]
                     if variable.startswith("UNIFIED_"):
-                        arglist.append(context.get("FILES_PER_UNIFIED_FILE", 16))
+                        if (
+                            unified_build is False
+                            and context.get("REQUIRES_UNIFIED_BUILD", False) is False
+                        ):
+                            arglist.append(1)
+                        else:
+                            arglist.append(context.get("FILES_PER_UNIFIED_FILE", 16))
                     obj = cls(*arglist)
                     srcs = list(obj.files)
                     if isinstance(obj, UnifiedSources) and obj.have_unified_mapping:
@@ -1294,7 +1297,6 @@ class TreeMetadataEmitter(LoggingMixin):
             computed_flags.resolve_flags("RTL", [rtl_flag])
             if not context.config.substs.get("CROSS_COMPILE"):
                 computed_host_flags.resolve_flags("RTL", [rtl_flag])
-            computed_wasm_flags.resolve_flags("RTL", [rtl_flag])
 
         generated_files = set()
         localized_generated_files = set()

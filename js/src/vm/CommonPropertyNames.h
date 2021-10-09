@@ -27,6 +27,7 @@
   MACRO_(anonymous, anonymous, "anonymous")                                    \
   MACRO_(Any, Any, "Any")                                                      \
   MACRO_(apply, apply, "apply")                                                \
+  MACRO_(approximatelySign, approximatelySign, "approximatelySign")            \
   MACRO_(arguments, arguments, "arguments")                                    \
   MACRO_(ArrayBufferSpecies, ArrayBufferSpecies, "$ArrayBufferSpecies")        \
   MACRO_(ArrayIterator, ArrayIterator, "Array Iterator")                       \
@@ -328,7 +329,6 @@
   MACRO_(NaN, NaN, "NaN")                                                      \
   MACRO_(NegativeInfinity, NegativeInfinity, "-Infinity")                      \
   MACRO_(new, new_, "new")                                                     \
-  MACRO_(NewPrivateName, NewPrivateName, "NewPrivateName")                     \
   MACRO_(next, next, "next")                                                   \
   MACRO_(NFC, NFC, "NFC")                                                      \
   MACRO_(NFD, NFD, "NFD")                                                      \
@@ -405,9 +405,13 @@
          "RequireObjectCoercible")                                             \
   MACRO_(resolve, resolve, "resolve")                                          \
   MACRO_(result, result, "result")                                             \
+  MACRO_(results, results, "results")                                          \
   MACRO_(resumeGenerator, resumeGenerator, "resumeGenerator")                  \
   MACRO_(return, return_, "return")                                            \
   MACRO_(revoke, revoke, "revoke")                                             \
+  MACRO_(roundingIncrement, roundingIncrement, "roundingIncrement")            \
+  MACRO_(roundingMode, roundingMode, "roundingMode")                           \
+  MACRO_(roundingPriority, roundingPriority, "roundingPriority")               \
   MACRO_(rtl, rtl, "rtl")                                                      \
   MACRO_(script, script, "script")                                             \
   MACRO_(scripts, scripts, "scripts")                                          \
@@ -458,6 +462,7 @@
   MACRO_(timestamp, timestamp, "timestamp")                                    \
   MACRO_(timeZone, timeZone, "timeZone")                                       \
   MACRO_(timeZoneName, timeZoneName, "timeZoneName")                           \
+  MACRO_(trailingZeroDisplay, trailingZeroDisplay, "trailingZeroDisplay")      \
   MACRO_(trimEnd, trimEnd, "trimEnd")                                          \
   MACRO_(trimLeft, trimLeft, "trimLeft")                                       \
   MACRO_(trimRight, trimRight, "trimRight")                                    \
@@ -510,6 +515,7 @@
   MACRO_(useAsm, useAsm, "use asm")                                            \
   MACRO_(useGrouping, useGrouping, "useGrouping")                              \
   MACRO_(useStrict, useStrict, "use strict")                                   \
+  MACRO_(UTC, UTC, "UTC")                                                      \
   MACRO_(void, void_, "void")                                                  \
   MACRO_(value, value, "value")                                                \
   MACRO_(valueOf, valueOf, "valueOf")                                          \

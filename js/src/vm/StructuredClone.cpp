@@ -39,7 +39,6 @@
 #include <memory>
 #include <utility>
 
-#include "jsapi.h"
 #include "jsdate.h"
 
 #include "builtin/DataViewObject.h"
@@ -2492,8 +2491,7 @@ bool JSStructuredCloneReader::readSharedWasmMemory(uint32_t nbytes,
       cx, &payload.toObject().as<SharedArrayBufferObject>());
 
   // Construct the memory.
-  RootedObject proto(
-      cx, &cx->global()->getPrototype(JSProto_WasmMemory).toObject());
+  RootedObject proto(cx, &cx->global()->getPrototype(JSProto_WasmMemory));
   RootedObject memory(cx, WasmMemoryObject::create(cx, sab, proto));
   if (!memory) {
     return false;
@@ -2699,7 +2697,7 @@ bool JSStructuredCloneReader::startRead(MutableHandleValue vp,
           (tag == SCTAG_ARRAY_OBJECT)
               ? (JSObject*)NewDenseUnallocatedArray(
                     context(), NativeEndian::swapFromLittleEndian(data))
-              : (JSObject*)NewBuiltinClassInstance<PlainObject>(context());
+              : (JSObject*)NewPlainObject(context());
       if (!obj || !objs.append(ObjectValue(*obj))) {
         return false;
       }

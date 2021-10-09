@@ -114,16 +114,13 @@ void TestProfilerUtils() {
         std::is_same_v<
             decltype(mozilla::baseprofiler::profiler_current_process_id()),
             BaseProfilerProcessId>);
-#ifdef MOZ_GECKO_PROFILER
     MOZ_RELEASE_ASSERT(
         mozilla::baseprofiler::profiler_current_process_id().IsSpecified());
-#else
-    MOZ_RELEASE_ASSERT(
-        !mozilla::baseprofiler::profiler_current_process_id().IsSpecified());
-#endif
   }
 
   {
+    mozilla::baseprofiler::profiler_init_main_thread_id();
+
     using mozilla::baseprofiler::BaseProfilerThreadId;
     using Number = BaseProfilerThreadId::NumberType;
     static constexpr Number scMaxNumber = std::numeric_limits<Number>::max();
@@ -190,20 +187,12 @@ void TestProfilerUtils() {
     static_assert(std::is_same_v<
                   decltype(mozilla::baseprofiler::profiler_current_thread_id()),
                   BaseProfilerThreadId>);
-#ifdef MOZ_GECKO_PROFILER
     BaseProfilerThreadId mainTestThreadId =
         mozilla::baseprofiler::profiler_current_thread_id();
     MOZ_RELEASE_ASSERT(mainTestThreadId.IsSpecified());
 
     BaseProfilerThreadId mainThreadId =
         mozilla::baseprofiler::profiler_main_thread_id();
-    if (!mainThreadId.IsSpecified()) {
-      // Special case: This may happen if the profiler has not yet been
-      // initialized. We only need to set scProfilerMainThreadId.
-      mozilla::baseprofiler::detail::scProfilerMainThreadId = mainTestThreadId;
-      // After which `profiler_main_thread_id` should work.
-      mainThreadId = mozilla::baseprofiler::profiler_main_thread_id();
-    }
     MOZ_RELEASE_ASSERT(mainThreadId.IsSpecified());
 
     MOZ_RELEASE_ASSERT(mainThreadId == mainTestThreadId,
@@ -218,13 +207,6 @@ void TestProfilerUtils() {
       MOZ_RELEASE_ASSERT(!mozilla::baseprofiler::profiler_is_main_thread());
     });
     testThread.join();
-#else
-    MOZ_RELEASE_ASSERT(
-        !mozilla::baseprofiler::profiler_current_thread_id().IsSpecified());
-    MOZ_RELEASE_ASSERT(
-        !mozilla::baseprofiler::profiler_main_thread_id().IsSpecified());
-    MOZ_RELEASE_ASSERT(!mozilla::baseprofiler::profiler_is_main_thread());
-#endif
   }
 
   // No conversions between processes and threads.
@@ -510,6 +492,90 @@ void TestLEB128() {
   }
 
   printf("TestLEB128 done\n");
+}
+
+struct StringWriteFunc : public JSONWriteFunc {
+  std::string mString;
+
+  void Write(const mozilla::Span<const char>& aStr) override {
+    mString.append(aStr.data(), aStr.size());
+  }
+};
+
+void CheckJSON(mozilla::baseprofiler::SpliceableJSONWriter& aWriter,
+               const char* aExpected, int aLine) {
+  const std::string& actual =
+      static_cast<StringWriteFunc*>(aWriter.WriteFunc())->mString;
+  if (strcmp(aExpected, actual.c_str()) != 0) {
+    fprintf(stderr,
+            "---- EXPECTED ---- (line %d)\n<<<%s>>>\n"
+            "---- ACTUAL ----\n<<<%s>>>\n",
+            aLine, aExpected, actual.c_str());
+    MOZ_RELEASE_ASSERT(false, "expected and actual output don't match");
+  }
+}
+
+void TestJSONTimeOutput() {
+  printf("TestJSONTimeOutput...\n");
+
+#  define TEST(in, out)                                        \
+    do {                                                       \
+      mozilla::baseprofiler::SpliceableJSONWriter writer(      \
+          mozilla::MakeUnique<StringWriteFunc>());             \
+      writer.Start(mozilla::JSONWriter::SingleLineStyle);      \
+      writer.TimeDoubleMsProperty("time_ms", (in));            \
+      writer.End();                                            \
+      CheckJSON(writer, "{\"time_ms\": " out "}\n", __LINE__); \
+    } while (false);
+
+  TEST(0, "0");
+
+  TEST(0.000'000'1, "0");
+  TEST(0.000'000'4, "0");
+  TEST(0.000'000'499, "0");
+  TEST(0.000'000'5, "0.000001");
+  TEST(0.000'001, "0.000001");
+  TEST(0.000'01, "0.00001");
+  TEST(0.000'1, "0.0001");
+  TEST(0.001, "0.001");
+  TEST(0.01, "0.01");
+  TEST(0.1, "0.1");
+  TEST(1, "1");
+  TEST(2, "2");
+  TEST(10, "10");
+  TEST(100, "100");
+  TEST(1'000, "1000");
+  TEST(10'000, "10000");
+  TEST(100'000, "100000");
+  TEST(1'000'000, "1000000");
+  // 2^53-2 ns in ms. 2^53-1 is the highest integer value representable in
+  // double, -1 again because we're adding 0.5 before truncating.
+  // That's 104 days, after which the nanosecond precision would decrease.
+  TEST(9'007'199'254.740'990, "9007199254.74099");
+
+  TEST(-0.000'000'1, "0");
+  TEST(-0.000'000'4, "0");
+  TEST(-0.000'000'499, "0");
+  TEST(-0.000'000'5, "-0.000001");
+  TEST(-0.000'001, "-0.000001");
+  TEST(-0.000'01, "-0.00001");
+  TEST(-0.000'1, "-0.0001");
+  TEST(-0.001, "-0.001");
+  TEST(-0.01, "-0.01");
+  TEST(-0.1, "-0.1");
+  TEST(-1, "-1");
+  TEST(-2, "-2");
+  TEST(-10, "-10");
+  TEST(-100, "-100");
+  TEST(-1'000, "-1000");
+  TEST(-10'000, "-10000");
+  TEST(-100'000, "-100000");
+  TEST(-1'000'000, "-1000000");
+  TEST(-9'007'199'254.740'990, "-9007199254.74099");
+
+#  undef TEST
+
+  printf("TestJSONTimeOutput done\n");
 }
 
 template <uint8_t byte, uint8_t... tail>
@@ -1794,6 +1860,12 @@ static void TestChunkedBuffer() {
   MOZ_RELEASE_ASSERT(result == 6);
   MOZ_RELEASE_ASSERT(read == 1);
 
+  MOZ_RELEASE_ASSERT(!cb.IsIndexInCurrentChunk(ProfileBufferIndex{}));
+  MOZ_RELEASE_ASSERT(
+      cb.IsIndexInCurrentChunk(blockIndex.ConvertToProfileBufferIndex()));
+  MOZ_RELEASE_ASSERT(cb.IsIndexInCurrentChunk(cb.GetState().mRangeEnd - 1));
+  MOZ_RELEASE_ASSERT(!cb.IsIndexInCurrentChunk(cb.GetState().mRangeEnd));
+
   // No changes after reads.
   VERIFY_PCB_START_END_PUSHED_CLEARED_FAILED(
       cb, 1, 1 + ULEB128Size(sizeof(test)) + sizeof(test), 1, 0, 0);
@@ -1870,6 +1942,11 @@ static void TestChunkedBuffer() {
   uint64_t clearedAfterPuts = stateAfterPuts.mClearedBlockCount;
   MOZ_RELEASE_ASSERT(clearedAfterPuts > 0);
   MOZ_RELEASE_ASSERT(stateAfterPuts.mFailedPutBytes == 0);
+  MOZ_RELEASE_ASSERT(!cb.IsIndexInCurrentChunk(ProfileBufferIndex{}));
+  MOZ_RELEASE_ASSERT(
+      !cb.IsIndexInCurrentChunk(blockIndex.ConvertToProfileBufferIndex()));
+  MOZ_RELEASE_ASSERT(
+      !cb.IsIndexInCurrentChunk(firstBlockIndex.ConvertToProfileBufferIndex()));
 
   // Read extant numbers, which should at least follow each other.
   read = 0;
@@ -1965,6 +2042,11 @@ static void TestChunkedBuffer() {
   MOZ_RELEASE_ASSERT(stateAfterClear.mPushedBlockCount == 0);
   MOZ_RELEASE_ASSERT(stateAfterClear.mClearedBlockCount == 0);
   MOZ_RELEASE_ASSERT(stateAfterClear.mFailedPutBytes == 0);
+  MOZ_RELEASE_ASSERT(!cb.IsIndexInCurrentChunk(ProfileBufferIndex{}));
+  MOZ_RELEASE_ASSERT(
+      !cb.IsIndexInCurrentChunk(blockIndex.ConvertToProfileBufferIndex()));
+  MOZ_RELEASE_ASSERT(!cb.IsIndexInCurrentChunk(stateAfterClear.mRangeEnd - 1));
+  MOZ_RELEASE_ASSERT(!cb.IsIndexInCurrentChunk(stateAfterClear.mRangeEnd));
 
   // Start writer threads.
   constexpr int ThreadCount = 32;
@@ -3738,6 +3820,7 @@ void TestProfilerDependencies() {
   TestPowerOfTwoMask();
   TestPowerOfTwo();
   TestLEB128();
+  TestJSONTimeOutput();
   TestChunk();
   TestChunkManagerSingle();
   TestChunkManagerWithLocalLimit();
@@ -3795,9 +3878,9 @@ MOZ_NEVER_INLINE unsigned long long Fibonacci(unsigned long long n) {
 }
 
 void TestProfiler() {
-  printf("TestProfiler starting -- pid: %d, tid: %d\n",
-         int(baseprofiler::profiler_current_process_id().ToNumber()),
-         int(baseprofiler::profiler_current_thread_id().ToNumber()));
+  printf("TestProfiler starting -- pid: %" PRIu64 ", tid: %" PRIu64 "\n",
+         uint64_t(baseprofiler::profiler_current_process_id().ToNumber()),
+         uint64_t(baseprofiler::profiler_current_thread_id().ToNumber()));
   // ::SleepMilli(10000);
 
   TestProfilerDependencies();
@@ -4457,10 +4540,10 @@ void TestUserMarker() {
     }
     static mozilla::MarkerSchema MarkerTypeDisplay() {
       using MS = mozilla::MarkerSchema;
-      MS schema{MS::Location::markerChart, MS::Location::markerTable};
+      MS schema{MS::Location::MarkerChart, MS::Location::MarkerTable};
       schema.SetTooltipLabel("tooltip for test-minimal");
-      schema.AddKeyLabelFormatSearchable("text", "Text", MS::Format::string,
-                                         MS::Searchable::searchable);
+      schema.AddKeyLabelFormatSearchable("text", "Text", MS::Format::String,
+                                         MS::Searchable::Searchable);
       return schema;
     }
   };
@@ -4559,9 +4642,10 @@ void TestPredefinedMarkers() {
 }
 
 void TestProfilerMarkers() {
-  printf("TestProfilerMarkers -- pid: %d, tid: %d\n",
-         int(mozilla::baseprofiler::profiler_current_process_id().ToNumber()),
-         int(mozilla::baseprofiler::profiler_current_thread_id().ToNumber()));
+  printf(
+      "TestProfilerMarkers -- pid: %" PRIu64 ", tid: %" PRIu64 "\n",
+      uint64_t(mozilla::baseprofiler::profiler_current_process_id().ToNumber()),
+      uint64_t(mozilla::baseprofiler::profiler_current_thread_id().ToNumber()));
   // ::SleepMilli(10000);
 
   TestUniqueJSONStrings();
@@ -4639,9 +4723,9 @@ int main()
 #endif  // defined(XP_WIN)
 {
 #ifdef MOZ_GECKO_PROFILER
-  printf("BaseTestProfiler -- pid: %d, tid: %d\n",
-         int(baseprofiler::profiler_current_process_id().ToNumber()),
-         int(baseprofiler::profiler_current_thread_id().ToNumber()));
+  printf("BaseTestProfiler -- pid: %" PRIu64 ", tid: %" PRIu64 "\n",
+         uint64_t(baseprofiler::profiler_current_process_id().ToNumber()),
+         uint64_t(baseprofiler::profiler_current_thread_id().ToNumber()));
   // ::SleepMilli(10000);
 #endif  // MOZ_GECKO_PROFILER
 

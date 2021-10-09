@@ -827,15 +827,15 @@ MsaaAccessible::QueryInterface(REFIID iid, void** ppv) {
     return E_NOINTERFACE;
   }
   AccessibleWrap* localAcc = LocalAcc();
-  if (IID_IEnumVARIANT == iid && localAcc) {
+  if (IID_IEnumVARIANT == iid) {
     if (
         // Don't support this interface for leaf elements.
-        !localAcc->HasChildren() || nsAccUtils::MustPrune(localAcc) ||
+        !mAcc->HasChildren() || nsAccUtils::MustPrune(mAcc) ||
         // We also don't support this for local OuterDocAccessibles with remote
         // document children when the cache is disabled. Handling this is tricky
         // and there's no benefit to IEnumVARIANT when there's only one child
         // anyway.
-        (localAcc->IsOuterDoc() &&
+        (localAcc && localAcc->IsOuterDoc() &&
          !StaticPrefs::accessibility_cache_enabled_AtStartup() &&
          localAcc->FirstChild()->IsRemote())) {
       return E_NOINTERFACE;
@@ -966,12 +966,9 @@ MsaaAccessible::get_accName(
   if (accessible) {
     return accessible->get_accName(kVarChildIdSelf, pszName);
   }
-  if (mAcc->IsRemote()) {
-    return E_NOTIMPL;  // XXX Not supported for RemoteAccessible yet.
-  }
 
   nsAutoString name;
-  LocalAcc()->Name(name);
+  Acc()->Name(name);
 
   // The name was not provided, e.g. no alt attribute for an image. A screen
   // reader may choose to invent its own accessible name, e.g. from an image src
@@ -1033,12 +1030,9 @@ MsaaAccessible::get_accDescription(VARIANT varChild,
   if (accessible) {
     return accessible->get_accDescription(kVarChildIdSelf, pszDescription);
   }
-  if (mAcc->IsRemote()) {
-    return E_NOTIMPL;  // XXX Not supported for RemoteAccessible yet.
-  }
 
   nsAutoString description;
-  LocalAcc()->Description(description);
+  Acc()->Description(description);
 
   *pszDescription =
       ::SysAllocStringLen(description.get(), description.Length());

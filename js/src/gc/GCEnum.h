@@ -107,7 +107,6 @@ enum class GCAbortReason {
   _(IonScript)                             \
   _(ArgumentsData)                         \
   _(RareArgumentsData)                     \
-  _(RegExpStatics)                         \
   _(RegExpSharedBytecode)                  \
   _(RegExpSharedNamedCaptureData)          \
   _(TypedArrayElements)                    \
@@ -143,7 +142,8 @@ enum class GCAbortReason {
   _(FinalizationRecordVector)              \
   _(ZoneAllocPolicy)                       \
   _(SharedArrayRawBuffer)                  \
-  _(XDRBufferElements)
+  _(XDRBufferElements)                     \
+  _(GlobalObjectData)
 
 #define JS_FOR_EACH_MEMORY_USE(_)  \
   JS_FOR_EACH_PUBLIC_MEMORY_USE(_) \

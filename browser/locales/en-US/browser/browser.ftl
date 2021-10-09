@@ -326,7 +326,7 @@ identity-enable-mixed-content-blocking =
     .label = Enable protection
     .accesskey = E
 identity-more-info-link-text =
-    .label = More Information
+    .label = More information
 
 ## Window controls
 
@@ -538,6 +538,20 @@ urlbar-result-action-search-bookmarks = Search Bookmarks
 urlbar-result-action-search-history = Search History
 urlbar-result-action-search-tabs = Search Tabs
 
+## Labels shown above groups of urlbar results
+
+# A label shown above the "Firefox Suggest" (bookmarks/history) group in the
+# urlbar results.
+urlbar-group-firefox-suggest =
+  .label = { -firefox-suggest-brand-name }
+
+# A label shown above the search suggestions group in the urlbar results. It
+# should use title case.
+# Variables
+#  $engine (String): the name of the search engine providing the suggestions
+urlbar-group-search-suggestions =
+  .label = { $engine } Suggestions
+
 ## Full Screen and Pointer Lock UI
 
 # Please ensure that the domain stays in the `<span data-l10n-name="domain">` markup.
@@ -667,11 +681,9 @@ toolbar-settings-button =
      *[other] Open settings
   }
 
-## More items
-
-more-menu-go-offline =
-  .label = Work Offline
-  .accesskey = k
+toolbar-overflow-customize-button =
+  .label = Customize toolbar…
+  .accesskey = C
 
 ## EME notification panel
 
@@ -704,3 +716,30 @@ remote-tabs-sync-now = Sync Now
 # "More" item in macOS share menu
 menu-share-more =
     .label = More…
+ui-tour-info-panel-close =
+    .tooltiptext = Close
+
+## Variables:
+##  $uriHost (String): URI host for which the popup was allowed or blocked.
+
+popups-infobar-allow =
+    .label = Allow pop-ups for { $uriHost }
+    .accesskey = p
+
+popups-infobar-block =
+    .label = Block pop-ups for { $uriHost }
+    .accesskey = p
+
+##
+
+popups-infobar-dont-show-message =
+    .label = Don’t show this message when pop-ups are blocked
+    .accesskey = D
+
+edit-popup-settings =
+    .label = Manage pop-up settings…
+    .accesskey = M
+
+picture-in-picture-hide-toggle =
+    .label = Hide Picture-in-Picture Toggle
+    .accesskey = H

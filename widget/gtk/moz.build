@@ -86,6 +86,7 @@ if CONFIG["MOZ_WAYLAND"]:
         "DMABufSurface.cpp",
         "MozContainerWayland.cpp",
         "nsClipboardWayland.cpp",
+        "nsClipboardWaylandAsync.cpp",
         "nsWaylandDisplay.cpp",
         "WaylandBuffer.cpp",
         "WindowSurfaceWayland.cpp",
@@ -110,7 +111,6 @@ if CONFIG["MOZ_X11"]:
         "WindowSurfaceX11.cpp",
         "WindowSurfaceX11Image.cpp",
         "WindowSurfaceX11SHM.cpp",
-        "WindowSurfaceXRender.cpp",
     ]
     EXPORTS.mozilla.widget += [
         "CompositorWidgetChild.h",
@@ -167,3 +167,5 @@ if CONFIG["MOZ_ENABLE_DBUS"]:
 
 CXXFLAGS += ["-Wno-error=shadow"]
 CXXFLAGS += ["-Werror=switch"]
+
+REQUIRES_UNIFIED_BUILD = True

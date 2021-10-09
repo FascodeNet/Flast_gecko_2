@@ -16,6 +16,8 @@ android {
         applicationId "org.mozilla.geckoview_example"
         versionCode 1
         versionName "1.0"
+
+        multiDexEnabled true
     }
 
     compileOptions {
@@ -24,7 +26,7 @@ android {
     }
 
     dexOptions {
-        javaMaxHeapSize "6g"
+        javaMaxHeapSize "32g"
     }
 
     buildTypes {
@@ -56,4 +58,6 @@ dependencies {
     implementation project(path: ':geckoview')
     implementation 'androidx.constraintlayout:constraintlayout:1.1.3'
     implementation 'com.google.android.material:material:1.0.0'
+
+    implementation 'androidx.multidex:multidex:2.0.0'
 }

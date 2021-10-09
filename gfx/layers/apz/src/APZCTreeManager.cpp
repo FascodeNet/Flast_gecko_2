@@ -87,7 +87,6 @@ struct APZCTreeManager::TreeBuildingState {
     CompositorBridgeParent::CallWithIndirectShadowTree(
         aRootLayersId, [this](LayerTreeState& aState) -> void {
           mCompositorController = aState.GetCompositorController();
-          mInProcessSharingController = aState.InProcessSharingController();
         });
   }
 
@@ -96,7 +95,6 @@ struct APZCTreeManager::TreeBuildingState {
 
   // State that doesn't change as we recurse in the tree building
   RefPtr<CompositorController> mCompositorController;
-  RefPtr<MetricsSharingController> mInProcessSharingController;
   const bool mIsFirstPaint;
   const LayersId mOriginatingLayersId;
   const APZPaintLogHelper mPaintLogger;
@@ -1164,11 +1162,9 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
   // TreeBuildingState, and update them as we change layers id during the
   // traversal
   RefPtr<GeckoContentController> geckoContentController;
-  RefPtr<MetricsSharingController> crossProcessSharingController;
   CompositorBridgeParent::CallWithIndirectShadowTree(
       aLayersId, [&](LayerTreeState& lts) -> void {
         geckoContentController = lts.mController;
-        crossProcessSharingController = lts.CrossProcessSharingController();
       });
 
   if (!geckoContentController) {
@@ -1278,12 +1274,6 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
     if (newApzc) {
       apzc = NewAPZCInstance(aLayersId, geckoContentController);
       apzc->SetCompositorController(aState.mCompositorController.get());
-      if (crossProcessSharingController) {
-        apzc->SetMetricsSharingController(crossProcessSharingController);
-      } else {
-        apzc->SetMetricsSharingController(
-            aState.mInProcessSharingController.get());
-      }
       MOZ_ASSERT(node == nullptr);
       node = new HitTestingTreeNode(apzc, true, aLayersId);
     } else {
@@ -1414,9 +1404,9 @@ HitTestingTreeNode* APZCTreeManager::PrepareNodeForLayer(
       typedef TreeBuildingState::DeferredTransformMap::value_type PairType;
       if (!aAncestorTransform.ContainsPerspectiveTransform() &&
           !apzc->AncestorTransformContainsPerspective()) {
-        NS_ASSERTION(false,
-                     "Two layers that scroll together have different ancestor "
-                     "transforms");
+        MOZ_ASSERT(false,
+                   "Two layers that scroll together have different ancestor "
+                   "transforms");
       } else if (!aAncestorTransform.ContainsPerspectiveTransform()) {
         aState.mPerspectiveTransformsDeferredToChildren.insert(
             PairType{apzc, apzc->GetAncestorTransformPerspective()});

@@ -17,15 +17,17 @@
 #include <type_traits>
 
 #include "gc/Rooting.h"
+#include "js/ErrorReport.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/RootingAPI.h"
 #include "js/TypeDecls.h"
 #include "js/UniquePtr.h"
+#include "js/ValueArray.h"
 #include "vm/ArgumentsObject.h"
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
 #include "vm/SavedFrame.h"
-#include "wasm/WasmFrame.h"  // js::wasm::DebugFrame
+#include "wasm/WasmDebugFrame.h"  // js::wasm::DebugFrame
 
 namespace js {
 

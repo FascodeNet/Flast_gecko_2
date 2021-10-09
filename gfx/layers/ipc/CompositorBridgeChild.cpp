@@ -7,9 +7,8 @@
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/CompositorBridgeParent.h"
 #include "mozilla/layers/CompositorThread.h"
-#include <stddef.h>              // for size_t
-#include "ClientLayerManager.h"  // for ClientLayerManager
-#include "base/task.h"           // for NewRunnableMethod, etc
+#include <stddef.h>     // for size_t
+#include "base/task.h"  // for NewRunnableMethod, etc
 #include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/layers/CompositorManagerChild.h"
 #include "mozilla/layers/ImageBridgeChild.h"
@@ -17,9 +16,7 @@
 #include "mozilla/layers/IAPZCTreeManager.h"
 #include "mozilla/layers/APZCTreeManagerChild.h"
 #include "mozilla/layers/CanvasChild.h"
-#include "mozilla/layers/LayerTransactionChild.h"
-#include "mozilla/layers/PaintThread.h"
-#include "mozilla/layers/PLayerTransactionChild.h"
+#include "mozilla/layers/WebRenderLayerManager.h"
 #include "mozilla/layers/PTextureChild.h"
 #include "mozilla/layers/TextureClient.h"      // for TextureClient
 #include "mozilla/layers/TextureClientPool.h"  // for TextureClientPool
@@ -36,7 +33,6 @@
 #include "nsDebug.h"          // for NS_WARNING
 #include "nsISupportsImpl.h"  // for MOZ_COUNT_CTOR, etc
 #include "nsTArray.h"         // for nsTArray, nsTArray_Impl
-#include "FrameLayerBuilder.h"
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/ContentChild.h"
@@ -59,7 +55,6 @@
 
 using mozilla::Unused;
 using mozilla::gfx::GPUProcessManager;
-using mozilla::layers::LayerTransactionChild;
 
 namespace mozilla {
 namespace layers {
@@ -165,9 +160,6 @@ void CompositorBridgeChild::Destroy() {
     mLayerManager = nullptr;
   }
 
-  // Flush async paints before we destroy texture data.
-  FlushAsyncPaints();
-
   if (!mCanSend) {
     // We may have already called destroy but still have lingering references
     // or CompositorBridgeChild::ActorDestroy was called. Ensure that we do our
@@ -176,14 +168,6 @@ void CompositorBridgeChild::Destroy() {
         NewRunnableMethod("CompositorBridgeChild::PrepareFinalDestroy", selfRef,
                           &CompositorBridgeChild::PrepareFinalDestroy));
     return;
-  }
-
-  AutoTArray<PLayerTransactionChild*, 16> transactions;
-  ManagedPLayerTransactionChild(transactions);
-  for (int i = transactions.Length() - 1; i >= 0; --i) {
-    RefPtr<LayerTransactionChild> layers =
-        static_cast<LayerTransactionChild*>(transactions[i]);
-    layers->Destroy();
   }
 
   AutoTArray<PWebRenderBridgeChild*, 16> wrBridges;
@@ -246,16 +230,6 @@ void CompositorBridgeChild::ShutDown() {
   }
 }
 
-bool CompositorBridgeChild::LookupCompositorFrameMetrics(
-    const ScrollableLayerGuid::ViewID aId, FrameMetrics& aFrame) {
-  SharedFrameMetricsData* data = mFrameMetricsTable.Get(aId);
-  if (data) {
-    data->CopyFrameMetrics(&aFrame);
-    return true;
-  }
-  return false;
-}
-
 void CompositorBridgeChild::InitForContent(uint32_t aNamespace) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aNamespace);
@@ -275,7 +249,7 @@ void CompositorBridgeChild::InitForContent(uint32_t aNamespace) {
 }
 
 void CompositorBridgeChild::InitForWidget(uint64_t aProcessToken,
-                                          LayerManager* aLayerManager,
+                                          WebRenderLayerManager* aLayerManager,
                                           uint32_t aNamespace) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aProcessToken);
@@ -319,27 +293,10 @@ bool CompositorBridgeChild::CompositorIsInGPUProcess() {
   return bridge->OtherPid() != dom::ContentChild::GetSingleton()->OtherPid();
 }
 
-PLayerTransactionChild* CompositorBridgeChild::AllocPLayerTransactionChild(
-    const nsTArray<LayersBackend>& aBackendHints, const LayersId& aId) {
-  LayerTransactionChild* c = new LayerTransactionChild(aId);
-  c->AddIPDLReference();
-
-  return c;
-}
-
-bool CompositorBridgeChild::DeallocPLayerTransactionChild(
-    PLayerTransactionChild* actor) {
-  LayersId childId = static_cast<LayerTransactionChild*>(actor)->GetId();
-  ClearSharedFrameMetricsData(childId);
-  static_cast<LayerTransactionChild*>(actor)->ReleaseIPDLReference();
-  return true;
-}
-
 mozilla::ipc::IPCResult CompositorBridgeChild::RecvInvalidateLayers(
     const LayersId& aLayersId) {
   if (mLayerManager) {
     MOZ_ASSERT(!aLayersId.IsValid());
-    FrameLayerBuilder::InvalidateAllLayers(mLayerManager);
   } else if (aLayersId.IsValid()) {
     if (dom::BrowserChild* child = dom::BrowserChild::GetFrom(aLayersId)) {
       child->InvalidateLayers();
@@ -361,7 +318,7 @@ mozilla::ipc::IPCResult CompositorBridgeChild::RecvDidComposite(
                      LayersBackend::LAYERS_CLIENT ||
                  mLayerManager->GetBackendType() == LayersBackend::LAYERS_WR);
       // Hold a reference to keep LayerManager alive. See Bug 1242668.
-      RefPtr<LayerManager> m = mLayerManager;
+      RefPtr<WebRenderLayerManager> m = mLayerManager;
       m->DidComposite(id, aCompositeStart, aCompositeEnd);
     } else if (aId.IsValid()) {
       RefPtr<dom::BrowserChild> child = dom::BrowserChild::GetFrom(aId);
@@ -410,79 +367,6 @@ void CompositorBridgeChild::ActorDestroy(ActorDestroyReason aWhy) {
   if (mProcessToken && XRE_IsParentProcess()) {
     GPUProcessManager::Get()->NotifyRemoteActorDestroyed(mProcessToken);
   }
-}
-
-mozilla::ipc::IPCResult CompositorBridgeChild::RecvSharedCompositorFrameMetrics(
-    const mozilla::ipc::SharedMemoryBasic::Handle& metrics,
-    const CrossProcessMutexHandle& handle, const LayersId& aLayersId,
-    const uint32_t& aAPZCId) {
-  auto data =
-      MakeUnique<SharedFrameMetricsData>(metrics, handle, aLayersId, aAPZCId);
-  const auto& viewID = data->GetViewID();
-  mFrameMetricsTable.InsertOrUpdate(viewID, std::move(data));
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult
-CompositorBridgeChild::RecvReleaseSharedCompositorFrameMetrics(
-    const ViewID& aId, const uint32_t& aAPZCId) {
-  if (auto entry = mFrameMetricsTable.Lookup(aId)) {
-    // The SharedFrameMetricsData may have been removed previously if
-    // a SharedFrameMetricsData with the same ViewID but later APZCId had
-    // been store and over wrote it.
-    if (entry.Data()->GetAPZCId() == aAPZCId) {
-      entry.Remove();
-    }
-  }
-  return IPC_OK();
-}
-
-CompositorBridgeChild::SharedFrameMetricsData::SharedFrameMetricsData(
-    const ipc::SharedMemoryBasic::Handle& metrics,
-    const CrossProcessMutexHandle& handle, const LayersId& aLayersId,
-    const uint32_t& aAPZCId)
-    : mMutex(nullptr), mLayersId(aLayersId), mAPZCId(aAPZCId) {
-  mBuffer = new ipc::SharedMemoryBasic;
-  mBuffer->SetHandle(metrics, ipc::SharedMemory::RightsReadOnly);
-  mBuffer->Map(sizeof(FrameMetrics));
-  mMutex = new CrossProcessMutex(handle);
-  MOZ_COUNT_CTOR(SharedFrameMetricsData);
-}
-
-CompositorBridgeChild::SharedFrameMetricsData::~SharedFrameMetricsData() {
-  // When the hash table deletes the class, delete
-  // the shared memory and mutex.
-  delete mMutex;
-  mBuffer = nullptr;
-  MOZ_COUNT_DTOR(SharedFrameMetricsData);
-}
-
-void CompositorBridgeChild::SharedFrameMetricsData::CopyFrameMetrics(
-    FrameMetrics* aFrame) {
-  const FrameMetrics* frame =
-      static_cast<const FrameMetrics*>(mBuffer->memory());
-  MOZ_ASSERT(frame);
-  mMutex->Lock();
-  *aFrame = *frame;
-  mMutex->Unlock();
-}
-
-ScrollableLayerGuid::ViewID
-CompositorBridgeChild::SharedFrameMetricsData::GetViewID() {
-  const FrameMetrics* frame =
-      static_cast<const FrameMetrics*>(mBuffer->memory());
-  MOZ_ASSERT(frame);
-  // Not locking to read of mScrollId since it should not change after being
-  // initially set.
-  return frame->GetScrollId();
-}
-
-LayersId CompositorBridgeChild::SharedFrameMetricsData::GetLayersId() const {
-  return mLayersId;
-}
-
-uint32_t CompositorBridgeChild::SharedFrameMetricsData::GetAPZCId() {
-  return mAPZCId;
 }
 
 bool CompositorBridgeChild::SendWillClose() {
@@ -874,7 +758,6 @@ PWebRenderBridgeChild* CompositorBridgeChild::AllocPWebRenderBridgeChild(
 bool CompositorBridgeChild::DeallocPWebRenderBridgeChild(
     PWebRenderBridgeChild* aActor) {
   WebRenderBridgeChild* child = static_cast<WebRenderBridgeChild*>(aActor);
-  ClearSharedFrameMetricsData(wr::AsLayersId(child->GetPipeline()));
   child->ReleaseIPDLReference();
   return true;
 }
@@ -889,15 +772,6 @@ bool CompositorBridgeChild::DeallocPWebGPUChild(webgpu::PWebGPUChild* aActor) {
   webgpu::WebGPUChild* child = static_cast<webgpu::WebGPUChild*>(aActor);
   child->ReleaseIPDLReference();
   return true;
-}
-
-void CompositorBridgeChild::ClearSharedFrameMetricsData(LayersId aLayersId) {
-  for (auto iter = mFrameMetricsTable.Iter(); !iter.Done(); iter.Next()) {
-    auto data = iter.UserData();
-    if (data->GetLayersId() == aLayersId) {
-      iter.Remove();
-    }
-  }
 }
 
 uint64_t CompositorBridgeChild::GetNextResourceId() {
@@ -918,83 +792,6 @@ wr::PipelineId CompositorBridgeChild::GetNextPipelineId() {
   return wr::AsPipelineId(GetNextResourceId());
 }
 
-void CompositorBridgeChild::FlushAsyncPaints() {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  Maybe<TimeStamp> start;
-  if (XRE_IsContentProcess() && gfx::gfxVars::UseOMTP()) {
-    start = Some(TimeStamp::Now());
-  }
-
-  {
-    MonitorAutoLock lock(mPaintLock);
-    while (mOutstandingAsyncPaints > 0 || mOutstandingAsyncEndTransaction) {
-      lock.Wait();
-    }
-
-    // It's now safe to free any TextureClients that were used during painting.
-    mTextureClientsForAsyncPaint.Clear();
-  }
-
-  if (start) {
-    float ms = (TimeStamp::Now() - start.value()).ToMilliseconds();
-
-    // Anything above 200us gets recorded.
-    if (ms >= 0.2) {
-      mSlowFlushCount++;
-      Telemetry::Accumulate(Telemetry::GFX_OMTP_PAINT_WAIT_TIME, int32_t(ms));
-    }
-    mTotalFlushCount++;
-
-    double ratio = double(mSlowFlushCount) / double(mTotalFlushCount);
-    Telemetry::ScalarSet(Telemetry::ScalarID::GFX_OMTP_PAINT_WAIT_RATIO,
-                         uint32_t(ratio * 100 * 100));
-  }
-}
-
-void CompositorBridgeChild::NotifyBeginAsyncPaint(PaintTask* aTask) {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  MonitorAutoLock lock(mPaintLock);
-
-  if (mTotalAsyncPaints == 0) {
-    mAsyncTransactionBegin = TimeStamp::Now();
-  }
-  mTotalAsyncPaints += 1;
-
-  // We must not be waiting for paints or buffer copying to complete yet. This
-  // would imply we started a new paint without waiting for a previous one,
-  // which could lead to incorrect rendering or IPDL deadlocks.
-  MOZ_ASSERT(!mIsDelayingForAsyncPaints);
-
-  mOutstandingAsyncPaints++;
-
-  // Mark texture clients that they are being used for async painting, and
-  // make sure we hold them alive on the main thread.
-  for (auto& client : aTask->mClients) {
-    client->AddPaintThreadRef();
-    mTextureClientsForAsyncPaint.AppendElement(client);
-  };
-}
-
-// Must only be called from the paint thread. Notifies the CompositorBridge
-// that the paint thread has finished an asynchronous paint request.
-bool CompositorBridgeChild::NotifyFinishedAsyncWorkerPaint(PaintTask* aTask) {
-  MOZ_ASSERT(PaintThread::Get()->IsOnPaintWorkerThread());
-
-  MonitorAutoLock lock(mPaintLock);
-  mOutstandingAsyncPaints--;
-
-  for (auto& client : aTask->mClients) {
-    client->DropPaintThreadRef();
-  };
-  aTask->DropTextureClients();
-
-  // If the main thread has completed queuing work and this was the
-  // last paint, then it is time to end the layer transaction and sync
-  return mOutstandingAsyncEndTransaction && mOutstandingAsyncPaints == 0;
-}
-
 bool CompositorBridgeChild::NotifyBeginAsyncEndLayerTransaction(
     SyncObjectClient* aSyncObject) {
   MOZ_ASSERT(NS_IsMainThread());
@@ -1004,77 +801,6 @@ bool CompositorBridgeChild::NotifyBeginAsyncEndLayerTransaction(
   mOutstandingAsyncEndTransaction = true;
   mOutstandingAsyncSyncObject = aSyncObject;
   return mOutstandingAsyncPaints == 0;
-}
-
-void CompositorBridgeChild::NotifyFinishedAsyncEndLayerTransaction() {
-  MOZ_ASSERT(PaintThread::Get()->IsOnPaintWorkerThread());
-
-  if (mOutstandingAsyncSyncObject) {
-    mOutstandingAsyncSyncObject->Synchronize();
-    mOutstandingAsyncSyncObject = nullptr;
-  }
-
-  MonitorAutoLock lock(mPaintLock);
-
-  if (mTotalAsyncPaints > 0) {
-    float tenthMs =
-        (TimeStamp::Now() - mAsyncTransactionBegin).ToMilliseconds() * 10;
-    Telemetry::Accumulate(Telemetry::GFX_OMTP_PAINT_TASK_COUNT,
-                          int32_t(mTotalAsyncPaints));
-    Telemetry::Accumulate(Telemetry::GFX_OMTP_PAINT_TIME, int32_t(tenthMs));
-    mTotalAsyncPaints = 0;
-  }
-
-  // Since this should happen after ALL paints are done and
-  // at the end of a transaction, this should always be true.
-  MOZ_RELEASE_ASSERT(mOutstandingAsyncPaints == 0);
-  MOZ_ASSERT(mOutstandingAsyncEndTransaction);
-
-  mOutstandingAsyncEndTransaction = false;
-
-  // It's possible that we painted so fast that the main thread never reached
-  // the code that starts delaying messages. If so, mIsDelayingForAsyncPaints
-  // will be false, and we can safely return.
-  if (mIsDelayingForAsyncPaints) {
-    ResumeIPCAfterAsyncPaint();
-  }
-
-  // Notify the main thread in case it's blocking. We do this unconditionally
-  // to avoid deadlocking.
-  lock.Notify();
-}
-
-void CompositorBridgeChild::ResumeIPCAfterAsyncPaint() {
-  // Note: the caller is responsible for holding the lock.
-  mPaintLock.AssertCurrentThreadOwns();
-  MOZ_ASSERT(PaintThread::Get()->IsOnPaintWorkerThread());
-  MOZ_ASSERT(mOutstandingAsyncPaints == 0);
-  MOZ_ASSERT(!mOutstandingAsyncEndTransaction);
-  MOZ_ASSERT(mIsDelayingForAsyncPaints);
-
-  mIsDelayingForAsyncPaints = false;
-
-  // It's also possible that the channel has shut down already.
-  if (!mCanSend || mActorDestroyed) {
-    return;
-  }
-
-  GetIPCChannel()->StopPostponingSends();
-}
-
-void CompositorBridgeChild::PostponeMessagesIfAsyncPainting() {
-  MOZ_ASSERT(NS_IsMainThread());
-
-  MonitorAutoLock lock(mPaintLock);
-
-  MOZ_ASSERT(!mIsDelayingForAsyncPaints);
-
-  // We need to wait for async paints and the async end transaction as
-  // it will do texture synchronization
-  if (mOutstandingAsyncPaints > 0 || mOutstandingAsyncEndTransaction) {
-    mIsDelayingForAsyncPaints = true;
-    GetIPCChannel()->BeginPostponingSends();
-  }
 }
 
 }  // namespace layers

@@ -21,9 +21,8 @@
 #include <algorithm>
 #include <iterator>
 
-#include "jit/ABIFunctions.h"
+#include "jit/ABIArgGenerator.h"
 #include "jit/JitFrames.h"
-#include "jit/JitScript.h"
 #include "jit/RegisterAllocator.h"
 #include "js/Printf.h"
 #include "util/Memory.h"
@@ -31,7 +30,6 @@
 #include "wasm/WasmGenerator.h"
 #include "wasm/WasmInstance.h"
 
-#include "jit/ABIFunctionList-inl.h"
 #include "jit/MacroAssembler-inl.h"
 
 using namespace js;
@@ -2295,7 +2293,8 @@ static bool GenerateImportJitExit(MacroAssembler& masm, const FuncImport& fi,
   masm.storePtr(callee, Address(masm.getStackPointer(), calleeArgOffset));
 
   // 6. Check if we need to rectify arguments.
-  masm.load16ZeroExtend(Address(callee, JSFunction::offsetOfNargs()), scratch);
+  masm.load32(Address(callee, JSFunction::offsetOfFlagsAndArgCount()), scratch);
+  masm.rshift32(Imm32(JSFunction::ArgCountShift), scratch);
 
   Label rectify;
   masm.branch32(Assembler::Above, scratch, Imm32(fi.funcType().args().length()),

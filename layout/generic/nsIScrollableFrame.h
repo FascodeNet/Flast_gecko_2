@@ -34,14 +34,13 @@ class nsPresContext;
 class nsIContent;
 
 namespace mozilla {
-struct ContainerLayerParameters;
 class DisplayItemClip;
 class nsDisplayListBuilder;
 
 namespace layers {
 struct ScrollMetadata;
 class Layer;
-class LayerManager;
+class WebRenderLayerManager;
 }  // namespace layers
 namespace layout {
 class ScrollAnchorContainer;
@@ -56,7 +55,6 @@ class ScrollAnchorContainer;
 class nsIScrollableFrame : public nsIScrollbarMediator {
  public:
   typedef mozilla::CSSIntPoint CSSIntPoint;
-  typedef mozilla::ContainerLayerParameters ContainerLayerParameters;
   typedef mozilla::layers::ScrollSnapInfo ScrollSnapInfo;
   typedef mozilla::layout::ScrollAnchorContainer ScrollAnchorContainer;
   typedef mozilla::ScrollMode ScrollMode;
@@ -395,11 +393,6 @@ class nsIScrollableFrame : public nsIScrollbarMediator {
   virtual bool IsMaybeAsynchronouslyScrolled() = 0;
 
   /**
-   * Call this when the layer(s) induced by active scrolling are being
-   * completely redrawn.
-   */
-  virtual void ResetScrollPositionForLayerPixelAlignment() = 0;
-  /**
    * Was the current presentation state for this frame restored from history?
    */
   virtual bool DidHistoryRestore() const = 0;
@@ -482,16 +475,9 @@ class nsIScrollableFrame : public nsIScrollbarMediator {
    * Returns the ScrollMetadata contributed by this frame, if there is one.
    */
   virtual mozilla::Maybe<mozilla::layers::ScrollMetadata> ComputeScrollMetadata(
-      mozilla::layers::LayerManager* aLayerManager,
+      mozilla::layers::WebRenderLayerManager* aLayerManager,
       const nsIFrame* aContainerReferenceFrame,
-      const mozilla::Maybe<ContainerLayerParameters>& aParameters,
       const mozilla::DisplayItemClip* aClip) const = 0;
-  /**
-   * Ensure's aLayer is clipped to the display port.
-   */
-  virtual void ClipLayerToDisplayPort(
-      mozilla::layers::Layer* aLayer, const mozilla::DisplayItemClip* aClip,
-      const ContainerLayerParameters& aParameters) const = 0;
 
   /**
    * Mark the scrollbar frames for reflow.

@@ -359,16 +359,14 @@ static gfx::YUVColorSpace GetAVIFColorSpace(const NclxColourInformation* aNclx,
       .valueOr(gfx::YUVColorSpace::BT601);
 }
 
-static gfx::ColorRange GetAVIFColorRange(
-    const NclxColourInformation* aNclx,
-    const Maybe<gfx::ColorRange> av1ColorRange) {
+static gfx::ColorRange GetAVIFColorRange(const NclxColourInformation* aNclx,
+                                         const gfx::ColorRange av1ColorRange) {
   return ToMaybe(aNclx)
       .map([=](const auto& nclx) {
-        return Some(aNclx->full_range_flag ? gfx::ColorRange::FULL
-                                           : gfx::ColorRange::LIMITED);
+        return aNclx->full_range_flag ? gfx::ColorRange::FULL
+                                      : gfx::ColorRange::LIMITED;
       })
-      .valueOr(av1ColorRange)
-      .valueOr(gfx::ColorRange::FULL);
+      .valueOr(av1ColorRange);
 }
 
 void AVIFDecodedData::SetCicpValues(
@@ -391,13 +389,13 @@ void AVIFDecodedData::SetCicpValues(
     if (aAv1ColourPrimaries != CICP::ColourPrimaries::CP_UNSPECIFIED) {
       cp = aAv1ColourPrimaries;
       MOZ_LOG(sAVIFLog, LogLevel::Info,
-              ("No colour_primaries value specified in colr box, "
+              ("Unspecified colour_primaries value specified in colr box, "
                "using AV1 sequence header (%hhu)",
                cp));
     } else {
       cp = CICP::ColourPrimaries::CP_BT709;
       MOZ_LOG(sAVIFLog, LogLevel::Warning,
-              ("No colour_primaries value specified in colr box "
+              ("Unspecified colour_primaries value specified in colr box "
                "or AV1 sequence header, using fallback value (%hhu)",
                cp));
     }
@@ -413,13 +411,13 @@ void AVIFDecodedData::SetCicpValues(
         CICP::TransferCharacteristics::TC_UNSPECIFIED) {
       tc = aAv1TransferCharacteristics;
       MOZ_LOG(sAVIFLog, LogLevel::Info,
-              ("No transfer_characteristics value specified in "
+              ("Unspecified transfer_characteristics value specified in "
                "colr box, using AV1 sequence header (%hhu)",
                tc));
     } else {
       tc = CICP::TransferCharacteristics::TC_SRGB;
       MOZ_LOG(sAVIFLog, LogLevel::Warning,
-              ("No transfer_characteristics value specified in "
+              ("Unspecified transfer_characteristics value specified in "
                "colr box or AV1 sequence header, using fallback value (%hhu)",
                tc));
     }
@@ -434,13 +432,13 @@ void AVIFDecodedData::SetCicpValues(
     if (aAv1MatrixCoefficients != CICP::MatrixCoefficients::MC_UNSPECIFIED) {
       mc = aAv1MatrixCoefficients;
       MOZ_LOG(sAVIFLog, LogLevel::Info,
-              ("No matrix_coefficients value specified in "
+              ("Unspecified matrix_coefficients value specified in "
                "colr box, using AV1 sequence header (%hhu)",
                mc));
     } else {
       mc = CICP::MatrixCoefficients::MC_BT601;
       MOZ_LOG(sAVIFLog, LogLevel::Warning,
-              ("No matrix_coefficients value specified in "
+              ("Unspecified matrix_coefficients value specified in "
                "colr box or AV1 sequence header, using fallback value (%hhu)",
                mc));
     }
@@ -993,21 +991,25 @@ AVIFDecodedData Dav1dDecoder::Dav1dPictureToDecodedData(
   auto av1TransferCharacteristics =
       CICP::TransferCharacteristics::TC_UNSPECIFIED;
   auto av1MatrixCoefficients = CICP::MatrixCoefficients::MC_UNSPECIFIED;
-  Maybe<gfx::ColorRange> av1ColorRange = Nothing();
 
-  if (aPicture->seq_hdr && aPicture->seq_hdr->color_description_present) {
-    auto& seq_hdr = *aPicture->seq_hdr;
+  MOZ_ASSERT(aPicture->seq_hdr);
+  auto& seq_hdr = *aPicture->seq_hdr;
+
+  MOZ_LOG(sAVIFLog, LogLevel::Debug,
+          ("seq_hdr.color_description_present: %d",
+           seq_hdr.color_description_present));
+  if (seq_hdr.color_description_present) {
     av1ColourPrimaries = static_cast<CICP::ColourPrimaries>(seq_hdr.pri);
     av1TransferCharacteristics =
         static_cast<CICP::TransferCharacteristics>(seq_hdr.trc);
     av1MatrixCoefficients = static_cast<CICP::MatrixCoefficients>(seq_hdr.mtrx);
-    av1ColorRange = seq_hdr.color_range ? Some(gfx::ColorRange::FULL)
-                                        : Some(gfx::ColorRange::LIMITED);
   }
 
   data.SetCicpValues(aNclx, av1ColourPrimaries, av1TransferCharacteristics,
                      av1MatrixCoefficients);
 
+  gfx::ColorRange av1ColorRange =
+      seq_hdr.color_range ? gfx::ColorRange::FULL : gfx::ColorRange::LIMITED;
   data.mColorRange = GetAVIFColorRange(aNclx, av1ColorRange);
 
   if (aAlphaPlane) {
@@ -1078,11 +1080,12 @@ AVIFDecodedData AOMDecoder::AOMImageToToDecodedData(
                                       sAVIFLog);
   });
 
-  Maybe<gfx::ColorRange> av1ColorRange = Nothing();
+  gfx::ColorRange av1ColorRange;
   if (aImage->range == AOM_CR_STUDIO_RANGE) {
-    av1ColorRange = Some(gfx::ColorRange::LIMITED);
-  } else if (aImage->range == AOM_CR_FULL_RANGE) {
-    av1ColorRange = Some(gfx::ColorRange::FULL);
+    av1ColorRange = gfx::ColorRange::LIMITED;
+  } else {
+    MOZ_ASSERT(aImage->range == AOM_CR_FULL_RANGE);
+    av1ColorRange = gfx::ColorRange::FULL;
   }
   data.mColorRange = GetAVIFColorRange(aNclx, av1ColorRange);
 
@@ -1229,6 +1232,28 @@ nsAVIFDecoder::DecodeResult nsAVIFDecoder::Decode(
   }
   const Mp4parseAvifImage& parsedImg = *parsedImagePtr;
 
+  if (parsedImg.icc_colour_information.data) {
+    const auto& icc = parsedImg.icc_colour_information;
+    MOZ_LOG(
+        sAVIFLog, LogLevel::Debug,
+        ("[this=%p] colr type ICC: %zu bytes %p", this, icc.length, icc.data));
+  }
+
+  if (parsedImg.nclx_colour_information) {
+    const auto& nclx = *parsedImg.nclx_colour_information;
+    MOZ_LOG(
+        sAVIFLog, LogLevel::Debug,
+        ("[this=%p] colr type CICP: cp/tc/mc/full-range %u/%u/%u/%s", this,
+         nclx.colour_primaries, nclx.transfer_characteristics,
+         nclx.matrix_coefficients, nclx.full_range_flag ? "true" : "false"));
+  }
+
+  if (!parsedImg.icc_colour_information.data &&
+      !parsedImg.nclx_colour_information) {
+    MOZ_LOG(sAVIFLog, LogLevel::Debug,
+            ("[this=%p] colr box not present", this));
+  }
+
   if (parsedImg.alpha_image.coded_data.data) {
     PostHasTransparency();
   }
@@ -1280,23 +1305,6 @@ nsAVIFDecoder::DecodeResult nsAVIFDecoder::Decode(
            StaticPrefs::image_avif_use_dav1d() ? "Dav1d" : "AOM",
            IsDecodeSuccess(r) ? "succeeds" : "fails"));
 
-  if (parsedImg.icc_colour_information.data) {
-    auto& icc = parsedImg.icc_colour_information;
-    MOZ_LOG(
-        sAVIFLog, LogLevel::Debug,
-        ("[this=%p] colr type ICC: %zu bytes %p", this, icc.length, icc.data));
-  } else if (parsedImg.nclx_colour_information) {
-    auto& nclx = *parsedImg.nclx_colour_information;
-    MOZ_LOG(
-        sAVIFLog, LogLevel::Debug,
-        ("[this=%p] colr type CICP: cp/tc/mc/full-range %u/%u/%u/%s", this,
-         nclx.colour_primaries, nclx.transfer_characteristics,
-         nclx.matrix_coefficients, nclx.full_range_flag ? "true" : "false"));
-  } else {
-    MOZ_LOG(sAVIFLog, LogLevel::Debug,
-            ("[this=%p] colr box not present", this));
-  }
-
   if (!IsDecodeSuccess(r)) {
     return r;
   }
@@ -1309,6 +1317,10 @@ nsAVIFDecoder::DecodeResult nsAVIFDecoder::Decode(
              CICP::TransferCharacteristics::TC_UNSPECIFIED);
   MOZ_ASSERT(decodedData.mColorRange <= gfx::ColorRange::_Last);
   MOZ_ASSERT(decodedData.mYUVColorSpace <= gfx::YUVColorSpace::_Last);
+
+  MOZ_LOG(sAVIFLog, LogLevel::Debug,
+          ("[this=%p] decodedData.mColorRange: %hhd", this,
+           static_cast<uint8_t>(decodedData.mColorRange)));
 
   // Technically it's valid but we don't handle it now (Bug 1682318).
   if (decodedData.mAlpha && decodedData.mAlpha->mSize != decodedData.mYSize) {
@@ -1367,7 +1379,10 @@ nsAVIFDecoder::DecodeResult nsAVIFDecoder::Decode(
   IntSize rgbSize = Size();
   MOZ_ASSERT(rgbSize == decodedData.mPicSize);
 
-  if (parsedImg.nclx_colour_information) {
+  if (parsedImg.nclx_colour_information &&
+      parsedImg.icc_colour_information.data) {
+    AccumulateCategorical(LABELS_AVIF_COLR::both);
+  } else if (parsedImg.nclx_colour_information) {
     AccumulateCategorical(LABELS_AVIF_COLR::nclx);
   } else if (parsedImg.icc_colour_information.data) {
     AccumulateCategorical(LABELS_AVIF_COLR::icc);

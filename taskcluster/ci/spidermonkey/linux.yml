@@ -5,7 +5,7 @@
 job-defaults:
     worker:
         max-run-time: 36000
-        docker-image: {in-tree: debian10-amd64-build}
+        docker-image: {in-tree: debian11-amd64-build}
         env:
             MOZ_JS_UPLOAD_BINARIES_DEFAULT: "0"
     run:
@@ -324,7 +324,7 @@ sm-linux64-wasi/opt:
             - linux64-cbindgen
             - linux64-dump_syms
             - sysroot-x86_64-linux-gnu
-            - wasi-sysroot-12
+            - sysroot-wasm32-wasi
 
 sm-msan-linux64/opt:
     description: "Spidermonkey Memory Sanitizer"

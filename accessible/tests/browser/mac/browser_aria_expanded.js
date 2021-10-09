@@ -7,18 +7,6 @@
 /* import-globals-from ../../mochitest/states.js */
 loadScripts({ name: "states.js", dir: MOCHITESTS_DIR });
 
-function waitForStateChange(id, state, isEnabled) {
-  return waitForEvent(EVENT_STATE_CHANGE, e => {
-    e.QueryInterface(nsIAccessibleStateChangeEvent);
-    return (
-      e.state == state &&
-      !e.isExtraState &&
-      isEnabled == e.isEnabled &&
-      id == getAccessibleDOMNodeID(e.accessible)
-    );
-  });
-}
-
 // Test aria-expanded on a button
 addAccessibleTask(
   `hello world<br>
@@ -40,7 +28,10 @@ addAccessibleTask(
     await stateChanged;
     is(button.getAttributeValue("AXExpanded"), 1, "button is expanded");
 
-    stateChanged = waitForStateChange("b", STATE_EXPANDED, false);
+    stateChanged = Promise.all([
+      waitForStateChange("b", STATE_EXPANDED, false),
+      waitForStateChange("b", EXT_STATE_EXPANDABLE, false, true),
+    ]);
     await SpecialPowers.spawn(browser, [], () => {
       content.document.getElementById("b").removeAttribute("aria-expanded");
     });

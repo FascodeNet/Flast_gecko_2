@@ -95,11 +95,11 @@ nsHtml5Parser::SetCommand(eParserCommands aParserCommand) {
 
 void nsHtml5Parser::SetDocumentCharset(NotNull<const Encoding*> aEncoding,
                                        int32_t aCharsetSource,
-                                       bool aChannelHadCharset) {
+                                       bool aForceAutoDetection) {
   MOZ_ASSERT(!mExecutor->HasStarted(), "Document charset set too late.");
   MOZ_ASSERT(GetStreamParser(), "Setting charset on a script-only parser.");
   GetStreamParser()->SetDocumentCharset(aEncoding, aCharsetSource,
-                                        aChannelHadCharset);
+                                        aForceAutoDetection);
   mExecutor->SetDocumentCharsetAndSource(aEncoding, aCharsetSource);
 }
 
@@ -156,10 +156,7 @@ NS_IMETHODIMP_(bool)
 nsHtml5Parser::IsComplete() { return mExecutor->IsComplete(); }
 
 NS_IMETHODIMP
-nsHtml5Parser::Parse(nsIURI* aURL, nsIRequestObserver* aObserver,
-                     void* aKey,       // legacy; ignored
-                     nsDTDMode aMode)  // legacy; ignored
-{
+nsHtml5Parser::Parse(nsIURI* aURL, void* /* legacy; ignored */) {
   /*
    * Do NOT cause WillBuildModel to be called synchronously from here!
    * The document won't be ready for it until OnStartRequest!
@@ -169,7 +166,6 @@ nsHtml5Parser::Parse(nsIURI* aURL, nsIRequestObserver* aObserver,
   MOZ_ASSERT(GetStreamParser(),
              "Can't call this Parse() variant on script-created parser");
 
-  GetStreamParser()->SetObserver(aObserver);
   GetStreamParser()->SetViewSourceTitle(aURL);  // In case we're viewing source
   mExecutor->SetStreamParser(GetStreamParser());
   mExecutor->SetParser(this);

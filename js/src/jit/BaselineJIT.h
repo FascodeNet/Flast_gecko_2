@@ -17,14 +17,13 @@
 #include <stdint.h>
 
 #include "jsfriendapi.h"
-#include "jspubtd.h"
 
 #include "jit/IonTypes.h"
 #include "jit/JitCode.h"
 #include "jit/JitContext.h"
 #include "jit/JitOptions.h"
 #include "jit/shared/Assembler-shared.h"
-#include "js/AllocPolicy.h"
+#include "js/Principals.h"
 #include "js/TypeDecls.h"
 #include "js/Vector.h"
 #include "util/TrailingArray.h"

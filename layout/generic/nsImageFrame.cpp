@@ -63,7 +63,6 @@
 #include "nsLayoutUtils.h"
 #include "nsDisplayList.h"
 #include "nsIContent.h"
-#include "FrameLayerBuilder.h"
 #include "mozilla/dom/Selection.h"
 #include "nsIURIMutator.h"
 
@@ -90,6 +89,7 @@
 
 #include "mozilla/dom/Link.h"
 #include "mozilla/dom/HTMLAnchorElement.h"
+#include "mozilla/dom/BrowserChild.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -147,9 +147,9 @@ void nsDisplayGradient::Paint(nsDisplayListBuilder* aBuilder,
     result = imageRenderer.PrepareResult();
   } else {
     nsRect dest(ToReferenceFrame(), size);
-    result = imageRenderer.DrawLayer(frame->PresContext(), *aCtx, dest, dest,
-                                     dest.TopLeft(), GetPaintRect(),
-                                     dest.Size(), /* aOpacity = */ 1.0f);
+    result = imageRenderer.DrawLayer(
+        frame->PresContext(), *aCtx, dest, dest, dest.TopLeft(),
+        GetPaintRect(aBuilder, aCtx), dest.Size(), /* aOpacity = */ 1.0f);
   }
   nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
 }
@@ -1064,6 +1064,12 @@ void nsImageFrame::MaybeDecodeForPredictedSize() {
       presShell->GetCumulativeResolution() *
       nsLayoutUtils::GetTransformToAncestorScaleExcludingAnimated(this));
 
+  // If we are in a remote browser, then apply scaling from ancestor browsers
+  if (BrowserChild* browserChild = BrowserChild::GetFrom(presShell)) {
+    resolutionToScreen.xScale *= browserChild->GetEffectsInfo().mScaleX;
+    resolutionToScreen.yScale *= browserChild->GetEffectsInfo().mScaleY;
+  }
+
   // ...and this frame's content box...
   const nsPoint offset =
       GetOffsetToCrossDoc(nsLayoutUtils::GetReferenceFrame(this));
@@ -1531,8 +1537,8 @@ class nsDisplayAltFeedback final : public nsPaintedDisplayItem {
     uint32_t flags = imgIContainer::FLAG_SYNC_DECODE;
 
     nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
-    ImgDrawResult result =
-        f->DisplayAltFeedback(*aCtx, GetPaintRect(), ToReferenceFrame(), flags);
+    ImgDrawResult result = f->DisplayAltFeedback(
+        *aCtx, GetPaintRect(aBuilder, aCtx), ToReferenceFrame(), flags);
 
     nsDisplayItemGenericImageGeometry::UpdateDrawResult(this, result);
   }
@@ -1997,8 +2003,8 @@ void nsDisplayImage::Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) {
     flags |= imgIContainer::FLAG_HIGH_QUALITY_SCALING;
   }
 
-  ImgDrawResult result = frame->PaintImage(*aCtx, ToReferenceFrame(),
-                                           GetPaintRect(), mImage, flags);
+  ImgDrawResult result = frame->PaintImage(
+      *aCtx, ToReferenceFrame(), GetPaintRect(aBuilder, aCtx), mImage, flags);
 
   if (result == ImgDrawResult::NOT_READY ||
       result == ImgDrawResult::INCOMPLETE ||
@@ -2006,8 +2012,9 @@ void nsDisplayImage::Paint(nsDisplayListBuilder* aBuilder, gfxContext* aCtx) {
     // If the current image failed to paint because it's still loading or
     // decoding, try painting the previous image.
     if (mPrevImage) {
-      result = frame->PaintImage(*aCtx, ToReferenceFrame(), GetPaintRect(),
-                                 mPrevImage, flags);
+      result =
+          frame->PaintImage(*aCtx, ToReferenceFrame(),
+                            GetPaintRect(aBuilder, aCtx), mPrevImage, flags);
     }
   }
 
@@ -2031,13 +2038,8 @@ void nsDisplayImage::ComputeInvalidationRegion(
     aInvalidRegion->Or(*aInvalidRegion, GetBounds(aBuilder, &snap));
   }
 
-  nsDisplayImageContainer::ComputeInvalidationRegion(aBuilder, aGeometry,
-                                                     aInvalidRegion);
-}
-
-already_AddRefed<imgIContainer> nsDisplayImage::GetImage() {
-  nsCOMPtr<imgIContainer> image = mImage;
-  return image.forget();
+  nsPaintedDisplayItem::ComputeInvalidationRegion(aBuilder, aGeometry,
+                                                  aInvalidRegion);
 }
 
 nsRect nsDisplayImage::GetDestRect() const {
@@ -2048,62 +2050,6 @@ nsRect nsDisplayImage::GetDestRect() const {
   return imageFrame->PredictedDestRect(frameContentBox);
 }
 
-LayerState nsDisplayImage::GetLayerState(
-    nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-    const ContainerLayerParameters& aParameters) {
-  if (!nsDisplayItem::ForceActiveLayers()) {
-    bool animated = false;
-    if (!StaticPrefs::layout_animated_image_layers_enabled() ||
-        mImage->GetType() != imgIContainer::TYPE_RASTER ||
-        NS_FAILED(mImage->GetAnimated(&animated)) || !animated) {
-      if (!aManager->IsCompositingCheap() ||
-          !nsLayoutUtils::GPUImageScalingEnabled()) {
-        return LayerState::LAYER_NONE;
-      }
-    }
-
-    if (!animated) {
-      int32_t imageWidth;
-      int32_t imageHeight;
-      mImage->GetWidth(&imageWidth);
-      mImage->GetHeight(&imageHeight);
-
-      NS_ASSERTION(imageWidth != 0 && imageHeight != 0, "Invalid image size!");
-
-      const int32_t factor = mFrame->PresContext()->AppUnitsPerDevPixel();
-      const LayoutDeviceRect destRect =
-          LayoutDeviceRect::FromAppUnits(GetDestRect(), factor);
-      const LayerRect destLayerRect = destRect * aParameters.Scale();
-
-      // Calculate the scaling factor for the frame.
-      const gfxSize scale = gfxSize(destLayerRect.width / imageWidth,
-                                    destLayerRect.height / imageHeight);
-
-      // If we are not scaling at all, no point in separating this into a layer.
-      if (scale.width == 1.0f && scale.height == 1.0f) {
-        return LayerState::LAYER_NONE;
-      }
-
-      // If the target size is pretty small, no point in using a layer.
-      if (destLayerRect.width * destLayerRect.height < 64 * 64) {
-        return LayerState::LAYER_NONE;
-      }
-    }
-  }
-
-  if (!CanOptimizeToImageLayer(aManager, aBuilder)) {
-    return LayerState::LAYER_NONE;
-  }
-
-  // Image layer doesn't support draw focus ring for image map.
-  nsImageFrame* f = static_cast<nsImageFrame*>(mFrame);
-  if (f->HasImageMap()) {
-    return LayerState::LAYER_NONE;
-  }
-
-  return LayerState::LAYER_ACTIVE;
-}
-
 nsRegion nsDisplayImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
                                          bool* aSnap) const {
   *aSnap = false;
@@ -2112,30 +2058,6 @@ nsRegion nsDisplayImage::GetOpaqueRegion(nsDisplayListBuilder* aBuilder,
     return GetDestRect().Intersect(frameContentBox);
   }
   return nsRegion();
-}
-
-already_AddRefed<Layer> nsDisplayImage::BuildLayer(
-    nsDisplayListBuilder* aBuilder, LayerManager* aManager,
-    const ContainerLayerParameters& aParameters) {
-  uint32_t flags = imgIContainer::FLAG_ASYNC_NOTIFY;
-  if (aBuilder->ShouldSyncDecodeImages()) {
-    flags |= imgIContainer::FLAG_SYNC_DECODE;
-  }
-
-  RefPtr<ImageContainer> container = mImage->GetImageContainer(aManager, flags);
-  if (!container || !container->HasCurrentImage()) {
-    return nullptr;
-  }
-
-  RefPtr<ImageLayer> layer = static_cast<ImageLayer*>(
-      aManager->GetLayerBuilder()->GetLeafLayerFor(aBuilder, this));
-  if (!layer) {
-    layer = aManager->CreateImageLayer();
-    if (!layer) return nullptr;
-  }
-  layer->SetContainer(container);
-  ConfigureLayer(layer, aParameters);
-  return layer.forget();
 }
 
 bool nsDisplayImage::CreateWebRenderCommands(

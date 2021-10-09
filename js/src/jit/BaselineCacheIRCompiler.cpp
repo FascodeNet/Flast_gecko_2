@@ -18,12 +18,11 @@
 #include "proxy/DeadObjectProxy.h"
 #include "proxy/Proxy.h"
 #include "util/Unicode.h"
+#include "vm/JSAtom.h"
 
 #include "jit/MacroAssembler-inl.h"
 #include "jit/SharedICHelpers-inl.h"
 #include "jit/VMFunctionList-inl.h"
-#include "vm/JSContext-inl.h"
-#include "vm/Realm-inl.h"
 
 using namespace js;
 using namespace js::jit;
@@ -34,8 +33,6 @@ using JS::ExpandoAndGeneration;
 
 namespace js {
 namespace jit {
-
-class AutoStubFrame;
 
 Address CacheRegisterAllocator::addressOf(MacroAssembler& masm,
                                           BaselineFrameSlot slot) const {
@@ -335,7 +332,8 @@ bool BaselineCacheIRCompiler::emitGuardFunctionScript(
   }
 
   Address addr(stubAddress(expectedOffset));
-  masm.loadPtr(Address(fun, JSFunction::offsetOfBaseScript()), scratch);
+  masm.loadPrivate(Address(fun, JSFunction::offsetOfJitInfoOrScript()),
+                   scratch);
   masm.branchPtr(Assembler::NotEqual, addr, scratch, failure->label());
   return true;
 }
@@ -500,7 +498,8 @@ bool BaselineCacheIRCompiler::emitCallScriptedGetterShared(
 
   // Handle arguments underflow.
   Label noUnderflow;
-  masm.load16ZeroExtend(Address(callee, JSFunction::offsetOfNargs()), callee);
+  masm.load32(Address(callee, JSFunction::offsetOfFlagsAndArgCount()), callee);
+  masm.rshift32(Imm32(JSFunction::ArgCountShift), callee);
   masm.branch32(Assembler::Equal, callee, Imm32(0), &noUnderflow);
 
   // Call the arguments rectifier.
@@ -1353,6 +1352,117 @@ bool BaselineCacheIRCompiler::emitHasClassResult(ObjOperandId objId,
   return true;
 }
 
+void BaselineCacheIRCompiler::emitAtomizeString(Register str, Register temp,
+                                                Label* failure) {
+  Label isAtom;
+  masm.branchTest32(Assembler::NonZero, Address(str, JSString::offsetOfFlags()),
+                    Imm32(JSString::ATOM_BIT), &isAtom);
+  {
+    LiveRegisterSet save(GeneralRegisterSet::Volatile(),
+                         liveVolatileFloatRegs());
+    masm.PushRegsInMask(save);
+
+    using Fn = JSAtom* (*)(JSContext * cx, JSString * str);
+    masm.setupUnalignedABICall(temp);
+    masm.loadJSContext(temp);
+    masm.passABIArg(temp);
+    masm.passABIArg(str);
+    masm.callWithABI<Fn, jit::AtomizeStringNoGC>();
+    masm.storeCallPointerResult(temp);
+
+    LiveRegisterSet ignore;
+    ignore.add(temp);
+    masm.PopRegsInMaskIgnore(save, ignore);
+
+    masm.branchPtr(Assembler::Equal, temp, ImmWord(0), failure);
+    masm.mov(temp, str);
+  }
+  masm.bind(&isAtom);
+}
+
+bool BaselineCacheIRCompiler::emitSetHasStringResult(ObjOperandId setId,
+                                                     StringOperandId strId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register set = allocator.useRegister(masm, setId);
+  Register str = allocator.useRegister(masm, strId);
+
+  AutoScratchRegister scratch1(allocator, masm);
+  AutoScratchRegister scratch2(allocator, masm);
+  AutoScratchRegister scratch3(allocator, masm);
+  AutoScratchRegister scratch4(allocator, masm);
+
+  FailurePath* failure;
+  if (!addFailurePath(&failure)) {
+    return false;
+  }
+
+  emitAtomizeString(str, scratch1, failure->label());
+  masm.prepareHashString(str, scratch1, scratch2);
+
+  masm.tagValue(JSVAL_TYPE_STRING, str, output.valueReg());
+  masm.setObjectHasNonBigInt(set, output.valueReg(), scratch1, scratch2,
+                             scratch3, scratch4);
+  masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch2, output.valueReg());
+  return true;
+}
+
+bool BaselineCacheIRCompiler::emitMapHasStringResult(ObjOperandId mapId,
+                                                     StringOperandId strId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register map = allocator.useRegister(masm, mapId);
+  Register str = allocator.useRegister(masm, strId);
+
+  AutoScratchRegister scratch1(allocator, masm);
+  AutoScratchRegister scratch2(allocator, masm);
+  AutoScratchRegister scratch3(allocator, masm);
+  AutoScratchRegister scratch4(allocator, masm);
+
+  FailurePath* failure;
+  if (!addFailurePath(&failure)) {
+    return false;
+  }
+
+  emitAtomizeString(str, scratch1, failure->label());
+  masm.prepareHashString(str, scratch1, scratch2);
+
+  masm.tagValue(JSVAL_TYPE_STRING, str, output.valueReg());
+  masm.mapObjectHasNonBigInt(map, output.valueReg(), scratch1, scratch2,
+                             scratch3, scratch4);
+  masm.tagValue(JSVAL_TYPE_BOOLEAN, scratch2, output.valueReg());
+  return true;
+}
+
+bool BaselineCacheIRCompiler::emitMapGetStringResult(ObjOperandId mapId,
+                                                     StringOperandId strId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  Register map = allocator.useRegister(masm, mapId);
+  Register str = allocator.useRegister(masm, strId);
+
+  AutoScratchRegister scratch1(allocator, masm);
+  AutoScratchRegister scratch2(allocator, masm);
+  AutoScratchRegister scratch3(allocator, masm);
+  AutoScratchRegister scratch4(allocator, masm);
+
+  FailurePath* failure;
+  if (!addFailurePath(&failure)) {
+    return false;
+  }
+
+  emitAtomizeString(str, scratch1, failure->label());
+  masm.prepareHashString(str, scratch1, scratch2);
+
+  masm.tagValue(JSVAL_TYPE_STRING, str, output.valueReg());
+  masm.mapObjectGetNonBigInt(map, output.valueReg(), scratch1,
+                             output.valueReg(), scratch2, scratch3, scratch4);
+  return true;
+}
+
 bool BaselineCacheIRCompiler::emitCallNativeSetter(
     ObjOperandId receiverId, uint32_t setterOffset, ValOperandId rhsId,
     bool sameRealm, uint32_t nargsAndFlagsOffset) {
@@ -1463,7 +1573,9 @@ bool BaselineCacheIRCompiler::emitCallScriptedSetterShared(
   // can be used as scratch.
   Label noUnderflow;
   Register scratch2 = val.scratchReg();
-  masm.load16ZeroExtend(Address(callee, JSFunction::offsetOfNargs()), scratch2);
+  masm.load32(Address(callee, JSFunction::offsetOfFlagsAndArgCount()),
+              scratch2);
+  masm.rshift32(Imm32(JSFunction::ArgCountShift), scratch2);
   masm.branch32(Assembler::BelowOrEqual, scratch2, Imm32(1), &noUnderflow);
 
   // Call the arguments rectifier.
@@ -2462,12 +2574,15 @@ bool BaselineCacheIRCompiler::emitCallNativeShared(
       masm.callWithABI(redirectedAddr);
 #else
       if (*ignoresReturnValue) {
-        masm.loadPtr(Address(calleeReg, JSFunction::offsetOfJitInfo()),
-                     calleeReg);
+        masm.loadPrivate(
+            Address(calleeReg, JSFunction::offsetOfJitInfoOrScript()),
+            calleeReg);
         masm.callWithABI(
             Address(calleeReg, JSJitInfo::offsetOfIgnoresReturnValueNative()));
       } else {
-        masm.callWithABI(Address(calleeReg, JSFunction::offsetOfNative()));
+        // This depends on the native function pointer being stored unchanged as
+        // a PrivateValue.
+        masm.callWithABI(Address(calleeReg, JSFunction::offsetOfNativeOrEnv()));
       }
 #endif
     } break;
@@ -2743,8 +2858,9 @@ bool BaselineCacheIRCompiler::emitCallScriptedFunction(ObjOperandId calleeId,
 
   // Handle arguments underflow.
   Label noUnderflow;
-  masm.load16ZeroExtend(Address(calleeReg, JSFunction::offsetOfNargs()),
-                        calleeReg);
+  masm.load32(Address(calleeReg, JSFunction::offsetOfFlagsAndArgCount()),
+              calleeReg);
+  masm.rshift32(Imm32(JSFunction::ArgCountShift), calleeReg);
   masm.branch32(Assembler::AboveOrEqual, argcReg, calleeReg, &noUnderflow);
   {
     // Call the arguments rectifier.
@@ -2854,8 +2970,9 @@ bool BaselineCacheIRCompiler::emitCallInlinedFunction(ObjOperandId calleeId,
 
   // Handle arguments underflow.
   Label noUnderflow;
-  masm.load16ZeroExtend(Address(calleeReg, JSFunction::offsetOfNargs()),
-                        calleeReg);
+  masm.load32(Address(calleeReg, JSFunction::offsetOfFlagsAndArgCount()),
+              calleeReg);
+  masm.rshift32(Imm32(JSFunction::ArgCountShift), calleeReg);
   masm.branch32(Assembler::AboveOrEqual, argcReg, calleeReg, &noUnderflow);
 
   // Call the trial-inlining arguments rectifier.

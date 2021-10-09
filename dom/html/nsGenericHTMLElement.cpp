@@ -12,6 +12,8 @@
 #include "mozilla/EventStateManager.h"
 #include "mozilla/EventStates.h"
 #include "mozilla/HTMLEditor.h"
+#include "mozilla/IMEContentObserver.h"
+#include "mozilla/IMEStateManager.h"
 #include "mozilla/MappedDeclarations.h"
 #include "mozilla/Likely.h"
 #include "mozilla/MouseEvents.h"
@@ -61,7 +63,6 @@
 #include "nsGkAtoms.h"
 #include "nsDOMCSSDeclaration.h"
 #include "nsITextControlFrame.h"
-#include "nsIForm.h"
 #include "nsIFormControl.h"
 #include "mozilla/dom/HTMLFormElement.h"
 #include "nsFocusManager.h"
@@ -73,6 +74,7 @@
 #include "nsLayoutUtils.h"
 #include "mozAutoDocUpdate.h"
 #include "nsHtml5Module.h"
+#include "mozilla/dom/DocumentInlines.h"
 #include "mozilla/dom/ElementInlines.h"
 #include "HTMLFieldSetElement.h"
 #include "nsTextNode.h"
@@ -728,6 +730,27 @@ nsresult nsGenericHTMLElement::AfterSetAttr(
         SetHasName();
         if (CanHaveName(NodeInfo()->NameAtom())) {
           AddToNameTable(aValue->GetAtomValue());
+        }
+      }
+    } else if ((aName == nsGkAtoms::inputmode &&
+                StaticPrefs::dom_forms_inputmode()) ||
+               (aName == nsGkAtoms::enterkeyhint &&
+                StaticPrefs::dom_forms_enterkeyhint())) {
+      nsPIDOMWindowOuter* window = OwnerDoc()->GetWindow();
+      if (window && window->GetFocusedElement() == this) {
+        IMEContentObserver* observer =
+            IMEStateManager::GetActiveContentObserver();
+        nsPresContext* presContext = GetPresContext(eForComposedDoc);
+        if (observer && observer->IsManaging(presContext, this)) {
+          if (RefPtr<EditorBase> editor =
+                  nsContentUtils::GetActiveEditor(window)) {
+            IMEState newState;
+            editor->GetPreferredIMEState(&newState);
+            IMEStateManager::UpdateIMEState(
+                newState, this, *editor,
+                {IMEStateManager::UpdateIMEStateOption::ForceUpdate,
+                 IMEStateManager::UpdateIMEStateOption::DontCommitComposition});
+          }
         }
       }
     }
@@ -1712,8 +1735,6 @@ void nsGenericHTMLFormElement::ClearForm(bool aRemoveFromForm,
   AfterClearForm(aUnbindOrDelete);
 }
 
-HTMLFormElement* nsGenericHTMLFormElement::GetFormElement() { return mForm; }
-
 HTMLFieldSetElement* nsGenericHTMLFormElement::GetFieldSet() {
   return mFieldSet;
 }
@@ -2409,11 +2430,11 @@ bool nsGenericHTMLElement::IsHTMLFocusable(bool aWithMouse, bool* aIsFocusable,
   return disallowOverridingFocusability;
 }
 
-bool nsGenericHTMLElement::PerformAccesskey(bool aKeyCausesActivation,
-                                            bool aIsTrustedEvent) {
+Result<bool, nsresult> nsGenericHTMLElement::PerformAccesskey(
+    bool aKeyCausesActivation, bool aIsTrustedEvent) {
   nsPresContext* presContext = GetPresContext(eForComposedDoc);
   if (!presContext) {
-    return false;
+    return Err(NS_ERROR_UNEXPECTED);
   }
 
   // It's hard to say what HTML4 wants us to do in all cases.
@@ -2431,9 +2452,13 @@ bool nsGenericHTMLElement::PerformAccesskey(bool aKeyCausesActivation,
     AutoPopupStatePusher popupStatePusher(
         aIsTrustedEvent ? PopupBlocker::openAllowed : PopupBlocker::openAbused);
     DispatchSimulatedClick(this, aIsTrustedEvent, presContext);
+    return focused;
   }
 
-  return focused;
+  // If the accesskey won't cause the activation and the focus isn't changed,
+  // either. Return error so EventStateManager would try to find next element
+  // to handle the accesskey.
+  return focused ? Result<bool, nsresult>{focused} : Err(NS_ERROR_ABORT);
 }
 
 void nsGenericHTMLElement::HandleKeyboardActivation(
@@ -2882,7 +2907,7 @@ void nsGenericHTMLElement::SetInnerText(const nsAString& aValue) {
   mb.NodesAdded();
 }
 
-// https://html.spec.whatwg.org/commit-snapshots/b48bb2238269d90ea4f455a52cdf29505aff3df0/#dom-attachinternals
+// https://html.spec.whatwg.org/commit-snapshots/53bc3803433e1c817918b83e8a84f3db900031dd/#dom-attachinternals
 already_AddRefed<ElementInternals> nsGenericHTMLElement::AttachInternals(
     ErrorResult& aRv) {
   CustomElementData* ceData = GetCustomElementData();
@@ -2932,6 +2957,10 @@ already_AddRefed<ElementInternals> nsGenericHTMLElement::AttachInternals(
     return nullptr;
   }
 
+  // If this is not a custom element, i.e. ceData is nullptr, we are unable to
+  // find a definition and should return earlier above.
+  MOZ_ASSERT(ceData);
+
   // 5. If element's attached internals is true, then throw an
   //    "NotSupportedError" DOMException.
   if (ceData->HasAttachedInternals()) {
@@ -2941,10 +2970,19 @@ already_AddRefed<ElementInternals> nsGenericHTMLElement::AttachInternals(
     return nullptr;
   }
 
-  // 6. Set element's attached internals to true.
+  // 6. If element's custom element state is not "precustomized" or "custom",
+  //    then throw a "NotSupportedError" DOMException.
+  if (ceData->mState != CustomElementData::State::ePrecustomized &&
+      ceData->mState != CustomElementData::State::eCustom) {
+    aRv.ThrowNotSupportedError(
+        R"(Custom element state is not "precustomized" or "custom".)");
+    return nullptr;
+  }
+
+  // 7. Set element's attached internals to true.
   ceData->AttachedInternals();
 
-  // 7. Create a new ElementInternals instance targeting element, and return it.
+  // 8. Create a new ElementInternals instance targeting element, and return it.
   return MakeAndAddRef<ElementInternals>(this);
 }
 

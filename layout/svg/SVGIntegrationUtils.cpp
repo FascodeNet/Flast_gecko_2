@@ -17,8 +17,6 @@
 #include "nsLayoutUtils.h"
 #include "gfxContext.h"
 #include "SVGPaintServerFrame.h"
-#include "FrameLayerBuilder.h"
-#include "BasicLayers.h"
 #include "mozilla/gfx/Point.h"
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/CSSClipPathInstance.h"
@@ -954,18 +952,9 @@ void PaintMaskAndClipPathInternal(const PaintFramesParams& aParams,
     }
 
     if (shouldPushMask) {
-      if (aParams.layerManager &&
-          aParams.layerManager->GetRoot()->GetContentFlags() &
-              Layer::CONTENT_COMPONENT_ALPHA) {
-        context.PushGroupAndCopyBackground(
-            gfxContentType::COLOR_ALPHA,
-            opacityApplied ? 1.0 : maskUsage.opacity, maskSurface,
-            maskTransform);
-      } else {
-        context.PushGroupForBlendBack(gfxContentType::COLOR_ALPHA,
-                                      opacityApplied ? 1.0 : maskUsage.opacity,
-                                      maskSurface, maskTransform);
-      }
+      context.PushGroupForBlendBack(gfxContentType::COLOR_ALPHA,
+                                    opacityApplied ? 1.0 : maskUsage.opacity,
+                                    maskSurface, maskTransform);
     }
   }
 
@@ -1022,19 +1011,6 @@ void PaintMaskAndClipPathInternal(const PaintFramesParams& aParams,
   if (shouldPushMask) {
     context.PopGroupAndBlend();
   }
-}
-
-void SVGIntegrationUtils::PaintMaskAndClipPath(
-    const PaintFramesParams& aParams) {
-  PaintMaskAndClipPathInternal(aParams, [&] {
-    gfxContext& context = aParams.ctx;
-    BasicLayerManager* basic = aParams.layerManager->AsBasicLayerManager();
-    RefPtr<gfxContext> oldCtx = basic->GetTarget();
-    basic->SetTarget(&context);
-    aParams.layerManager->EndTransaction(FrameLayerBuilder::DrawPaintedLayer,
-                                         aParams.builder);
-    basic->SetTarget(oldCtx);
-  });
 }
 
 void SVGIntegrationUtils::PaintMaskAndClipPath(

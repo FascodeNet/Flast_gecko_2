@@ -14,6 +14,11 @@ const FeatureManifest = {
   urlbar: {
     description: "The Address Bar",
     variables: {
+      merinoEnabled: {
+        type: "boolean",
+        fallbackPref: "browser.urlbar.merino.enabled",
+        description: "Whether Merino is enabled as a quick suggest source",
+      },
       quickSuggestEnabled: {
         type: "boolean",
         fallbackPref: "browser.urlbar.quicksuggest.enabled",
@@ -24,6 +29,19 @@ const FeatureManifest = {
         fallbackPref: "browser.urlbar.quicksuggest.nonSponsoredIndex",
         description:
           "The index of non-sponsored QuickSuggest results within the general group. A negative index is relative to the end of the group",
+      },
+      quickSuggestRemoteSettingsEnabled: {
+        type: "boolean",
+        fallbackPref: "browser.urlbar.quicksuggest.remoteSettings.enabled",
+        description:
+          "Whether Remote Settings is enabled as a quick suggest source",
+      },
+      quickSuggestScenario: {
+        // IMPORTANT: This should not have a fallbackPref. See UrlbarPrefs.jsm.
+        type: "string",
+        description:
+          "The Firefox Suggest scenario in which the user is enrolled",
+        enum: ["history", "offline", "online"],
       },
       quickSuggestShouldShowOnboardingDialog: {
         type: "boolean",
@@ -211,6 +229,7 @@ const FeatureManifest = {
         type: "string",
         description:
           "Sets the position of the promo section. Possible values are: top, below-search, bottom. Default bottom.",
+        enum: ["top", "below-search", "bottom"],
       },
       promoTitle: {
         type: "string",
@@ -240,6 +259,7 @@ const FeatureManifest = {
         type: "string",
         description:
           "Type of promo link type. Possible values: link, button. Default is link.",
+        enum: ["link", "button"],
       },
       promoImageLarge: {
         type: "string",

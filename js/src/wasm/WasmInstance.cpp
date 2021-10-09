@@ -28,10 +28,8 @@
 
 #include "jit/AtomicOperations.h"
 #include "jit/Disassemble.h"
-#include "jit/InlinableNatives.h"
 #include "jit/JitCommon.h"
 #include "jit/JitRuntime.h"
-#include "jit/JitScript.h"
 #include "js/ForOfIterator.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "util/StringBuffer.h"
@@ -40,6 +38,7 @@
 #include "vm/PlainObject.h"  // js::PlainObject
 #include "wasm/TypedObject.h"
 #include "wasm/WasmBuiltins.h"
+#include "wasm/WasmDebugFrame.h"
 #include "wasm/WasmJS.h"
 #include "wasm/WasmModule.h"
 #include "wasm/WasmStubs.h"
@@ -2015,7 +2014,7 @@ bool Instance::callExport(JSContext* cx, uint32_t funcIndex, CallArgs args,
     // function returns a primary type, which is the case for all asm.js
     // exported functions, the returned value is discarded and an empty
     // object is returned instead.
-    PlainObject* obj = NewBuiltinClassInstance<PlainObject>(cx);
+    PlainObject* obj = NewPlainObject(cx);
     if (!obj) {
       return false;
     }

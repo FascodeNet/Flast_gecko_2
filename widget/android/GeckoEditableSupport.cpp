@@ -687,18 +687,30 @@ void GeckoEditableSupport::FlushIMEChanges(FlushChangesFlag aFlags) {
   int32_t selEnd = -1;
 
   if (mIMESelectionChanged) {
-    WidgetQueryContentEvent querySelectedTextEvent(true, eQuerySelectedText,
-                                                   widget);
-    widget->DispatchEvent(&querySelectedTextEvent, status);
+    if (mCachedSelection.IsValid()) {
+      selStart = mCachedSelection.mStartOffset;
+      selEnd = mCachedSelection.mEndOffset;
+    } else {
+      // XXX Unfortunately we don't know current selection via selection
+      //     change notification.
+      //     eQuerySelectedText might be newer data than text change data.
+      //     It means that GeckoEditableChild.onSelectionChange may throw
+      //     IllegalArgumentException since we don't merge with newer text
+      //     change.
+      WidgetQueryContentEvent querySelectedTextEvent(true, eQuerySelectedText,
+                                                     widget);
+      widget->DispatchEvent(&querySelectedTextEvent, status);
 
-    if (shouldAbort(NS_WARN_IF(querySelectedTextEvent.DidNotFindSelection()))) {
-      return;
+      if (shouldAbort(
+              NS_WARN_IF(querySelectedTextEvent.DidNotFindSelection()))) {
+        return;
+      }
+
+      selStart = static_cast<int32_t>(
+          querySelectedTextEvent.mReply->SelectionStartOffset());
+      selEnd = static_cast<int32_t>(
+          querySelectedTextEvent.mReply->SelectionEndOffset());
     }
-
-    selStart = static_cast<int32_t>(
-        querySelectedTextEvent.mReply->SelectionStartOffset());
-    selEnd = static_cast<int32_t>(
-        querySelectedTextEvent.mReply->SelectionEndOffset());
 
     if (aFlags == FLUSH_FLAG_RECOVER && textTransaction.IsValid()) {
       // Sometimes we get out-of-bounds selection during recovery.
@@ -1293,6 +1305,8 @@ nsresult GeckoEditableSupport::NotifyIME(
         mDispatcher = dispatcher;
         mIMEKeyEvents.Clear();
 
+        mCachedSelection.Reset();
+
         mIMEDelaySynchronizeReply = false;
         mIMEActiveCompositionCount = 0;
         FlushIMEText();
@@ -1332,6 +1346,12 @@ nsresult GeckoEditableSupport::NotifyIME(
     case NOTIFY_IME_OF_SELECTION_CHANGE: {
       ALOGIME("IME: NOTIFY_IME_OF_SELECTION_CHANGE: SelectionChangeData=%s",
               ToString(aNotification.mSelectionChangeData).c_str());
+
+      mCachedSelection.mStartOffset =
+          aNotification.mSelectionChangeData.mOffset;
+      mCachedSelection.mEndOffset =
+          aNotification.mSelectionChangeData.mString->Length() +
+          aNotification.mSelectionChangeData.mOffset;
 
       PostFlushIMEChanges();
       mIMESelectionChanged = true;
@@ -1413,6 +1433,17 @@ GeckoEditableSupport::GetIMENotificationRequests() {
   return IMENotificationRequests(IMENotificationRequests::NOTIFY_TEXT_CHANGE);
 }
 
+static bool ShouldKeyboardDismiss(const nsAString& aInputType,
+                                  const nsAString& aInputmode) {
+  // Some input type uses the prompt to input value. So it is unnecessary to
+  // show software keyboard.
+  return aInputmode.EqualsLiteral("none") || aInputType.EqualsLiteral("date") ||
+         aInputType.EqualsLiteral("time") ||
+         aInputType.EqualsLiteral("month") ||
+         aInputType.EqualsLiteral("week") ||
+         aInputType.EqualsLiteral("datetime-local");
+}
+
 void GeckoEditableSupport::SetInputContext(const InputContext& aContext,
                                            const InputContextAction& aAction) {
   // SetInputContext is called from chrome process only
@@ -1428,7 +1459,8 @@ void GeckoEditableSupport::SetInputContext(const InputContext& aContext,
   mInputContext = aContext;
 
   if (mInputContext.mIMEState.mEnabled != IMEEnabled::Disabled &&
-      !mInputContext.mHTMLInputInputmode.EqualsLiteral("none") &&
+      !ShouldKeyboardDismiss(mInputContext.mHTMLInputType,
+                             mInputContext.mHTMLInputInputmode) &&
       aAction.UserMightRequestOpenVKB()) {
     // Don't reset keyboard when we should simply open the vkb
     mEditable->NotifyIME(EditableListener::NOTIFY_IME_OPEN_VKB);
@@ -1459,7 +1491,10 @@ void GeckoEditableSupport::NotifyIMEContext(const InputContext& aContext,
       (aAction.IsHandlingUserInput() || aContext.mHasHandledUserInput);
   const int32_t flags =
       (inPrivateBrowsing ? EditableListener::IME_FLAG_PRIVATE_BROWSING : 0) |
-      (isUserAction ? EditableListener::IME_FLAG_USER_ACTION : 0);
+      (isUserAction ? EditableListener::IME_FLAG_USER_ACTION : 0) |
+      (aAction.mFocusChange == InputContextAction::FOCUS_NOT_CHANGED
+           ? EditableListener::IME_FOCUS_NOT_CHANGED
+           : 0);
 
   mEditable->NotifyIMEContext(
       static_cast<int32_t>(aContext.mIMEState.mEnabled),

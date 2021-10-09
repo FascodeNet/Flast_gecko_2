@@ -51,6 +51,7 @@
 #include "mozilla/dom/HTMLDNSPrefetch.h"
 #include "mozilla/dom/HTMLInputElement.h"
 #include "mozilla/dom/SVGElementFactory.h"
+#include "nsLanguageAtomService.h"
 #include "nsMathMLAtoms.h"
 #include "nsMathMLOperators.h"
 #include "Navigator.h"
@@ -59,7 +60,6 @@
 #include "DisplayItemClip.h"
 #include "HitTestInfo.h"
 #include "ActiveLayerTracker.h"
-#include "FrameLayerBuilder.h"
 #include "AnimationCommon.h"
 #include "LayerAnimationInfo.h"
 #include "mozilla/TimelineConsumers.h"
@@ -320,6 +320,7 @@ void nsLayoutStatics::Shutdown() {
   HTMLDNSPrefetch::Shutdown();
   nsCSSRendering::Shutdown();
   StaticPresData::Shutdown();
+  nsLanguageAtomService::Shutdown();
 #ifdef DEBUG
   nsIFrame::DisplayReflowShutdown();
 #endif
@@ -357,7 +358,6 @@ void nsLayoutStatics::Shutdown() {
   nsGlobalWindowInner::ShutDown();
   nsGlobalWindowOuter::ShutDown();
   nsListControlFrame::Shutdown();
-  FrameLayerBuilder::Shutdown();
 
   CubebUtils::ShutdownLibrary();
   WebAudioUtils::Shutdown();

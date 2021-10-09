@@ -58,6 +58,7 @@ dictionary ProfilerMarkerOptions {
 dictionary InteractionData {
   unsigned long interactionCount = 0;
   unsigned long interactionTimeInMilliseconds = 0;
+  unsigned long scrollingDistanceInPixels = 0;
 };
 
 /**
@@ -317,6 +318,18 @@ partial namespace ChromeUtils {
   getBaseDomainFromPartitionKey(DOMString partitionKey);
 
   /**
+   * Returns the partitionKey for a given URL.
+   *
+   * The function will treat the URL as a first party and construct the
+   * partitionKey according to the scheme, site and port in the URL.
+   *
+   * Throws for invalid urls.
+   */
+  [Throws]
+  DOMString
+  getPartitionKeyFromURL(DOMString url);
+
+  /**
    * Loads and compiles the script at the given URL and returns an object
    * which may be used to execute it repeatedly, in different globals, without
    * re-parsing.
@@ -571,7 +584,15 @@ partial namespace ChromeUtils {
    */
   [Throws, ChromeOnly]
   record<DOMString, InteractionData> consumeInteractionData();
-  
+
+  /**
+   * Returns a record of user scrolling interactions collected from content processes.
+   *
+   * Valid keys: "Scrolling"
+   */
+  [Throws]
+  Promise<InteractionData> collectScrollingData();
+
 };
 
 /*
