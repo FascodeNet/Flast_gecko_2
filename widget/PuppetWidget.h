@@ -117,9 +117,6 @@ class PuppetWidget : public nsBaseWidget,
 
   virtual void SetFocus(Raise, mozilla::dom::CallerType aCallerType) override;
 
-  virtual nsresult ConfigureChildren(
-      const nsTArray<Configuration>& aConfigurations) override;
-
   virtual void Invalidate(const LayoutDeviceIntRect& aRect) override;
 
   // PuppetWidgets don't have native data, as they're purely nonnative.
@@ -272,10 +269,13 @@ class PuppetWidget : public nsBaseWidget,
                                             nsIObserver* aObserver) override;
   virtual nsresult ClearNativeTouchSequence(nsIObserver* aObserver) override;
   virtual uint32_t GetMaxTouchPoints() const override;
-  virtual nsresult SynthesizeNativePenInput(
-      uint32_t aPointerId, TouchPointerState aPointerState,
-      LayoutDeviceIntPoint aPoint, double aPressure, uint32_t aRotation,
-      int32_t aTiltX, int32_t aTiltY, nsIObserver* aObserver) override;
+  virtual nsresult SynthesizeNativePenInput(uint32_t aPointerId,
+                                            TouchPointerState aPointerState,
+                                            LayoutDeviceIntPoint aPoint,
+                                            double aPressure,
+                                            uint32_t aRotation, int32_t aTiltX,
+                                            int32_t aTiltY, int32_t aButton,
+                                            nsIObserver* aObserver) override;
 
   virtual nsresult SynthesizeNativeTouchpadDoubleTap(
       LayoutDeviceIntPoint aPoint, uint32_t aModifierFlags) override;

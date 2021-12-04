@@ -12,12 +12,17 @@
 #include "nsIClassOfService.h"
 #include "nsIDNSRecord.h"
 #include "nsIInterfaceRequestorUtils.h"
+#include "nsSocketTransportService2.h"
 #include "nsDNSService2.h"
 #include "nsQueryObject.h"
 #include "nsURLHelper.h"
 #include "mozilla/Components.h"
 #include "mozilla/StaticPrefs_network.h"
 #include "mozilla/SyncRunnable.h"
+#include "nsHttpHandler.h"
+#include "ConnectionEntry.h"
+#include "HttpConnectionUDP.h"
+#include "nsServiceManagerUtils.h"
 
 // Log on level :5, instead of default :4.
 #undef LOG
@@ -48,13 +53,11 @@ DnsAndConnectSocket::DnsAndConnectSocket(nsHttpConnectionInfo* ci,
                                          uint32_t caps, bool speculative,
                                          bool isFromPredictor, bool urgentStart)
     : mTransaction(trans),
-      mPrimaryTransport(false),
       mCaps(caps),
       mSpeculative(speculative),
       mUrgentStart(urgentStart),
       mIsFromPredictor(isFromPredictor),
-      mConnInfo(ci),
-      mBackupTransport(true) {
+      mConnInfo(ci) {
   MOZ_ASSERT(ci && trans, "constructor with null arguments");
   LOG(("Creating DnsAndConnectSocket [this=%p trans=%p ent=%s key=%s]\n", this,
        trans, mConnInfo->Origin(), mConnInfo->HashKey().get()));
@@ -1195,6 +1198,7 @@ nsresult DnsAndConnectSocket::TransportSetup::SetupStreams(
   NS_ENSURE_SUCCESS(rv, rv);
 
   if (gHttpHandler->EchConfigEnabled()) {
+    MOZ_ASSERT(!ci->IsHttp3());
     rv = socketTransport->SetEchConfig(ci->GetEchConfig());
     NS_ENSURE_SUCCESS(rv, rv);
   }

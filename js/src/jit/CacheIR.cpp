@@ -2701,9 +2701,10 @@ static bool CanAttachGlobalName(JSContext* cx,
 
 AttachDecision GetNameIRGenerator::tryAttachGlobalNameValue(ObjOperandId objId,
                                                             HandleId id) {
-  if (!IsGlobalOp(JSOp(*pc_)) || script_->hasNonSyntacticScope()) {
+  if (!IsGlobalOp(JSOp(*pc_))) {
     return AttachDecision::NoAction;
   }
+  MOZ_ASSERT(!script_->hasNonSyntacticScope());
 
   auto* globalLexical = &env_->as<GlobalLexicalEnvironmentObject>();
 
@@ -2763,9 +2764,10 @@ AttachDecision GetNameIRGenerator::tryAttachGlobalNameValue(ObjOperandId objId,
 
 AttachDecision GetNameIRGenerator::tryAttachGlobalNameGetter(ObjOperandId objId,
                                                              HandleId id) {
-  if (!IsGlobalOp(JSOp(*pc_)) || script_->hasNonSyntacticScope()) {
+  if (!IsGlobalOp(JSOp(*pc_))) {
     return AttachDecision::NoAction;
   }
+  MOZ_ASSERT(!script_->hasNonSyntacticScope());
 
   Handle<GlobalLexicalEnvironmentObject*> globalLexical =
       env_.as<GlobalLexicalEnvironmentObject>();
@@ -2945,9 +2947,10 @@ AttachDecision BindNameIRGenerator::tryAttachStub() {
 
 AttachDecision BindNameIRGenerator::tryAttachGlobalName(ObjOperandId objId,
                                                         HandleId id) {
-  if (!IsGlobalOp(JSOp(*pc_)) || script_->hasNonSyntacticScope()) {
+  if (!IsGlobalOp(JSOp(*pc_))) {
     return AttachDecision::NoAction;
   }
+  MOZ_ASSERT(!script_->hasNonSyntacticScope());
 
   Handle<GlobalLexicalEnvironmentObject*> globalLexical =
       env_.as<GlobalLexicalEnvironmentObject>();
@@ -4769,27 +4772,30 @@ AttachDecision GetIteratorIRGenerator::tryAttachStub() {
 
   AutoAssertNoPendingException aanpe(cx_);
 
-  if (mode_ == ICState::Mode::Megamorphic) {
-    return AttachDecision::NoAction;
-  }
-
   ValOperandId valId(writer.setInputOperandId(0));
-  if (!val_.isObject()) {
+
+  if (mode_ == ICState::Mode::Megamorphic) {
+    TRY_ATTACH(tryAttachMegamorphic(valId));
     return AttachDecision::NoAction;
   }
 
-  RootedObject obj(cx_, &val_.toObject());
-
-  ObjOperandId objId = writer.guardToObject(valId);
-  TRY_ATTACH(tryAttachNativeIterator(objId, obj));
+  TRY_ATTACH(tryAttachNativeIterator(valId));
+  TRY_ATTACH(tryAttachNullOrUndefined(valId));
 
   trackAttached(IRGenerator::NotAttached);
   return AttachDecision::NoAction;
 }
 
 AttachDecision GetIteratorIRGenerator::tryAttachNativeIterator(
-    ObjOperandId objId, HandleObject obj) {
+    ValOperandId valId) {
   MOZ_ASSERT(JSOp(*pc_) == JSOp::Iter);
+
+  if (!val_.isObject()) {
+    return AttachDecision::NoAction;
+  }
+
+  RootedObject obj(cx_, &val_.toObject());
+  ObjOperandId objId = writer.guardToObject(valId);
 
   PropertyIteratorObject* iterobj = LookupInIteratorCache(cx_, obj);
   if (!iterobj) {
@@ -4812,7 +4818,44 @@ AttachDecision GetIteratorIRGenerator::tryAttachNativeIterator(
   writer.loadObjectResult(iterId);
   writer.returnFromIC();
 
-  trackAttached("GetIterator");
+  trackAttached("NativeIterator");
+  return AttachDecision::Attach;
+}
+
+AttachDecision GetIteratorIRGenerator::tryAttachMegamorphic(
+    ValOperandId valId) {
+  MOZ_ASSERT(JSOp(*pc_) == JSOp::Iter);
+
+  writer.valueToIteratorResult(valId);
+  writer.returnFromIC();
+
+  trackAttached("Megamorphic");
+  return AttachDecision::Attach;
+}
+
+AttachDecision GetIteratorIRGenerator::tryAttachNullOrUndefined(
+    ValOperandId valId) {
+  MOZ_ASSERT(JSOp(*pc_) == JSOp::Iter);
+
+  // For null/undefined we can simply return the empty iterator singleton. This
+  // works because this iterator is unlinked and immutable.
+
+  if (!val_.isNullOrUndefined()) {
+    return AttachDecision::NoAction;
+  }
+
+  PropertyIteratorObject* emptyIter = cx_->global()->maybeEmptyIterator();
+  if (!emptyIter) {
+    return AttachDecision::NoAction;
+  }
+
+  writer.guardIsNullOrUndefined(valId);
+
+  ObjOperandId iterId = writer.loadObject(emptyIter);
+  writer.loadObjectResult(iterId);
+  writer.returnFromIC();
+
+  trackAttached("NullOrUndefined");
   return AttachDecision::Attach;
 }
 
@@ -6755,8 +6798,10 @@ AttachDecision CallIRGenerator::tryAttachMathHypot(HandleFunction callee) {
   // Guard callee is the 'hypot' native function.
   emitNativeCalleeGuard(callee);
 
-  ValOperandId firstId = writer.loadStandardCallArgument(0, argc_);
-  ValOperandId secondId = writer.loadStandardCallArgument(1, argc_);
+  ValOperandId firstId =
+      writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  ValOperandId secondId =
+      writer.loadArgumentFixedSlot(ArgumentKind::Arg1, argc_);
 
   NumberOperandId firstNumId = writer.guardIsNumber(firstId);
   NumberOperandId secondNumId = writer.guardIsNumber(secondId);
@@ -6771,13 +6816,13 @@ AttachDecision CallIRGenerator::tryAttachMathHypot(HandleFunction callee) {
       writer.mathHypot2NumberResult(firstNumId, secondNumId);
       break;
     case 3:
-      thirdId = writer.loadStandardCallArgument(2, argc_);
+      thirdId = writer.loadArgumentFixedSlot(ArgumentKind::Arg2, argc_);
       thirdNumId = writer.guardIsNumber(thirdId);
       writer.mathHypot3NumberResult(firstNumId, secondNumId, thirdNumId);
       break;
     case 4:
-      thirdId = writer.loadStandardCallArgument(2, argc_);
-      fourthId = writer.loadStandardCallArgument(3, argc_);
+      thirdId = writer.loadArgumentFixedSlot(ArgumentKind::Arg2, argc_);
+      fourthId = writer.loadArgumentFixedSlot(ArgumentKind::Arg3, argc_);
       thirdNumId = writer.guardIsNumber(thirdId);
       fourthNumId = writer.guardIsNumber(fourthId);
       writer.mathHypot4NumberResult(firstNumId, secondNumId, thirdNumId,
@@ -6843,19 +6888,23 @@ AttachDecision CallIRGenerator::tryAttachMathMinMax(HandleFunction callee,
   emitNativeCalleeGuard(callee);
 
   if (allInt32) {
-    ValOperandId valId = writer.loadStandardCallArgument(0, argc_);
+    ValOperandId valId =
+        writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
     Int32OperandId resId = writer.guardToInt32(valId);
     for (size_t i = 1; i < argc_; i++) {
-      ValOperandId argId = writer.loadStandardCallArgument(i, argc_);
+      ValOperandId argId =
+          writer.loadArgumentFixedSlot(ArgumentKindForArgIndex(i), argc_);
       Int32OperandId argInt32Id = writer.guardToInt32(argId);
       resId = writer.int32MinMax(isMax, resId, argInt32Id);
     }
     writer.loadInt32Result(resId);
   } else {
-    ValOperandId valId = writer.loadStandardCallArgument(0, argc_);
+    ValOperandId valId =
+        writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
     NumberOperandId resId = writer.guardIsNumber(valId);
     for (size_t i = 1; i < argc_; i++) {
-      ValOperandId argId = writer.loadStandardCallArgument(i, argc_);
+      ValOperandId argId =
+          writer.loadArgumentFixedSlot(ArgumentKindForArgIndex(i), argc_);
       NumberOperandId argNumId = writer.guardIsNumber(argId);
       resId = writer.numberMinMax(isMax, resId, argNumId);
     }
@@ -7649,7 +7698,7 @@ AttachDecision CallIRGenerator::tryAttachObjectIsPrototypeOf(
 
   // Guard that |this| is an object.
   ValOperandId thisValId =
-      writer.loadArgumentDynamicSlot(ArgumentKind::This, argcId);
+      writer.loadArgumentFixedSlot(ArgumentKind::This, argc_);
   ObjOperandId thisObjId = writer.guardToObject(thisValId);
 
   ValOperandId argId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
@@ -7685,7 +7734,7 @@ AttachDecision CallIRGenerator::tryAttachObjectToString(HandleFunction callee) {
 
   // Guard that |this| is an object.
   ValOperandId thisValId =
-      writer.loadArgumentDynamicSlot(ArgumentKind::This, argcId);
+      writer.loadArgumentFixedSlot(ArgumentKind::This, argc_);
   ObjOperandId thisObjId = writer.guardToObject(thisValId);
 
   writer.objectToStringResult(thisObjId);
@@ -9307,20 +9356,9 @@ ScriptedThisResult CallIRGenerator::getThisForScripted(
 
   // Only attach a stub if the newTarget is a function with a
   // nonconfigurable prototype.
-  RootedValue protov(cx_);
   RootedObject newTarget(cx_, &newTarget_.toObject());
   if (!newTarget->is<JSFunction>() ||
       !newTarget->as<JSFunction>().hasNonConfigurablePrototypeDataProperty()) {
-    return ScriptedThisResult::NoAction;
-  }
-
-  if (!GetProperty(cx_, newTarget, newTarget, cx_->names().prototype,
-                   &protov)) {
-    cx_->clearPendingException();
-    return ScriptedThisResult::NoAction;
-  }
-
-  if (!protov.isObject()) {
     return ScriptedThisResult::NoAction;
   }
 
@@ -9411,15 +9449,23 @@ AttachDecision CallIRGenerator::tryAttachCallScripted(
       uint32_t slot = prop->slot();
       MOZ_ASSERT(slot >= newTarget->numFixedSlots(),
                  "Stub code relies on this");
-      JSObject* prototypeObject = &newTarget->getSlot(slot).toObject();
 
       ValOperandId newTargetValId = writer.loadArgumentDynamicSlot(
           ArgumentKind::NewTarget, argcId, flags);
       ObjOperandId newTargetObjId = writer.guardToObject(newTargetValId);
       writer.guardShape(newTargetObjId, newTarget->shape());
-      ObjOperandId protoId = writer.loadObject(prototypeObject);
-      writer.guardDynamicSlotIsSpecificObject(
-          newTargetObjId, protoId, slot - newTarget->numFixedSlots());
+
+      const Value& value = newTarget->getSlot(slot);
+      if (value.isObject()) {
+        JSObject* prototypeObject = &value.toObject();
+
+        ObjOperandId protoId = writer.loadObject(prototypeObject);
+        writer.guardDynamicSlotIsSpecificObject(
+            newTargetObjId, protoId, slot - newTarget->numFixedSlots());
+      } else {
+        writer.guardDynamicSlotIsNotObject(newTargetObjId,
+                                           slot - newTarget->numFixedSlots());
+      }
 
       // Call metaScriptedTemplateObject before emitting the call, so that Warp
       // can use this template object before transpiling the call.

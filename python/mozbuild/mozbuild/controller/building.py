@@ -1055,7 +1055,7 @@ class BuildDriver(MozbuildObject):
     """Provides a high-level API for build actions."""
 
     def __init__(self, *args, **kwargs):
-        MozbuildObject.__init__(self, *args, **kwargs)
+        MozbuildObject.__init__(self, *args, virtualenv_name="build", **kwargs)
         self.metrics = None
         self.mach_context = None
 
@@ -1064,6 +1064,7 @@ class BuildDriver(MozbuildObject):
         metrics,
         what=None,
         jobs=0,
+        job_size=0,
         directory=None,
         verbose=False,
         keep_going=False,
@@ -1190,18 +1191,13 @@ class BuildDriver(MozbuildObject):
                 ]
                 self.run_process(args, cwd=self.topobjdir, pass_thru=True)
 
-            if "Make" not in active_backend:
-                # client.mk has its own handling of MOZ_PARALLEL_BUILD so the
-                # make backend can determine when to run in single-threaded mode
-                # or parallel mode. For other backends, we can pass in the value
-                # of MOZ_PARALLEL_BUILD if -jX was not specified on the
-                # commandline.
-                if jobs == 0 and "make_extra" in self.mozconfig:
-                    for param in self.mozconfig["make_extra"]:
-                        key, value = param.split("=")
-                        if key == "MOZ_PARALLEL_BUILD":
-                            jobs = int(value)
+            if jobs == 0:
+                for param in self.mozconfig.get("make_extra") or []:
+                    key, value = param.split("=", 1)
+                    if key == "MOZ_PARALLEL_BUILD":
+                        jobs = int(value)
 
+            if "Make" not in active_backend:
                 backend_cls = get_backend_class(active_backend)(config)
                 status = backend_cls.build(self, output, jobs, verbose, what)
 
@@ -1260,6 +1256,7 @@ class BuildDriver(MozbuildObject):
                         print_directory=False,
                         ensure_exit_code=False,
                         num_jobs=jobs,
+                        job_size=job_size,
                         silent=not verbose,
                         append_env=tgt_env,
                         keep_going=keep_going,
@@ -1274,6 +1271,7 @@ class BuildDriver(MozbuildObject):
                 status = self._run_client_mk(
                     line_handler=output.on_line,
                     jobs=jobs,
+                    job_size=job_size,
                     verbose=verbose,
                     keep_going=keep_going,
                     append_env=append_env,
@@ -1624,6 +1622,7 @@ class BuildDriver(MozbuildObject):
         target=None,
         line_handler=None,
         jobs=0,
+        job_size=0,
         verbose=None,
         keep_going=False,
         append_env=None,
@@ -1700,13 +1699,13 @@ class BuildDriver(MozbuildObject):
         return self._run_make(
             srcdir=True,
             filename="client.mk",
-            allow_parallel=False,
             ensure_exit_code=False,
             print_directory=False,
             target=target,
             line_handler=line_handler,
             log=False,
             num_jobs=jobs,
+            job_size=job_size,
             silent=not verbose,
             keep_going=keep_going,
             append_env=append_env,

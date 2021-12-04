@@ -27,7 +27,7 @@
 #include "js/PropertySpec.h"
 #include "js/Wrapper.h"
 #include "util/DifferentialTesting.h"
-#include "util/Windows.h"
+#include "util/WindowsWrapper.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/GlobalObject.h"
 #include "vm/Interpreter.h"
@@ -964,6 +964,8 @@ const JSClass DataViewObject::class_ = {
     JSCLASS_HAS_RESERVED_SLOTS(DataViewObject::RESERVED_SLOTS) |
         JSCLASS_HAS_CACHED_PROTO(JSProto_DataView),
     &DataViewObjectClassOps, &DataViewObject::classSpec_};
+
+const JSClass* const JS::DataView::ClassPtr = &DataViewObject::class_;
 
 const JSClass DataViewObject::protoClass_ = {
     "DataView.prototype", JSCLASS_HAS_CACHED_PROTO(JSProto_DataView),

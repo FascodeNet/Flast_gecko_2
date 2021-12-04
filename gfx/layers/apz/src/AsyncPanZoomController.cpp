@@ -69,12 +69,12 @@
 #include "mozilla/layers/APZUtils.h"        // for AsyncTransform
 #include "mozilla/layers/CompositorController.h"  // for CompositorController
 #include "mozilla/layers/DirectionUtils.h"  // for GetAxis{Start,End,Length,Scale}
-#include "mozilla/mozalloc.h"                         // for operator new, etc
-#include "mozilla/Unused.h"                           // for unused
-#include "mozilla/FloatingPoint.h"                    // for FuzzyEquals*
-#include "nsAlgorithm.h"                              // for clamped
-#include "nsCOMPtr.h"                                 // for already_AddRefed
-#include "nsDebug.h"                                  // for NS_WARNING
+#include "mozilla/mozalloc.h"               // for operator new, etc
+#include "mozilla/Unused.h"                 // for unused
+#include "mozilla/FloatingPoint.h"          // for FuzzyEquals*
+#include "nsAlgorithm.h"                    // for clamped
+#include "nsCOMPtr.h"                       // for already_AddRefed
+#include "nsDebug.h"                        // for NS_WARNING
 #include "nsLayoutUtils.h"
 #include "nsMathUtils.h"  // for NS_hypot
 #include "nsPoint.h"      // for nsIntPoint
@@ -207,7 +207,7 @@ typedef PlatformSpecificStateBase
  * a state where we can't keep up with scrolling. The danger zone prefs specify
  * how wide this margin is; in the above example a y-axis danger zone of 10
  * pixels would make us drop to low-res at y=490...990.\n
- * This value is in layer pixels.
+ * This value is in screen pixels.
  *
  * \li\b apz.disable_for_scroll_linked_effects
  * Setting this pref to true will disable APZ scrolling on documents where
@@ -605,9 +605,9 @@ AutoApplyAsyncTestAttributes::~AutoApplyAsyncTestAttributes() {
 class ZoomAnimation : public AsyncPanZoomAnimation {
  public:
   ZoomAnimation(AsyncPanZoomController& aApzc, const CSSPoint& aStartOffset,
-                const CSSToParentLayerScale2D& aStartZoom,
+                const CSSToParentLayerScale& aStartZoom,
                 const CSSPoint& aEndOffset,
-                const CSSToParentLayerScale2D& aEndZoom)
+                const CSSToParentLayerScale& aEndZoom)
       : mApzc(aApzc),
         mTotalDuration(TimeDuration::FromMilliseconds(
             StaticPrefs::apz_zoom_animation_duration_ms())),
@@ -634,16 +634,14 @@ class ZoomAnimation : public AsyncPanZoomAnimation {
 
     // We scale the scrollOffset linearly with sampledPosition, so the zoom
     // needs to scale inversely to match.
-    if (mStartZoom == CSSToParentLayerScale2D(0, 0) ||
-        mEndZoom == CSSToParentLayerScale2D(0, 0)) {
+    if (mStartZoom == CSSToParentLayerScale(0) ||
+        mEndZoom == CSSToParentLayerScale(0)) {
       return false;
     }
 
-    aFrameMetrics.SetZoom(CSSToParentLayerScale2D(
-        1 / (sampledPosition / mEndZoom.xScale +
-             (1 - sampledPosition) / mStartZoom.xScale),
-        1 / (sampledPosition / mEndZoom.yScale +
-             (1 - sampledPosition) / mStartZoom.yScale)));
+    aFrameMetrics.SetZoom(
+        CSSToParentLayerScale(1 / (sampledPosition / mEndZoom.scale +
+                                   (1 - sampledPosition) / mStartZoom.scale)));
 
     mApzc.SetVisualScrollOffset(CSSPoint::FromUnknownPoint(gfx::Point(
         mEndOffset.x * sampledPosition + mStartOffset.x * (1 - sampledPosition),
@@ -665,13 +663,13 @@ class ZoomAnimation : public AsyncPanZoomAnimation {
   // interpolate between the start and end frames. We only use the
   // |mViewportScrollOffset| and |mResolution| fields on this.
   CSSPoint mStartOffset;
-  CSSToParentLayerScale2D mStartZoom;
+  CSSToParentLayerScale mStartZoom;
 
   // Target metrics for a zoom to animation. This is only valid when we are in
   // the "ANIMATED_ZOOM" state. We only use the |mViewportScrollOffset| and
   // |mResolution| fields on this.
   CSSPoint mEndOffset;
-  CSSToParentLayerScale2D mEndZoom;
+  CSSToParentLayerScale mEndZoom;
 };
 
 /*static*/
@@ -729,7 +727,6 @@ AsyncPanZoomController::AsyncPanZoomController(
       mInputQueue(aInputQueue),
       mPinchPaintTimerSet(false),
       mTestAttributeAppliers(0),
-      mAsyncTransformAppliedToContent(false),
       mTestHasAsyncKeyScrolled(false),
       mCheckerboardEventLock("APZCBELock") {
   if (aGestures == USE_GESTURE_DETECTOR) {
@@ -1549,14 +1546,12 @@ nsEventStatus AsyncPanZoomController::OnScale(const PinchGestureInput& aEvent) {
     // the minimum or maximum of the ratios of the widths and heights of the
     // page rect and the composition bounds).
     MOZ_ASSERT(Metrics().IsRootContent());
-    MOZ_ASSERT(Metrics().GetZoom().AreScalesSame());
 
-    // TODO: Need to handle different x-and y-scales.
-    CSSToParentLayerScale userZoom = Metrics().GetZoom().ToScaleFactor();
+    CSSToParentLayerScale userZoom = Metrics().GetZoom();
     ParentLayerPoint focusPoint =
         aEvent.mLocalFocusPoint - Metrics().GetCompositionBounds().TopLeft();
     CSSPoint cssFocusPoint;
-    if (Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+    if (Metrics().GetZoom() != CSSToParentLayerScale(0)) {
       cssFocusPoint = focusPoint / Metrics().GetZoom();
     }
 
@@ -1835,7 +1830,7 @@ CSSCoord AsyncPanZoomController::ConvertScrollbarPoint(
   RecursiveMutexAutoLock lock(mRecursiveMutex);
 
   CSSPoint scrollbarPoint;
-  if (Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+  if (Metrics().GetZoom() != CSSToParentLayerScale(0)) {
     // First, get it into the right coordinate space.
     scrollbarPoint = aScrollbarPoint / Metrics().GetZoom();
   }
@@ -2020,7 +2015,7 @@ nsEventStatus AsyncPanZoomController::OnKeyboard(const KeyboardInput& aEvent) {
   // Convert velocity from ParentLayerPoints/ms to ParentLayerPoints/s and then
   // to appunits/second.
   nsPoint velocity;
-  if (Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+  if (Metrics().GetZoom() != CSSToParentLayerScale(0)) {
     velocity =
         CSSPoint::ToAppUnits(ParentLayerPoint(mX.GetVelocity() * 1000.0f,
                                               mY.GetVelocity() * 1000.0f) /
@@ -2432,7 +2427,7 @@ nsEventStatus AsyncPanZoomController::OnScrollWheel(
 
       nsPoint deltaInAppUnits;
       nsPoint velocity;
-      if (Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+      if (Metrics().GetZoom() != CSSToParentLayerScale(0)) {
         deltaInAppUnits = CSSPoint::ToAppUnits(delta / Metrics().GetZoom());
         velocity =
             CSSPoint::ToAppUnits(ParentLayerPoint(mX.GetVelocity() * 1000.0f,
@@ -2527,7 +2522,7 @@ AsyncPanZoomController::GetDisplacementsForPanGesture(
     // Pan events with page units are used by Gtk, so this replicates Gtk:
     // https://gitlab.gnome.org/GNOME/gtk/blob/c734c7e9188b56f56c3a504abee05fa40c5475ac/gtk/gtkrange.c#L3065-3073
     CSSSize pageScrollSize;
-    CSSToParentLayerScale2D zoom;
+    CSSToParentLayerScale zoom;
     {
       // Grab the lock to access the frame metrics.
       RecursiveMutexAutoLock lock(mRecursiveMutex);
@@ -2538,10 +2533,10 @@ AsyncPanZoomController::GetDisplacementsForPanGesture(
     // scrollUnit* is in units of "ParentLayer pixels per page proportion"...
     auto scrollUnitWidth = std::min(std::pow(pageScrollSize.width, 2.0 / 3.0),
                                     pageScrollSize.width / 2.0) *
-                           zoom.xScale;
+                           zoom.scale;
     auto scrollUnitHeight = std::min(std::pow(pageScrollSize.height, 2.0 / 3.0),
                                      pageScrollSize.height / 2.0) *
-                            zoom.yScale;
+                            zoom.scale;
     // ... and pan displacements are in units of "page proportion count"
     // here, so the products of them and scrollUnit* are in ParentLayer pixels
     ParentLayerPoint physicalPanDisplacementPL(
@@ -3372,7 +3367,7 @@ bool AsyncPanZoomController::AttemptScroll(
     }
 
     if (!IsZero(adjustedDisplacement) &&
-        Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+        Metrics().GetZoom() != CSSToParentLayerScale(0)) {
       ScrollBy(adjustedDisplacement / Metrics().GetZoom());
       if (InputBlockState* block = GetCurrentInputBlock()) {
         bool displacementIsUserVisible = true;
@@ -3697,7 +3692,7 @@ void AsyncPanZoomController::SmoothScrollTo(const CSSPoint& aDestination,
   // to appunits/second.
   nsPoint destination = CSSPoint::ToAppUnits(aDestination);
   nsSize velocity;
-  if (Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+  if (Metrics().GetZoom() != CSSToParentLayerScale(0)) {
     velocity = CSSSize::ToAppUnits(ParentLayerSize(mX.GetVelocity() * 1000.0f,
                                                    mY.GetVelocity() * 1000.0f) /
                                    Metrics().GetZoom());
@@ -3735,7 +3730,7 @@ void AsyncPanZoomController::SmoothMsdScrollTo(const CSSPoint& aDestination) {
     SetState(SMOOTHMSD_SCROLL);
     // Convert velocity from ParentLayerPoints/ms to ParentLayerPoints/s.
     CSSPoint initialVelocity;
-    if (Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+    if (Metrics().GetZoom() != CSSToParentLayerScale(0)) {
       initialVelocity = ParentLayerPoint(mX.GetVelocity() * 1000.0f,
                                          mY.GetVelocity() * 1000.0f) /
                         Metrics().GetZoom();
@@ -3968,8 +3963,6 @@ void AsyncPanZoomController::ScaleWithFocus(float aScale,
 /*static*/
 gfx::IntSize AsyncPanZoomController::GetDisplayportAlignmentMultiplier(
     const ScreenSize& aBaseSize) {
-  MOZ_ASSERT(gfx::gfxVars::UseWebRender());
-
   gfx::IntSize multiplier(1, 1);
   float baseWidth = aBaseSize.width;
   while (baseWidth > 500) {
@@ -4033,26 +4026,24 @@ static CSSSize CalculateDisplayPortSize(
     yMultiplier = xMultiplier;
   }
 
-  if (gfx::gfxVars::UseWebRender()) {
-    // Scale down the margin multipliers by the alignment multiplier because
-    // the alignment code will expand the displayport outward to the multiplied
-    // alignment. This is not necessary for correctness, but for performance;
-    // if we don't do this the displayport can end up much larger. The math here
-    // is actually just scaling the part of the multipler that is > 1, so that
-    // we never end up with xMultiplier or yMultiplier being less than 1 (that
-    // would result in a guaranteed checkerboarding situation). Note that the
-    // calculation doesn't cancel exactly the increased margin from applying
-    // the alignment multiplier, but this is simple and should provide
-    // reasonable behaviour in most cases.
-    gfx::IntSize alignmentMultipler =
-        AsyncPanZoomController::GetDisplayportAlignmentMultiplier(
-            aCompositionSize * aDpPerCSS);
-    if (xMultiplier > 1) {
-      xMultiplier = ((xMultiplier - 1) / alignmentMultipler.width) + 1;
-    }
-    if (yMultiplier > 1) {
-      yMultiplier = ((yMultiplier - 1) / alignmentMultipler.height) + 1;
-    }
+  // Scale down the margin multipliers by the alignment multiplier because
+  // the alignment code will expand the displayport outward to the multiplied
+  // alignment. This is not necessary for correctness, but for performance;
+  // if we don't do this the displayport can end up much larger. The math here
+  // is actually just scaling the part of the multipler that is > 1, so that
+  // we never end up with xMultiplier or yMultiplier being less than 1 (that
+  // would result in a guaranteed checkerboarding situation). Note that the
+  // calculation doesn't cancel exactly the increased margin from applying
+  // the alignment multiplier, but this is simple and should provide
+  // reasonable behaviour in most cases.
+  gfx::IntSize alignmentMultipler =
+      AsyncPanZoomController::GetDisplayportAlignmentMultiplier(
+          aCompositionSize * aDpPerCSS);
+  if (xMultiplier > 1) {
+    xMultiplier = ((xMultiplier - 1) / alignmentMultipler.width) + 1;
+  }
+  if (yMultiplier > 1) {
+    yMultiplier = ((yMultiplier - 1) / alignmentMultipler.height) + 1;
   }
 
   return aCompositionSize * CSSSize(xMultiplier, yMultiplier);
@@ -4067,11 +4058,11 @@ static CSSSize CalculateDisplayPortSize(
 static CSSSize ExpandDisplayPortToDangerZone(
     const CSSSize& aDisplayPortSize, const FrameMetrics& aFrameMetrics) {
   CSSSize dangerZone(0.0f, 0.0f);
-  if (aFrameMetrics.LayersPixelsPerCSSPixel().xScale != 0 &&
-      aFrameMetrics.LayersPixelsPerCSSPixel().yScale != 0) {
-    dangerZone = LayerSize(StaticPrefs::apz_danger_zone_x(),
-                           StaticPrefs::apz_danger_zone_y()) /
-                 aFrameMetrics.LayersPixelsPerCSSPixel();
+  if (aFrameMetrics.DisplayportPixelsPerCSSPixel().xScale != 0 &&
+      aFrameMetrics.DisplayportPixelsPerCSSPixel().yScale != 0) {
+    dangerZone = ScreenSize(StaticPrefs::apz_danger_zone_x(),
+                            StaticPrefs::apz_danger_zone_y()) /
+                 aFrameMetrics.DisplayportPixelsPerCSSPixel();
   }
   const CSSSize compositionSize =
       aFrameMetrics.CalculateBoundedCompositedSizeInCssPixels();
@@ -4119,7 +4110,7 @@ const ScreenMargin AsyncPanZoomController::CalculatePendingDisplayPort(
   CSSSize compositionSize =
       aFrameMetrics.CalculateBoundedCompositedSizeInCssPixels();
   CSSPoint velocity;
-  if (aFrameMetrics.GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+  if (aFrameMetrics.GetZoom() != CSSToParentLayerScale(0)) {
     velocity = aVelocity / aFrameMetrics.GetZoom();  // avoid division by zero
   }
   CSSRect scrollableRect = aFrameMetrics.GetExpandedScrollableRect();
@@ -4173,7 +4164,8 @@ const ScreenMargin AsyncPanZoomController::CalculatePendingDisplayPort(
 
 void AsyncPanZoomController::ScheduleComposite() {
   if (mCompositorController) {
-    mCompositorController->ScheduleRenderOnCompositorThread();
+    mCompositorController->ScheduleRenderOnCompositorThread(
+        wr::RenderReasons::APZ);
   }
 }
 
@@ -4447,7 +4439,6 @@ bool AsyncPanZoomController::AdvanceAnimations(const SampleTime& aSampleTime) {
   // fling is happening, it has to keep compositing so that the animation is
   // smooth. If an animation frame is requested, it is the compositor's
   // responsibility to schedule a composite.
-  mAsyncTransformAppliedToContent = false;
   bool requestAnimationFrame = false;
   nsTArray<RefPtr<Runnable>> deferredTasks;
 
@@ -4480,15 +4471,6 @@ bool AsyncPanZoomController::AdvanceAnimations(const SampleTime& aSampleTime) {
   return requestAnimationFrame;
 }
 
-CSSRect AsyncPanZoomController::GetCurrentAsyncLayoutViewport(
-    AsyncTransformConsumer aMode) const {
-  RecursiveMutexAutoLock lock(mRecursiveMutex);
-  AutoApplyAsyncTestAttributes testAttributeApplier(this, lock);
-  MOZ_ASSERT(Metrics().IsRootContent(),
-             "Only the root content APZC has a layout viewport");
-  return GetEffectiveLayoutViewport(aMode, lock);
-}
-
 ParentLayerPoint AsyncPanZoomController::GetCurrentAsyncScrollOffset(
     AsyncTransformConsumer aMode) const {
   RecursiveMutexAutoLock lock(mRecursiveMutex);
@@ -4510,7 +4492,7 @@ AsyncTransform AsyncPanZoomController::GetCurrentAsyncTransform(
   RecursiveMutexAutoLock lock(mRecursiveMutex);
   AutoApplyAsyncTestAttributes testAttributeApplier(this, lock);
 
-  CSSToParentLayerScale2D effectiveZoom;
+  CSSToParentLayerScale effectiveZoom;
   if (aComponents.contains(AsyncTransformComponent::eVisual)) {
     effectiveZoom = GetEffectiveZoom(aMode, lock);
   } else {
@@ -4519,7 +4501,7 @@ AsyncTransform AsyncPanZoomController::GetCurrentAsyncTransform(
   }
 
   LayerToParentLayerScale compositedAsyncZoom =
-      (effectiveZoom / Metrics().LayersPixelsPerCSSPixel()).ToScaleFactor();
+      effectiveZoom / Metrics().LayersPixelsPerCSSPixel();
 
   ParentLayerPoint translation;
   if (aComponents.contains(AsyncTransformComponent::eVisual)) {
@@ -4565,11 +4547,8 @@ LayoutDeviceToParentLayerScale AsyncPanZoomController::GetCurrentPinchZoomScale(
     AsyncTransformConsumer aMode) const {
   RecursiveMutexAutoLock lock(mRecursiveMutex);
   AutoApplyAsyncTestAttributes testAttributeApplier(this, lock);
-  CSSToParentLayerScale2D scale = GetEffectiveZoom(aMode, lock);
-  // Note that in general the zoom might have different x- and y-scales.
-  // However, this function in particular is only used on the WebRender codepath
-  // for which the scales should always be the same.
-  return scale.ToScaleFactor() / Metrics().GetDevPixelsPerCSSPixel();
+  CSSToParentLayerScale scale = GetEffectiveZoom(aMode, lock);
+  return scale / Metrics().GetDevPixelsPerCSSPixel();
 }
 
 bool AsyncPanZoomController::SuppressAsyncScrollOffset() const {
@@ -4602,7 +4581,7 @@ CSSPoint AsyncPanZoomController::GetEffectiveScrollOffset(
   return Metrics().GetVisualScrollOffset();
 }
 
-CSSToParentLayerScale2D AsyncPanZoomController::GetEffectiveZoom(
+CSSToParentLayerScale AsyncPanZoomController::GetEffectiveZoom(
     AsyncTransformConsumer aMode,
     const RecursiveMutexAutoLock& aProofOfLock) const {
   if (aMode == eForCompositing && SuppressAsyncScrollOffset()) {
@@ -4698,18 +4677,18 @@ Matrix4x4 AsyncPanZoomController::GetTransformToLastDispatchedPaint() const {
   // We're interested in the async zoom change. Factor out the content scale
   // that may change when dragging the window to a monitor with a different
   // content scale.
-  LayoutDeviceToParentLayerScale2D lastContentZoom =
+  LayoutDeviceToParentLayerScale lastContentZoom =
       mLastContentPaintMetrics.GetZoom() /
       mLastContentPaintMetrics.GetDevPixelsPerCSSPixel();
-  LayoutDeviceToParentLayerScale2D lastDispatchedZoom =
+  LayoutDeviceToParentLayerScale lastDispatchedZoom =
       mExpectedGeckoMetrics.GetZoom() /
       mExpectedGeckoMetrics.GetDevPixelsPerCSSPixel();
-  gfxSize zoomChange(1.0, 1.0);
-  if (lastDispatchedZoom != LayoutDeviceToParentLayerScale2D(0, 0)) {
-    zoomChange = lastContentZoom / lastDispatchedZoom;
+  float zoomChange = 1.0;
+  if (lastDispatchedZoom != LayoutDeviceToParentLayerScale(0)) {
+    zoomChange = lastContentZoom.scale / lastDispatchedZoom.scale;
   }
   return Matrix4x4::Translation(scrollChange.x, scrollChange.y, 0)
-      .PostScale(zoomChange.width, zoomChange.height, 1);
+      .PostScale(zoomChange, zoomChange, 1);
 }
 
 CSSRect AsyncPanZoomController::GetVisibleRect(
@@ -4754,7 +4733,7 @@ uint32_t AsyncPanZoomController::GetCheckerboardMagnitude(
   ParentLayerRect visiblePartOfCompBoundsRelativeToItself =
       aClippedCompositionBounds - Metrics().GetCompositionBounds().TopLeft();
   CSSRect visiblePartOfCompBoundsRelativeToItselfInCssSpace;
-  if (Metrics().GetZoom() != CSSToParentLayerScale2D(0, 0)) {
+  if (Metrics().GetZoom() != CSSToParentLayerScale(0)) {
     visiblePartOfCompBoundsRelativeToItselfInCssSpace =
         (visiblePartOfCompBoundsRelativeToItself / Metrics().GetZoom());
   }
@@ -5004,12 +4983,11 @@ void AsyncPanZoomController::NotifyLayersUpdated(
       // our zoom to reflect that. Note that we can't just take
       // aLayerMetrics.mZoom because the APZ may have additional async zoom
       // since the repaint request.
-      gfxSize totalResolutionChange(1.0, 1.0);
+      float totalResolutionChange = 1.0;
 
-      if (Metrics().GetCumulativeResolution() !=
-          LayoutDeviceToLayerScale2D(0, 0)) {
-        totalResolutionChange = aLayerMetrics.GetCumulativeResolution() /
-                                Metrics().GetCumulativeResolution();
+      if (Metrics().GetCumulativeResolution() != LayoutDeviceToLayerScale(0)) {
+        totalResolutionChange = aLayerMetrics.GetCumulativeResolution().scale /
+                                Metrics().GetCumulativeResolution().scale;
       }
 
       float presShellResolutionChange = aLayerMetrics.GetPresShellResolution() /
@@ -5060,14 +5038,12 @@ void AsyncPanZoomController::NotifyLayersUpdated(
         aLayerMetrics.GetBoundingCompositionSize());
     Metrics().SetPresShellResolution(aLayerMetrics.GetPresShellResolution());
     Metrics().SetCumulativeResolution(aLayerMetrics.GetCumulativeResolution());
+    Metrics().SetTransformToAncestorScale(
+        aLayerMetrics.GetTransformToAncestorScale());
     mScrollMetadata.SetHasScrollgrab(aScrollMetadata.GetHasScrollgrab());
     mScrollMetadata.SetLineScrollAmount(aScrollMetadata.GetLineScrollAmount());
     mScrollMetadata.SetPageScrollAmount(aScrollMetadata.GetPageScrollAmount());
     mScrollMetadata.SetSnapInfo(ScrollSnapInfo(aScrollMetadata.GetSnapInfo()));
-    // The scroll clip can differ between layers associated a given scroll
-    // frame, so APZC (which keeps a single copy of ScrollMetadata per scroll
-    // frame) has no business using it.
-    mScrollMetadata.SetScrollClip(Nothing());
     mScrollMetadata.SetIsLayersIdRoot(aScrollMetadata.IsLayersIdRoot());
     mScrollMetadata.SetIsAutoDirRootContentRTL(
         aScrollMetadata.IsAutoDirRootContentRTL());
@@ -5088,6 +5064,8 @@ void AsyncPanZoomController::NotifyLayersUpdated(
 
   bool scrollOffsetUpdated = false;
   bool smoothScrollRequested = false;
+  bool didCancelAnimation = false;
+  Maybe<CSSPoint> cumulativeRelativeDelta;
   for (const auto& scrollUpdate : aScrollMetadata.GetScrollUpdates()) {
     APZC_LOG("%p processing scroll update %s\n", this,
              ToString(scrollUpdate).c_str());
@@ -5171,7 +5149,6 @@ void AsyncPanZoomController::NotifyLayersUpdated(
     }
 
     Maybe<CSSPoint> relativeDelta;
-
     if (scrollUpdate.GetType() == ScrollUpdateType::Relative) {
       APZC_LOG(
           "%p relative updating scroll offset from %s by %s\n", this,
@@ -5238,6 +5215,17 @@ void AsyncPanZoomController::NotifyLayersUpdated(
       }
     }
 
+    if (relativeDelta) {
+      cumulativeRelativeDelta =
+          !cumulativeRelativeDelta
+              ? relativeDelta
+              : Some(*cumulativeRelativeDelta + *relativeDelta);
+    } else {
+      // If the scroll update is not relative, clobber the cumulative delta,
+      // i.e. later updates win.
+      cumulativeRelativeDelta.reset();
+    }
+
     // If an animation is underway, tell it about the scroll offset update.
     // Some animations can handle some scroll offset updates and continue
     // running. Those that can't will return false, and we cancel them.
@@ -5246,12 +5234,18 @@ void AsyncPanZoomController::NotifyLayersUpdated(
       // after we update the scroll offset above. Otherwise we can be left
       // in a state where things are out of sync.
       CancelAnimation();
+      didCancelAnimation = true;
     }
   }
 
   if (scrollOffsetUpdated) {
     for (auto& sampledState : mSampledState) {
-      sampledState.UpdateScrollProperties(Metrics());
+      if (!didCancelAnimation && cumulativeRelativeDelta.isSome()) {
+        sampledState.UpdateScrollPropertiesWithRelativeDelta(
+            Metrics(), *cumulativeRelativeDelta);
+      } else {
+        sampledState.UpdateScrollProperties(Metrics());
+      }
     }
 
     // Because of the scroll generation update, any inflight paint requests
@@ -5467,13 +5461,7 @@ void AsyncPanZoomController::ZoomToRect(const ZoomTarget& aZoomTarget,
   {
     RecursiveMutexAutoLock lock(mRecursiveMutex);
 
-    // Only the root APZC is zoomable, and the root APZC is not allowed to have
-    // different x and y scales. If it did, the calculations in this function
-    // would have to be adjusted (as e.g. it would no longer be valid to take
-    // the minimum or maximum of the ratios of the widths and heights of the
-    // page rect and the composition bounds).
     MOZ_ASSERT(Metrics().IsRootContent());
-    MOZ_ASSERT(Metrics().GetZoom().AreScalesSame());
 
     const float defaultZoomInAmount =
         StaticPrefs::apz_doubletapzoom_defaultzoomin();
@@ -5482,8 +5470,7 @@ void AsyncPanZoomController::ZoomToRect(const ZoomTarget& aZoomTarget,
     CSSRect cssPageRect = Metrics().GetScrollableRect();
     CSSPoint scrollOffset = Metrics().GetVisualScrollOffset();
     CSSSize sizeBeforeZoom = Metrics().CalculateCompositedSizeInCssPixels();
-    // TODO: Need to handle different x-and y-scales.
-    CSSToParentLayerScale currentZoom = Metrics().GetZoom().ToScaleFactor();
+    CSSToParentLayerScale currentZoom = Metrics().GetZoom();
     CSSToParentLayerScale targetZoom;
 
     // The minimum zoom to prevent over-zoom-out.
@@ -5514,19 +5501,19 @@ void AsyncPanZoomController::ZoomToRect(const ZoomTarget& aZoomTarget,
     // 2. currentZoom is equal to mZoomConstraints.mMaxZoom and user still
     // double-tapping it
     // Treat these cases as a request to zoom out as much as possible
-    // unless we were passed the ZOOM_IN_IF_CANT_ZOOM_OUT flag and currentZoom
+    // unless cantZoomOutBehavior == ZoomIn and currentZoom
     // is equal to localMinZoom and user still double-tapping it, then try to
     // zoom in a small amount to provide feedback to the user.
     bool zoomOut = false;
     // True if we are already zoomed out and we are asked to either stay there
-    // or zoom out more and the ZOOM_IN_IF_CANT_ZOOM_OUT flag was passed.
+    // or zoom out more and cantZoomOutBehavior == ZoomIn.
     bool zoomInDefaultAmount = false;
     if (aFlags & DISABLE_ZOOM_OUT) {
       zoomOut = false;
     } else {
       if (rect.IsEmpty()) {
         if (currentZoom == localMinZoom &&
-            (aFlags & ZOOM_IN_IF_CANT_ZOOM_OUT) &&
+            aZoomTarget.cantZoomOutBehavior == CantZoomOutBehavior::ZoomIn &&
             (defaultZoomInAmount != 1.f)) {
           zoomInDefaultAmount = true;
         } else {
@@ -5539,7 +5526,8 @@ void AsyncPanZoomController::ZoomToRect(const ZoomTarget& aZoomTarget,
 
     // already at min zoom and asked to zoom out further
     if (!zoomOut && currentZoom == localMinZoom && targetZoom <= localMinZoom &&
-        (aFlags & ZOOM_IN_IF_CANT_ZOOM_OUT) && (defaultZoomInAmount != 1.f)) {
+        aZoomTarget.cantZoomOutBehavior == CantZoomOutBehavior::ZoomIn &&
+        (defaultZoomInAmount != 1.f)) {
       zoomInDefaultAmount = true;
     }
     MOZ_ASSERT(!(zoomInDefaultAmount && zoomOut));
@@ -5573,7 +5561,7 @@ void AsyncPanZoomController::ZoomToRect(const ZoomTarget& aZoomTarget,
         clamped(targetZoom.scale, localMinZoom.scale, localMaxZoom.scale);
 
     FrameMetrics endZoomToMetrics = Metrics();
-    endZoomToMetrics.SetZoom(CSSToParentLayerScale2D(targetZoom));
+    endZoomToMetrics.SetZoom(CSSToParentLayerScale(targetZoom));
     CSSSize sizeAfterZoom =
         endZoomToMetrics.CalculateCompositedSizeInCssPixels();
 
@@ -5972,8 +5960,8 @@ void AsyncPanZoomController::ScrollSnapToDestination() {
 bool AsyncPanZoomController::MaybeAdjustDeltaForScrollSnapping(
     ScrollUnit aUnit, ParentLayerPoint& aDelta, CSSPoint& aStartPosition) {
   RecursiveMutexAutoLock lock(mRecursiveMutex);
-  CSSToParentLayerScale2D zoom = Metrics().GetZoom();
-  if (zoom == CSSToParentLayerScale2D(0, 0)) {
+  CSSToParentLayerScale zoom = Metrics().GetZoom();
+  if (zoom == CSSToParentLayerScale(0)) {
     return false;
   }
   CSSPoint destination = Metrics().CalculateScrollRange().ClampPoint(

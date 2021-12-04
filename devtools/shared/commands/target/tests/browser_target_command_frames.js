@@ -368,11 +368,12 @@ async function testTabFrames(mainRoot) {
   // Check that calling getAllTargets([frame]) return the same target instances
   const frames = await targetCommand.getAllTargets([TYPES.FRAME]);
   // When fission is enabled, we also get the remote example.org iframe.
-  const expectedFramesCount = isFissionEnabled() ? 2 : 1;
+  const expectedFramesCount =
+    isFissionEnabled() || isEveryFrameTargetEnabled() ? 2 : 1;
   is(
     frames.length,
     expectedFramesCount,
-    "retrieved only the top level document"
+    "retrieved the expected number of targets"
   );
 
   // Assert that watchTargets will call the create callback for all existing frames
@@ -430,7 +431,7 @@ async function testTabFrames(mainRoot) {
     true,
     "First target is not considered as a target switching"
   );
-  if (isFissionEnabled()) {
+  if (isFissionEnabled() || isEveryFrameTargetEnabled()) {
     is(
       targets[1].targetFront.url,
       IFRAME_URL,
@@ -469,7 +470,7 @@ async function testTabFrames(mainRoot) {
   await BrowserTestUtils.loadURI(browser, SECOND_PAGE_URL);
   await onLoaded;
 
-  if (isFissionEnabled()) {
+  if (isFissionEnabled() || isEveryFrameTargetEnabled()) {
     const afterNavigationFramesCount = 3;
     await waitFor(
       () => targets.length == afterNavigationFramesCount,
@@ -502,24 +503,23 @@ async function testTabFrames(mainRoot) {
     );
     is(
       destroyedTargets[0].targetFront,
-      targets[0].targetFront,
-      "The first destroyed should be the previous top level one"
+      targets[1].targetFront,
+      "The first destroyed should be the iframe one"
     );
     is(
       destroyedTargets[0].isTargetSwitching,
-      true,
-      "the target destruction is flagged as target switching"
+      false,
+      "the target destruction is not flagged as target switching for iframes"
     );
-
     is(
       destroyedTargets[1].targetFront,
-      targets[1].targetFront,
-      "The second destroyed should be the iframe one"
+      targets[0].targetFront,
+      "The second destroyed should be the previous top level one (because it is delayed to be fired *after* will-navigate)"
     );
     is(
       destroyedTargets[1].isTargetSwitching,
-      false,
-      "the target destruction is not flagged as target switching for iframes"
+      true,
+      "the target destruction is flagged as target switching"
     );
   } else if (isServerTargetSwitchingEnabled()) {
     await waitFor(

@@ -25,11 +25,15 @@ add_task(async function setup() {
 
 const FAKE_CONTEXT = {
   experiment: ExperimentFakes.recipe("fake-test-experiment"),
+  source: "browser_experiment_evaluate_jexl",
 };
 
 add_task(async function test_throws_if_no_experiment_in_context() {
   await Assert.rejects(
-    RemoteSettingsExperimentLoader.evaluateJexl("true", { customThing: 1 }),
+    RemoteSettingsExperimentLoader.evaluateJexl("true", {
+      customThing: 1,
+      source: "test_throws_if_no_experiment_in_context",
+    }),
     /Expected an .experiment or .activeRemoteDefaults/,
     "should throw if experiment is not passed to the custom context"
   );
@@ -83,14 +87,15 @@ add_task(async function test_evaluate_active_experiments_activeExperiments() {
       branches: [
         {
           slug: "mochitest-active-foo",
-          feature: {
-            enabled: true,
-            featureId: "foo",
-            value: null,
-          },
+          features: [
+            {
+              enabled: true,
+              featureId: "foo",
+              value: null,
+            },
+          ],
         },
       ],
-      active: true,
     })
   );
 

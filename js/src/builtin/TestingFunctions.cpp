@@ -9,6 +9,12 @@
 #include "mozilla/Atomics.h"
 #include "mozilla/Casting.h"
 #include "mozilla/FloatingPoint.h"
+#ifdef JS_HAS_INTL_API
+#  include "mozilla/intl/ICU4CLibrary.h"
+#  include "mozilla/intl/Locale.h"
+#  include "mozilla/intl/String.h"
+#  include "mozilla/intl/TimeZone.h"
+#endif
 #include "mozilla/Maybe.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Span.h"
@@ -40,6 +46,7 @@
 
 #ifdef JS_HAS_INTL_API
 #  include "builtin/intl/CommonFunctions.h"
+#  include "builtin/intl/FormatBuffer.h"
 #  include "builtin/intl/SharedIntlData.h"
 #endif
 #include "builtin/Promise.h"
@@ -49,7 +56,8 @@
 #  include "frontend/TokenStream.h"
 #endif
 #include "frontend/BytecodeCompilation.h"  // frontend::CanLazilyParse
-#include "frontend/CompilationStencil.h"   // frontend::CompilationStencil
+#include "frontend/BytecodeCompiler.h"  // frontend::ParseModuleToExtensibleStencil
+#include "frontend/CompilationStencil.h"  // frontend::CompilationStencil
 #include "gc/Allocator.h"
 #include "gc/Zone.h"
 #include "jit/BaselineJIT.h"
@@ -96,13 +104,6 @@
 #include "js/Vector.h"
 #include "js/Wrapper.h"
 #include "threading/CpuCount.h"
-#ifdef JS_HAS_INTL_API
-#  include "unicode/ucal.h"
-#  include "unicode/uchar.h"
-#  include "unicode/uloc.h"
-#  include "unicode/utypes.h"
-#  include "unicode/uversion.h"
-#endif
 #include "util/DifferentialTesting.h"
 #include "util/StringBuffer.h"
 #include "util/Text.h"
@@ -210,6 +211,14 @@ static bool GetRealmConfiguration(JSContext* cx, unsigned argc, Value* vp) {
           offThreadParseGlobal ? TrueHandleValue : FalseHandleValue)) {
     return false;
   }
+
+#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
+  bool changeArrayByCopy = cx->options().changeArrayByCopy();
+  if (!JS_SetProperty(cx, info, "enableChangeArrayByCopy",
+                      changeArrayByCopy ? TrueHandleValue : FalseHandleValue)) {
+    return false;
+  }
+#endif
 
   args.rval().setObject(*info);
   return true;
@@ -519,6 +528,15 @@ static bool GetBuildConfiguration(JSContext* cx, unsigned argc, Value* vp) {
 
   value.setInt32(sizeof(void*));
   if (!JS_SetProperty(cx, info, "pointer-byte-size", value)) {
+    return false;
+  }
+
+#ifdef ENABLE_CHANGE_ARRAY_BY_COPY
+  value = BooleanValue(true);
+#else
+  value = BooleanValue(false);
+#endif
+  if (!JS_SetProperty(cx, info, "change-array-by-copy", value)) {
     return false;
   }
 
@@ -857,6 +875,41 @@ static bool WasmHugeMemorySupported(JSContext* cx, unsigned argc, Value* vp) {
   args.rval().setBoolean(false);
 #endif
   return true;
+}
+
+static bool WasmMaxMemoryPages(JSContext* cx, unsigned argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+  if (args.length() < 1) {
+    JS_ReportErrorASCII(cx, "not enough arguments");
+    return false;
+  }
+  if (!args.get(0).isString()) {
+    JS_ReportErrorASCII(cx, "index type must be a string");
+    return false;
+  }
+  RootedString s(cx, args.get(0).toString());
+  RootedLinearString ls(cx, s->ensureLinear(cx));
+  if (!ls) {
+    return false;
+  }
+  if (StringEqualsLiteral(ls, "i32")) {
+    args.rval().setInt32(
+        int32_t(wasm::MaxMemoryPages(wasm::IndexType::I32).value()));
+    return true;
+  }
+  if (StringEqualsLiteral(ls, "i64")) {
+#ifdef ENABLE_WASM_MEMORY64
+    if (wasm::Memory64Available(cx)) {
+      args.rval().setInt32(
+          int32_t(wasm::MaxMemoryPages(wasm::IndexType::I64).value()));
+      return true;
+    }
+#endif
+    JS_ReportErrorASCII(cx, "memory64 not enabled");
+    return false;
+  }
+  JS_ReportErrorASCII(cx, "bad index type");
+  return false;
 }
 
 static bool WasmThreadsEnabled(JSContext* cx, unsigned argc, Value* vp) {
@@ -2464,9 +2517,6 @@ static bool GCSlice(JSContext* cx, unsigned argc, Value* vp) {
   if (args.length() >= 1) {
     uint32_t work = 0;
     if (!ToUint32(cx, args[0], &work)) {
-      RootedObject callee(cx, &args.callee());
-      ReportUsageErrorASCII(cx, callee,
-                            "The work budget parameter |n| must be an integer");
       return false;
     }
     budget = SliceBudget(WorkBudget(work));
@@ -3095,9 +3145,34 @@ static size_t CountCompartments(JSContext* cx) {
 // For example, trigger OOM at every allocation point and test that the function
 // either recovers and succeeds or raises an exception and fails.
 
-struct MOZ_STACK_CLASS IterativeFailureTestParams {
-  explicit IterativeFailureTestParams(JSContext* cx) : testFunction(cx) {}
+class MOZ_STACK_CLASS IterativeFailureTest {
+ public:
+  struct FailureSimulator {
+    virtual void setup(JSContext* cx) {}
+    virtual void teardown(JSContext* cx) {}
+    virtual void startSimulating(JSContext* cx, unsigned iteration,
+                                 unsigned thread, bool keepFailing) = 0;
+    virtual bool stopSimulating() = 0;
+    virtual void cleanup(JSContext* cx) {}
+  };
 
+  IterativeFailureTest(JSContext* cx, FailureSimulator& simulator);
+  bool initParams(const CallArgs& args);
+  bool test();
+
+ private:
+  bool setup();
+  bool testThread(unsigned thread);
+  bool testIteration(unsigned thread, unsigned iteration,
+                     bool& failureWasSimulated, MutableHandleValue exception);
+  void cleanup();
+  void teardown();
+
+  JSContext* const cx;
+  FailureSimulator& simulator;
+  size_t compartmentCount;
+
+  // Test parameters set by initParams.
   RootedFunction testFunction;
   unsigned threadStart = 0;
   unsigned threadEnd = 0;
@@ -3106,22 +3181,38 @@ struct MOZ_STACK_CLASS IterativeFailureTestParams {
   bool verbose = false;
 };
 
-struct IterativeFailureSimulator {
-  virtual void setup(JSContext* cx) {}
-  virtual void teardown(JSContext* cx) {}
-  virtual void startSimulating(JSContext* cx, unsigned iteration,
-                               unsigned thread, bool keepFailing) = 0;
-  virtual bool stopSimulating() = 0;
-  virtual void cleanup(JSContext* cx) {}
-};
+bool RunIterativeFailureTest(
+    JSContext* cx, const CallArgs& args,
+    IterativeFailureTest::FailureSimulator& simulator) {
+  IterativeFailureTest test(cx, simulator);
+  return test.initParams(args) && test.test();
+}
 
-bool RunIterativeFailureTest(JSContext* cx,
-                             const IterativeFailureTestParams& params,
-                             IterativeFailureSimulator& simulator) {
+IterativeFailureTest::IterativeFailureTest(JSContext* cx,
+                                           FailureSimulator& simulator)
+    : cx(cx), simulator(simulator), testFunction(cx) {}
+
+bool IterativeFailureTest::test() {
   if (disableOOMFunctions) {
     return true;
   }
 
+  if (!setup()) {
+    return false;
+  }
+
+  auto onExit = mozilla::MakeScopeExit([this] { teardown(); });
+
+  for (unsigned thread = threadStart; thread <= threadEnd; thread++) {
+    if (!testThread(thread)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+bool IterativeFailureTest::setup() {
   if (!CheckCanSimulateOOM(cx)) {
     return false;
   }
@@ -3141,118 +3232,133 @@ bool RunIterativeFailureTest(JSContext* cx,
 #  endif
 
   // Delazify the function here if necessary so we don't end up testing that.
-  if (params.testFunction->isInterpreted() &&
-      !JSFunction::getOrCreateScript(cx, params.testFunction)) {
+  if (testFunction->isInterpreted() &&
+      !JSFunction::getOrCreateScript(cx, testFunction)) {
     return false;
   }
 
-  size_t compartmentCount = CountCompartments(cx);
-
-  RootedValue exception(cx);
+  compartmentCount = CountCompartments(cx);
 
   simulator.setup(cx);
 
-  for (unsigned thread = params.threadStart; thread <= params.threadEnd;
-       thread++) {
-    if (params.verbose) {
-      fprintf(stderr, "thread %u\n", thread);
-    }
-
-    unsigned iteration = 1;
-    bool failureWasSimulated;
-    do {
-      if (params.verbose) {
-        fprintf(stderr, "  iteration %u\n", iteration);
-      }
-
-      MOZ_ASSERT(!cx->isExceptionPending());
-
-      simulator.startSimulating(cx, iteration, thread, params.keepFailing);
-
-      RootedValue result(cx);
-      bool ok = JS_CallFunction(cx, cx->global(), params.testFunction,
-                                HandleValueArray::empty(), &result);
-
-      failureWasSimulated = simulator.stopSimulating();
-
-      if (ok) {
-        MOZ_ASSERT(!cx->isExceptionPending(),
-                   "Thunk execution succeeded but an exception was raised - "
-                   "missing error check?");
-      } else if (params.expectExceptionOnFailure) {
-        MOZ_ASSERT(cx->isExceptionPending(),
-                   "Thunk execution failed but no exception was raised - "
-                   "missing call to js::ReportOutOfMemory()?");
-      }
-
-      // Note that it is possible that the function throws an exception
-      // unconnected to the simulated failure, in which case we ignore
-      // it. More correct would be to have the caller pass some kind of
-      // exception specification and to check the exception against it.
-
-      if (!failureWasSimulated && cx->isExceptionPending()) {
-        if (!cx->getPendingException(&exception)) {
-          return false;
-        }
-      }
-      cx->clearPendingException();
-      simulator.cleanup(cx);
-
-      gc::FinishGC(cx);
-
-      // Some tests create a new compartment or zone on every
-      // iteration. Our GC is triggered by GC allocations and not by
-      // number of compartments or zones, so these won't normally get
-      // cleaned up. The check here stops some tests running out of
-      // memory. ("Gentlemen, you can't fight in here! This is the
-      // War oom!")
-      if (CountCompartments(cx) > compartmentCount + 100) {
-        JS_GC(cx);
-        compartmentCount = CountCompartments(cx);
-      }
-
-#  ifdef JS_TRACE_LOGGING
-      // Reset the TraceLogger state if enabled.
-      TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
-      if (logger && logger->enabled()) {
-        while (logger->enabled()) {
-          logger->disable();
-        }
-        logger->enable(cx);
-      }
-#  endif
-
-      iteration++;
-    } while (failureWasSimulated);
-
-    if (params.verbose) {
-      fprintf(stderr, "  finished after %u iterations\n", iteration - 1);
-      if (!exception.isUndefined()) {
-        RootedString str(cx, JS::ToString(cx, exception));
-        if (!str) {
-          fprintf(stderr,
-                  "  error while trying to print exception, giving up\n");
-          return false;
-        }
-        UniqueChars bytes(JS_EncodeStringToLatin1(cx, str));
-        if (!bytes) {
-          return false;
-        }
-        fprintf(stderr, "  threw %s\n", bytes.get());
-      }
-    }
-  }
-
-  simulator.teardown(cx);
-
-  cx->runningOOMTest = false;
   return true;
 }
 
-bool ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
-                                     IterativeFailureTestParams* params) {
-  MOZ_ASSERT(params);
+bool IterativeFailureTest::testThread(unsigned thread) {
+  if (verbose) {
+    fprintf(stderr, "thread %u\n", thread);
+  }
 
+  RootedValue exception(cx);
+
+  unsigned iteration = 1;
+  bool failureWasSimulated;
+  do {
+    if (!testIteration(thread, iteration, failureWasSimulated, &exception)) {
+      return false;
+    }
+
+    iteration++;
+  } while (failureWasSimulated);
+
+  if (verbose) {
+    fprintf(stderr, "  finished after %u iterations\n", iteration - 1);
+    if (!exception.isUndefined()) {
+      RootedString str(cx, JS::ToString(cx, exception));
+      if (!str) {
+        fprintf(stderr, "  error while trying to print exception, giving up\n");
+        return false;
+      }
+      UniqueChars bytes(JS_EncodeStringToLatin1(cx, str));
+      if (!bytes) {
+        return false;
+      }
+      fprintf(stderr, "  threw %s\n", bytes.get());
+    }
+  }
+
+  return true;
+}
+
+bool IterativeFailureTest::testIteration(unsigned thread, unsigned iteration,
+                                         bool& failureWasSimulated,
+                                         MutableHandleValue exception) {
+  if (verbose) {
+    fprintf(stderr, "  iteration %u\n", iteration);
+  }
+
+  MOZ_RELEASE_ASSERT(!cx->isExceptionPending());
+
+  simulator.startSimulating(cx, iteration, thread, keepFailing);
+
+  RootedValue result(cx);
+  bool ok = JS_CallFunction(cx, cx->global(), testFunction,
+                            HandleValueArray::empty(), &result);
+
+  failureWasSimulated = simulator.stopSimulating();
+
+  if (ok && cx->isExceptionPending()) {
+    MOZ_CRASH(
+        "Thunk execution succeeded but an exception was raised - missing error "
+        "check?");
+  }
+
+  if (!ok && !cx->isExceptionPending() && expectExceptionOnFailure) {
+    MOZ_CRASH(
+        "Thunk execution failed but no exception was raised - missing call to "
+        "js::ReportOutOfMemory()?");
+  }
+
+  // Note that it is possible that the function throws an exception unconnected
+  // to the simulated failure, in which case we ignore it. More correct would be
+  // to have the caller pass some kind of exception specification and to check
+  // the exception against it.
+  if (!failureWasSimulated && cx->isExceptionPending()) {
+    if (!cx->getPendingException(exception)) {
+      return false;
+    }
+  }
+  cx->clearPendingException();
+
+  cleanup();
+
+  return true;
+}
+
+void IterativeFailureTest::cleanup() {
+  simulator.cleanup(cx);
+
+  gc::FinishGC(cx);
+
+  // Some tests create a new compartment or zone on every iteration. Our GC is
+  // triggered by GC allocations and not by number of compartments or zones, so
+  // these won't normally get cleaned up. The check here stops some tests
+  // running out of memory. ("Gentlemen, you can't fight in here! This is the
+  // War oom!")
+  if (CountCompartments(cx) > compartmentCount + 100) {
+    JS_GC(cx);
+    compartmentCount = CountCompartments(cx);
+  }
+
+#  ifdef JS_TRACE_LOGGING
+  // Reset the TraceLogger state if enabled.
+  TraceLoggerThread* logger = TraceLoggerForCurrentThread(cx);
+  if (logger && logger->enabled()) {
+    while (logger->enabled()) {
+      logger->disable();
+    }
+    logger->enable(cx);
+  }
+#  endif
+}
+
+void IterativeFailureTest::teardown() {
+  simulator.teardown(cx);
+
+  cx->runningOOMTest = false;
+}
+
+bool IterativeFailureTest::initParams(const CallArgs& args) {
   if (args.length() < 1 || args.length() > 2) {
     JS_ReportErrorASCII(cx, "function takes between 1 and 2 arguments.");
     return false;
@@ -3262,11 +3368,11 @@ bool ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
     JS_ReportErrorASCII(cx, "The first argument must be the function to test.");
     return false;
   }
-  params->testFunction = &args[0].toObject().as<JSFunction>();
+  testFunction = &args[0].toObject().as<JSFunction>();
 
   if (args.length() == 2) {
     if (args[1].isBoolean()) {
-      params->expectExceptionOnFailure = args[1].toBoolean();
+      expectExceptionOnFailure = args[1].toBoolean();
     } else if (args[1].isObject()) {
       RootedObject options(cx, &args[1].toObject());
       RootedValue value(cx);
@@ -3275,14 +3381,14 @@ bool ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
         return false;
       }
       if (!value.isUndefined()) {
-        params->expectExceptionOnFailure = ToBoolean(value);
+        expectExceptionOnFailure = ToBoolean(value);
       }
 
       if (!JS_GetProperty(cx, options, "keepFailing", &value)) {
         return false;
       }
       if (!value.isUndefined()) {
-        params->keepFailing = ToBoolean(value);
+        keepFailing = ToBoolean(value);
       }
     } else {
       JS_ReportErrorASCII(
@@ -3294,12 +3400,12 @@ bool ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
   // There are some places where we do fail without raising an exception, so
   // we can't expose this to the fuzzers by default.
   if (fuzzingSafe) {
-    params->expectExceptionOnFailure = false;
+    expectExceptionOnFailure = false;
   }
 
   // Test all threads by default except worker threads.
-  params->threadStart = oom::FirstThreadTypeToTest;
-  params->threadEnd = oom::LastThreadTypeToTest;
+  threadStart = oom::FirstThreadTypeToTest;
+  threadEnd = oom::LastThreadTypeToTest;
 
   // Test a single thread type if specified by the OOM_THREAD environment
   // variable.
@@ -3311,16 +3417,16 @@ bool ParseIterativeFailureTestParams(JSContext* cx, const CallArgs& args,
       return false;
     }
 
-    params->threadStart = threadOption;
-    params->threadEnd = threadOption;
+    threadStart = threadOption;
+    threadEnd = threadOption;
   }
 
-  params->verbose = EnvVarIsDefined("OOM_VERBOSE");
+  verbose = EnvVarIsDefined("OOM_VERBOSE");
 
   return true;
 }
 
-struct OOMSimulator : public IterativeFailureSimulator {
+struct OOMSimulator : public IterativeFailureTest::FailureSimulator {
   void setup(JSContext* cx) override { cx->runtime()->hadOutOfMemory = false; }
 
   void startSimulating(JSContext* cx, unsigned i, unsigned thread,
@@ -3344,13 +3450,8 @@ struct OOMSimulator : public IterativeFailureSimulator {
 static bool OOMTest(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  IterativeFailureTestParams params(cx);
-  if (!ParseIterativeFailureTestParams(cx, args, &params)) {
-    return false;
-  }
-
   OOMSimulator simulator;
-  if (!RunIterativeFailureTest(cx, params, simulator)) {
+  if (!RunIterativeFailureTest(cx, args, simulator)) {
     return false;
   }
 
@@ -3358,7 +3459,7 @@ static bool OOMTest(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-struct StackOOMSimulator : public IterativeFailureSimulator {
+struct StackOOMSimulator : public IterativeFailureTest::FailureSimulator {
   void startSimulating(JSContext* cx, unsigned i, unsigned thread,
                        bool keepFailing) override {
     js::oom::simulator.simulateFailureAfter(
@@ -3375,13 +3476,8 @@ struct StackOOMSimulator : public IterativeFailureSimulator {
 static bool StackTest(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  IterativeFailureTestParams params(cx);
-  if (!ParseIterativeFailureTestParams(cx, args, &params)) {
-    return false;
-  }
-
   StackOOMSimulator simulator;
-  if (!RunIterativeFailureTest(cx, params, simulator)) {
+  if (!RunIterativeFailureTest(cx, args, simulator)) {
     return false;
   }
 
@@ -3389,7 +3485,8 @@ static bool StackTest(JSContext* cx, unsigned argc, Value* vp) {
   return true;
 }
 
-struct FailingIterruptSimulator : public IterativeFailureSimulator {
+struct FailingIterruptSimulator
+    : public IterativeFailureTest::FailureSimulator {
   JSInterruptCallback* prevEnd = nullptr;
 
   static bool failingInterruptCallback(JSContext* cx) { return false; }
@@ -3419,13 +3516,8 @@ struct FailingIterruptSimulator : public IterativeFailureSimulator {
 static bool InterruptTest(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
-  IterativeFailureTestParams params(cx);
-  if (!ParseIterativeFailureTestParams(cx, args, &params)) {
-    return false;
-  }
-
   FailingIterruptSimulator simulator;
-  if (!RunIterativeFailureTest(cx, params, simulator)) {
+  if (!RunIterativeFailureTest(cx, args, simulator)) {
     return false;
   }
 
@@ -4632,9 +4724,9 @@ static bool DisableTraceLogger(JSContext* cx, unsigned argc, Value* vp) {
 // ShapeSnapshot holds information about an object's properties. This is used
 // for checking object and shape changes between two points in time.
 class ShapeSnapshot {
-  GCPtr<JSObject*> object_;
-  GCPtr<Shape*> shape_;
-  GCPtr<BaseShape*> baseShape_;
+  HeapPtr<JSObject*> object_;
+  HeapPtr<Shape*> shape_;
+  HeapPtr<BaseShape*> baseShape_;
   ObjectFlags objectFlags_;
 
   GCVector<HeapPtr<Value>, 8> slots_;
@@ -5682,11 +5774,6 @@ static bool EvalReturningScope(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
-  RootedScript script(cx, JS::Compile(cx, options, srcBuf));
-  if (!script) {
-    return false;
-  }
-
   if (global) {
     global = CheckedUnwrapDynamic(global, cx, /* stopAtWindowProxy = */ false);
     if (!global) {
@@ -5704,10 +5791,16 @@ static bool EvalReturningScope(JSContext* cx, unsigned argc, Value* vp) {
   RootedObject varObj(cx);
 
   {
-    // If we're switching globals here, ExecuteInFrameScriptEnvironment will
-    // take care of cloning the script into that compartment before
-    // executing it.
+    // ExecuteInFrameScriptEnvironment requires the script be in the same
+    // realm as the global. The script compilation should be done after
+    // switching globals.
     AutoRealm ar(cx, global);
+
+    RootedScript script(cx, JS::Compile(cx, options, srcBuf));
+    if (!script) {
+      return false;
+    }
+
     JS::RootedObject obj(cx, JS_NewPlainObject(cx));
     if (!obj) {
       return false;
@@ -5728,76 +5821,6 @@ static bool EvalReturningScope(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   args.rval().set(varObjVal);
-  return true;
-}
-
-static bool ShellCloneAndExecuteScript(JSContext* cx, unsigned argc,
-                                       Value* vp) {
-  CallArgs args = CallArgsFromVp(argc, vp);
-  if (!args.requireAtLeast(cx, "cloneAndExecuteScript", 2)) {
-    return false;
-  }
-
-  RootedString str(cx, ToString(cx, args[0]));
-  if (!str) {
-    return false;
-  }
-
-  RootedObject global(cx, ToObject(cx, args[1]));
-  if (!global) {
-    return false;
-  }
-
-  AutoStableStringChars strChars(cx);
-  if (!strChars.initTwoByte(cx, str)) {
-    return false;
-  }
-
-  mozilla::Range<const char16_t> chars = strChars.twoByteRange();
-  size_t srclen = chars.length();
-  const char16_t* src = chars.begin().get();
-
-  JS::AutoFilename filename;
-  unsigned lineno;
-
-  JS::DescribeScriptedCaller(cx, &filename, &lineno);
-
-  JS::CompileOptions options(cx);
-  options.setFileAndLine(filename.get(), lineno);
-
-  JS::SourceText<char16_t> srcBuf;
-  if (!srcBuf.init(cx, src, srclen, SourceOwnership::Borrowed)) {
-    return false;
-  }
-
-  RootedScript script(cx, JS::Compile(cx, options, srcBuf));
-  if (!script) {
-    return false;
-  }
-
-  global = CheckedUnwrapDynamic(global, cx, /* stopAtWindowProxy = */ false);
-  if (!global) {
-    JS_ReportErrorASCII(cx, "Permission denied to access global");
-    return false;
-  }
-  if (!global->is<GlobalObject>()) {
-    JS_ReportErrorASCII(cx, "Argument must be a global object");
-    return false;
-  }
-
-  JS::RootedValue rval(cx);
-  {
-    AutoRealm ar(cx, global);
-    if (!JS::CloneAndExecuteScript(cx, script, &rval)) {
-      return false;
-    }
-  }
-
-  if (!cx->compartment()->wrap(cx, &rval)) {
-    return false;
-  }
-
-  args.rval().set(rval);
   return true;
 }
 
@@ -5921,6 +5944,25 @@ static bool GetStringRepresentation(JSContext* cx, unsigned argc, Value* vp) {
 
 #endif
 
+static bool ParseCompileOptionsForModule(JSContext* cx,
+                                         JS::CompileOptions& options,
+                                         JS::Handle<JSObject*> opts,
+                                         bool& isModule) {
+  JS::Rooted<JS::Value> v(cx);
+
+  if (!JS_GetProperty(cx, opts, "module", &v)) {
+    return false;
+  }
+  if (!v.isUndefined() && JS::ToBoolean(v)) {
+    options.setModule();
+    isModule = true;
+  } else {
+    isModule = false;
+  }
+
+  return true;
+}
+
 static bool CompileToStencil(JSContext* cx, uint32_t argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -5945,7 +5987,10 @@ static bool CompileToStencil(JSContext* cx, uint32_t argc, Value* vp) {
   }
 
   CompileOptions options(cx);
+  RootedString displayURL(cx);
+  RootedString sourceMapURL(cx);
   UniqueChars fileNameBytes;
+  bool isModule = false;
   if (args.length() == 2) {
     if (!args[1].isObject()) {
       JS_ReportErrorASCII(
@@ -5958,11 +6003,25 @@ static bool CompileToStencil(JSContext* cx, uint32_t argc, Value* vp) {
     if (!js::ParseCompileOptions(cx, options, opts, &fileNameBytes)) {
       return false;
     }
+    if (!ParseCompileOptionsForModule(cx, options, opts, isModule)) {
+      return false;
+    }
+    if (!js::ParseSourceOptions(cx, opts, &displayURL, &sourceMapURL)) {
+      return false;
+    }
   }
 
-  RefPtr<JS::Stencil> stencil =
-      JS::CompileGlobalScriptToStencil(cx, options, srcBuf);
+  RefPtr<JS::Stencil> stencil;
+  if (isModule) {
+    stencil = JS::CompileModuleScriptToStencil(cx, options, srcBuf);
+  } else {
+    stencil = JS::CompileGlobalScriptToStencil(cx, options, srcBuf);
+  }
   if (!stencil) {
+    return false;
+  }
+
+  if (!SetSourceOptions(cx, stencil->source, displayURL, sourceMapURL)) {
     return false;
   }
 
@@ -5990,6 +6049,13 @@ static bool EvalStencil(JSContext* cx, uint32_t argc, Value* vp) {
   }
   Rooted<js::StencilObject*> stencilObj(
       cx, &args[0].toObject().as<js::StencilObject>());
+
+  if (stencilObj->stencil()->isModule()) {
+    JS_ReportErrorASCII(cx,
+                        "evalStencil: Module stencil cannot be evaluated. Use "
+                        "instantiateModuleStencil instead");
+    return false;
+  }
 
   CompileOptions options(cx);
   UniqueChars fileNameBytes;
@@ -6063,7 +6129,10 @@ static bool CompileToStencilXDR(JSContext* cx, uint32_t argc, Value* vp) {
   }
 
   CompileOptions options(cx);
+  RootedString displayURL(cx);
+  RootedString sourceMapURL(cx);
   UniqueChars fileNameBytes;
+  bool isModule = false;
   if (args.length() == 2) {
     if (!args[1].isObject()) {
       JS_ReportErrorASCII(
@@ -6076,14 +6145,29 @@ static bool CompileToStencilXDR(JSContext* cx, uint32_t argc, Value* vp) {
     if (!js::ParseCompileOptions(cx, options, opts, &fileNameBytes)) {
       return false;
     }
+    if (!ParseCompileOptionsForModule(cx, options, opts, isModule)) {
+      return false;
+    }
+    if (!js::ParseSourceOptions(cx, opts, &displayURL, &sourceMapURL)) {
+      return false;
+    }
   }
 
   /* Compile the script text to stencil. */
   Rooted<frontend::CompilationInput> input(cx,
                                            frontend::CompilationInput(options));
-  auto stencil = frontend::CompileGlobalScriptToExtensibleStencil(
-      cx, input.get(), srcBuf, ScopeKind::Global);
+  UniquePtr<frontend::ExtensibleCompilationStencil> stencil;
+  if (isModule) {
+    stencil = frontend::ParseModuleToExtensibleStencil(cx, input.get(), srcBuf);
+  } else {
+    stencil = frontend::CompileGlobalScriptToExtensibleStencil(
+        cx, input.get(), srcBuf, ScopeKind::Global);
+  }
   if (!stencil) {
+    return false;
+  }
+
+  if (!SetSourceOptions(cx, stencil->source, displayURL, sourceMapURL)) {
     return false;
   }
 
@@ -6158,6 +6242,13 @@ static bool EvalStencilXDR(JSContext* cx, uint32_t argc, Value* vp) {
     return false;
   }
 
+  if (stencil.isModule()) {
+    JS_ReportErrorASCII(cx,
+                        "evalStencilXDR: Module stencil cannot be evaluated. "
+                        "Use instantiateModuleStencilXDR instead");
+    return false;
+  }
+
   /* Instantiate the stencil. */
   Rooted<frontend::CompilationGCOutput> output(cx);
   if (!frontend::CompilationStencil::instantiateStencils(
@@ -6173,6 +6264,66 @@ static bool EvalStencilXDR(JSContext* cx, uint32_t argc, Value* vp) {
   }
 
   args.rval().set(retVal);
+  return true;
+}
+
+static bool GetExceptionInfo(JSContext* cx, uint32_t argc, Value* vp) {
+  CallArgs args = CallArgsFromVp(argc, vp);
+
+  if (!args.requireAtLeast(cx, "getExceptionInfo", 1)) {
+    return false;
+  }
+
+  if (!args[0].isObject() || !args[0].toObject().is<JSFunction>()) {
+    JS_ReportErrorASCII(cx, "getExceptionInfo: expected function argument");
+    return false;
+  }
+
+  RootedValue rval(cx);
+  if (JS_CallFunctionValue(cx, nullptr, args[0], JS::HandleValueArray::empty(),
+                           &rval)) {
+    // Function didn't throw.
+    args.rval().setNull();
+    return true;
+  }
+
+  // We currently don't support interrupts or forced returns.
+  if (!cx->isExceptionPending()) {
+    JS_ReportErrorASCII(cx, "getExceptionInfo: unsupported exception status");
+    return false;
+  }
+
+  RootedValue excVal(cx);
+  RootedSavedFrame stack(cx);
+  if (!GetAndClearExceptionAndStack(cx, &excVal, &stack)) {
+    return false;
+  }
+
+  RootedValue stackVal(cx);
+  if (stack) {
+    RootedString stackString(cx);
+    if (!BuildStackString(cx, cx->realm()->principals(), stack, &stackString)) {
+      return false;
+    }
+    stackVal.setString(stackString);
+  } else {
+    stackVal.setNull();
+  }
+
+  RootedObject obj(cx, NewPlainObject(cx));
+  if (!obj) {
+    return false;
+  }
+
+  if (!JS_DefineProperty(cx, obj, "exception", excVal, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  if (!JS_DefineProperty(cx, obj, "stack", stackVal, JSPROP_ENUMERATE)) {
+    return false;
+  }
+
+  args.rval().setObject(*obj);
   return true;
 }
 
@@ -7005,15 +7156,33 @@ static bool EncodeAsUtf8InBuffer(JSContext* cx, unsigned argc, Value* vp) {
   }
   array->ensureDenseInitializedLength(0, 2);
 
-  size_t length;
-  bool isSharedMemory;
-  uint8_t* data;
-  if (!args[1].isObject() ||
-      !JS_GetObjectAsUint8Array(&args[1].toObject(), &length, &isSharedMemory,
-                                &data) ||
-      isSharedMemory ||  // excluded views of SharedArrayBuffers
-      !data) {           // exclude views of detached ArrayBuffers
+  JSObject* obj = args[1].isObject() ? &args[1].toObject() : nullptr;
+  Rooted<JS::Uint8Array> view(cx, JS::Uint8Array::unwrap(obj));
+  if (!view) {
     ReportUsageErrorASCII(cx, callee, "Second argument must be a Uint8Array");
+    return false;
+  }
+
+  size_t length;
+  bool isSharedMemory = false;
+  uint8_t* data = nullptr;
+  {
+    // The hazard analysis does not track the data pointer, so it can neither
+    // tell that `data` is dead if ReportUsageErrorASCII is called, nor that
+    // its live range ends at the call to AsWritableChars(). Construct a
+    // temporary scope to hide from the analysis. This should really be replaced
+    // with a safer mechanism.
+    JS::AutoCheckCannotGC nogc(cx);
+    if (!view.isDetached()) {
+      data = view.get().getLengthAndData(&length, &isSharedMemory, nogc);
+    }
+  }
+
+  if (isSharedMemory ||  // exclude views of SharedArrayBuffers
+      !data) {           // exclude views of detached ArrayBuffers
+    ReportUsageErrorASCII(
+        cx, callee,
+        "Second argument must be an unshared, non-detached Uint8Array");
     return false;
   }
 
@@ -7218,39 +7387,50 @@ static bool GetICUOptions(JSContext* cx, unsigned argc, Value* vp) {
 #ifdef JS_HAS_INTL_API
   RootedString str(cx);
 
-  str = NewStringCopyZ<CanGC>(cx, U_ICU_VERSION);
+  str = NewStringCopy<CanGC>(cx, mozilla::intl::ICU4CLibrary::GetVersion());
   if (!str || !JS_DefineProperty(cx, info, "version", str, JSPROP_ENUMERATE)) {
     return false;
   }
 
-  str = NewStringCopyZ<CanGC>(cx, U_UNICODE_VERSION);
+  str = NewStringCopy<CanGC>(cx, mozilla::intl::String::GetUnicodeVersion());
   if (!str || !JS_DefineProperty(cx, info, "unicode", str, JSPROP_ENUMERATE)) {
     return false;
   }
 
-  str = NewStringCopyZ<CanGC>(cx, uloc_getDefault());
+  str = NewStringCopyZ<CanGC>(cx, mozilla::intl::Locale::GetDefaultLocale());
   if (!str || !JS_DefineProperty(cx, info, "locale", str, JSPROP_ENUMERATE)) {
     return false;
   }
 
-  UErrorCode status = U_ZERO_ERROR;
-  const char* tzdataVersion = ucal_getTZDataVersion(&status);
-  if (U_FAILURE(status)) {
-    intl::ReportInternalError(cx);
+  auto tzdataVersion = mozilla::intl::TimeZone::GetTZDataVersion();
+  if (tzdataVersion.isErr()) {
+    intl::ReportInternalError(cx, tzdataVersion.unwrapErr());
     return false;
   }
 
-  str = NewStringCopyZ<CanGC>(cx, tzdataVersion);
+  str = NewStringCopy<CanGC>(cx, tzdataVersion.unwrap());
   if (!str || !JS_DefineProperty(cx, info, "tzdata", str, JSPROP_ENUMERATE)) {
     return false;
   }
 
-  str = intl::CallICU(cx, ucal_getDefaultTimeZone);
+  intl::FormatBuffer<char16_t, intl::INITIAL_CHAR_BUFFER_SIZE> buf(cx);
+
+  if (auto ok = mozilla::intl::TimeZone::GetDefaultTimeZone(buf); ok.isErr()) {
+    intl::ReportInternalError(cx, ok.unwrapErr());
+    return false;
+  }
+
+  str = buf.toString(cx);
   if (!str || !JS_DefineProperty(cx, info, "timezone", str, JSPROP_ENUMERATE)) {
     return false;
   }
 
-  str = intl::CallICU(cx, ucal_getHostTimeZone);
+  if (auto ok = mozilla::intl::TimeZone::GetHostTimeZone(buf); ok.isErr()) {
+    intl::ReportInternalError(cx, ok.unwrapErr());
+    return false;
+  }
+
+  str = buf.toString(cx);
   if (!str ||
       !JS_DefineProperty(cx, info, "host-timezone", str, JSPROP_ENUMERATE)) {
     return false;
@@ -7842,6 +8022,15 @@ gc::ZealModeHelpText),
 "  Returns a boolean indicating whether WebAssembly supports using a large"
 "  virtual memory reservation in order to elide bounds checks on this platform."),
 
+    JS_FN_HELP("wasmMaxMemoryPages", WasmMaxMemoryPages, 1, 0,
+"wasmMaxMemoryPages(indexType)",
+"  Returns an int with the maximum number of pages that can be allocated to a memory."
+"  This is an implementation artifact that does depend on the index type, the hardware,"
+"  the operating system, the build configuration, and flags.  The result is constant for"
+"  a given combination of those; there is no guarantee that that size allocation will"
+"  always succeed, only that it can succeed in principle.  The indexType is a string,"
+"  'i32' or 'i64'."),
+
 #define WASM_FEATURE(NAME, ...) \
     JS_FN_HELP("wasm" #NAME "Enabled", Wasm##NAME##Enabled, 0, 0, \
 "wasm" #NAME "Enabled()", \
@@ -8157,11 +8346,6 @@ JS_FOR_WASM_FEATURES(WASM_FEATURE, WASM_FEATURE)
 "  Evaluate the script in a new scope and return the scope.\n"
 "  If |global| is present, clone the script to |global| before executing."),
 
-    JS_FN_HELP("cloneAndExecuteScript", ShellCloneAndExecuteScript, 2, 0,
-"cloneAndExecuteScript(source, global)",
-"  Compile |source| in the current compartment, clone it into |global|'s\n"
-"  compartment, and run it there."),
-
     JS_FN_HELP("backtrace", DumpBacktrace, 1, 0,
 "backtrace()",
 "  Dump out a brief backtrace."),
@@ -8381,25 +8565,30 @@ JS_FN_HELP("isSmallFunction", IsSmallFunction, 1, 0,
 "  Returns true if a scripted function is small enough to be inlinable."),
 
     JS_FN_HELP("compileToStencil", CompileToStencil, 1, 0,
-"compileToStencil(string)",
+"compileToStencil(string, [options])",
 "  Parses the given string argument as js script, returns the stencil"
 "  for it."),
 
     JS_FN_HELP("evalStencil", EvalStencil, 1, 0,
-"compileStencil(stencil)",
+"evalStencil(stencil, [options])",
 "  Instantiates the given stencil, and evaluates the top-level script it"
 "  defines."),
 
     JS_FN_HELP("compileToStencilXDR", CompileToStencilXDR, 1, 0,
-"compileToStencilXDR(string)",
+"compileToStencilXDR(string, [options])",
 "  Parses the given string argument as js script, produces the stencil"
 "  for it, XDR-encodes the stencil, and returns an object that contains the"
 "  XDR buffer."),
 
     JS_FN_HELP("evalStencilXDR", EvalStencilXDR, 1, 0,
-"evalStencilXDR(stencilXDR)",
+"evalStencilXDR(stencilXDR, [options])",
 "  Reads the given stencil XDR object, and evaluates the top-level script it"
 "  defines."),
+
+    JS_FN_HELP("getExceptionInfo", GetExceptionInfo, 1, 0,
+"getExceptionInfo(fun)",
+"  Calls the given function and returns information about the exception it"
+"  throws. Returns null if the function didn't throw an exception."),
 
     JS_FS_HELP_END
 };

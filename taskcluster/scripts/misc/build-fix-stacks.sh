@@ -6,10 +6,10 @@ PROJECT=fix-stacks
 
 export TARGET="$1"
 
+COMPRESS_EXT=zst
 case "$TARGET" in
 x86_64-unknown-linux-gnu)
     EXE=
-    COMPRESS_EXT=xz
     # {CC,CXX} and TARGET_{CC,CXX} must be set because a build.rs file builds
     # some C and C++ code.
     export CC=$MOZ_FETCHES_DIR/clang/bin/clang
@@ -21,7 +21,6 @@ x86_64-unknown-linux-gnu)
 *-apple-darwin)
     # Cross-compiling for Mac on Linux.
     EXE=
-    COMPRESS_EXT=xz
     # {CC,CXX} and TARGET_{CC,CXX} must be set because a build.rs file builds
     # some C and C++ code.
     export CC=$MOZ_FETCHES_DIR/clang/bin/clang
@@ -29,15 +28,16 @@ x86_64-unknown-linux-gnu)
     export PATH="$MOZ_FETCHES_DIR/cctools/bin:$PATH"
     export RUSTFLAGS="-C linker=$GECKO_PATH/taskcluster/scripts/misc/osx-cross-linker"
     if test "$TARGET" = "aarch64-apple-darwin"; then
-        export SDK_VER=11.0
+        export MACOSX_DEPLOYMENT_TARGET=11.0
+    else
+        export MACOSX_DEPLOYMENT_TARGET=10.12
     fi
-    export TARGET_CC="$CC -isysroot $MOZ_FETCHES_DIR/MacOSX${SDK_VER:-10.12}.sdk"
-    export TARGET_CXX="$CXX -isysroot $MOZ_FETCHES_DIR/MacOSX${SDK_VER:-10.12}.sdk"
+    export TARGET_CC="$CC -isysroot $MOZ_FETCHES_DIR/MacOSX11.0.sdk"
+    export TARGET_CXX="$CXX -isysroot $MOZ_FETCHES_DIR/MacOSX11.0.sdk"
     ;;
 i686-pc-windows-msvc)
     # Cross-compiling for Windows on Linux.
     EXE=.exe
-    COMPRESS_EXT=bz2
     # Some magic that papers over differences in case-sensitivity/insensitivity on Linux
     # and Windows file systems.
     export LD_PRELOAD="/builds/worker/fetches/liblowercase/liblowercase.so"

@@ -80,10 +80,12 @@
 #include "mozilla/dom/FromParser.h"
 #include "mozilla/dom/Grid.h"
 #include "mozilla/dom/HTMLDivElement.h"
+#include "mozilla/dom/HTMLElement.h"
 #include "mozilla/dom/HTMLParagraphElement.h"
 #include "mozilla/dom/HTMLPreElement.h"
 #include "mozilla/dom/HTMLSpanElement.h"
 #include "mozilla/dom/HTMLTableCellElement.h"
+#include "mozilla/dom/HTMLTemplateElement.h"
 #include "mozilla/dom/KeyframeAnimationOptionsBinding.h"
 #include "mozilla/dom/KeyframeEffect.h"
 #include "mozilla/dom/MouseEventBinding.h"
@@ -92,6 +94,7 @@
 #include "mozilla/dom/NodeInfo.h"
 #include "mozilla/dom/PointerEventHandler.h"
 #include "mozilla/dom/Promise.h"
+#include "mozilla/dom/Sanitizer.h"
 #include "mozilla/dom/SVGElement.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/ShadowRoot.h"
@@ -221,6 +224,7 @@ namespace mozilla::dom {
 // bucket sizes.
 ASSERT_NODE_SIZE(Element, 128, 80);
 ASSERT_NODE_SIZE(HTMLDivElement, 128, 80);
+ASSERT_NODE_SIZE(HTMLElement, 128, 80);
 ASSERT_NODE_SIZE(HTMLParagraphElement, 128, 80);
 ASSERT_NODE_SIZE(HTMLPreElement, 128, 80);
 ASSERT_NODE_SIZE(HTMLSpanElement, 128, 80);
@@ -953,8 +957,7 @@ nsRect Element::GetClientAreaRect() {
   // We can avoid a layout flush if this is the scrolling element of the
   // document, we have overlay scrollbars, and we aren't embedded in another
   // document
-  bool overlayScrollbars =
-      LookAndFeel::GetInt(LookAndFeel::IntID::UseOverlayScrollbars) != 0;
+  bool overlayScrollbars = presContext && presContext->UseOverlayScrollbars();
   bool rootContentDocument =
       presContext && presContext->IsRootContentDocument();
   if (overlayScrollbars && rootContentDocument &&
@@ -1180,11 +1183,14 @@ already_AddRefed<ShadowRoot> Element::AttachShadow(const ShadowRootInit& aInit,
     OwnerDoc()->ReportShadowDOMUsage();
   }
 
-  return AttachShadowWithoutNameChecks(aInit.mMode, aInit.mSlotAssignment);
+  return AttachShadowWithoutNameChecks(aInit.mMode,
+                                       DelegatesFocus(aInit.mDelegatesFocus),
+                                       aInit.mSlotAssignment);
 }
 
 already_AddRefed<ShadowRoot> Element::AttachShadowWithoutNameChecks(
-    ShadowRootMode aMode, SlotAssignmentMode aSlotAssignment) {
+    ShadowRootMode aMode, DelegatesFocus aDelegatesFocus,
+    SlotAssignmentMode aSlotAssignment) {
   nsAutoScriptBlocker scriptBlocker;
 
   RefPtr<mozilla::dom::NodeInfo> nodeInfo =
@@ -1212,8 +1218,8 @@ already_AddRefed<ShadowRoot> Element::AttachShadowWithoutNameChecks(
    *    and mode is init's mode.
    */
   auto* nim = nodeInfo->NodeInfoManager();
-  RefPtr<ShadowRoot> shadowRoot =
-      new (nim) ShadowRoot(this, aMode, aSlotAssignment, nodeInfo.forget());
+  RefPtr<ShadowRoot> shadowRoot = new (nim) ShadowRoot(
+      this, aMode, aDelegatesFocus, aSlotAssignment, nodeInfo.forget());
 
   if (NodeOrAncestorHasDirAuto()) {
     shadowRoot->SetAncestorHasDirAuto();
@@ -1248,7 +1254,8 @@ already_AddRefed<ShadowRoot> Element::AttachShadowWithoutNameChecks(
   return shadowRoot.forget();
 }
 
-void Element::AttachAndSetUAShadowRoot(NotifyUAWidgetSetup aNotify) {
+void Element::AttachAndSetUAShadowRoot(NotifyUAWidgetSetup aNotify,
+                                       DelegatesFocus aDelegatesFocus) {
   MOZ_DIAGNOSTIC_ASSERT(!CanAttachShadowDOM(),
                         "Cannot be used to attach UI shadow DOM");
   if (OwnerDoc()->IsStaticDocument()) {
@@ -1257,7 +1264,7 @@ void Element::AttachAndSetUAShadowRoot(NotifyUAWidgetSetup aNotify) {
 
   if (!GetShadowRoot()) {
     RefPtr<ShadowRoot> shadowRoot =
-        AttachShadowWithoutNameChecks(ShadowRootMode::Closed);
+        AttachShadowWithoutNameChecks(ShadowRootMode::Closed, aDelegatesFocus);
     shadowRoot->SetIsUAWidget();
   }
 
@@ -1474,7 +1481,7 @@ already_AddRefed<Attr> Element::RemoveAttributeNode(Attr& aAttribute,
 
 void Element::GetAttributeNS(const nsAString& aNamespaceURI,
                              const nsAString& aLocalName, nsAString& aReturn) {
-  int32_t nsid = nsContentUtils::NameSpaceManager()->GetNameSpaceID(
+  int32_t nsid = nsNameSpaceManager::GetInstance()->GetNameSpaceID(
       aNamespaceURI, nsContentUtils::IsChromeDoc(OwnerDoc()));
 
   if (nsid == kNameSpaceID_Unknown) {
@@ -1547,7 +1554,7 @@ void Element::RemoveAttributeNS(const nsAString& aNamespaceURI,
                                 const nsAString& aLocalName,
                                 ErrorResult& aError) {
   RefPtr<nsAtom> name = NS_AtomizeMainThread(aLocalName);
-  int32_t nsid = nsContentUtils::NameSpaceManager()->GetNameSpaceID(
+  int32_t nsid = nsNameSpaceManager::GetInstance()->GetNameSpaceID(
       aNamespaceURI, nsContentUtils::IsChromeDoc(OwnerDoc()));
 
   if (nsid == kNameSpaceID_Unknown) {
@@ -1581,8 +1588,8 @@ already_AddRefed<nsIHTMLCollection> Element::GetElementsByTagNameNS(
   int32_t nameSpaceId = kNameSpaceID_Wildcard;
 
   if (!aNamespaceURI.EqualsLiteral("*")) {
-    aError = nsContentUtils::NameSpaceManager()->RegisterNameSpace(
-        aNamespaceURI, nameSpaceId);
+    aError = nsNameSpaceManager::GetInstance()->RegisterNameSpace(aNamespaceURI,
+                                                                  nameSpaceId);
     if (aError.Failed()) {
       return nullptr;
     }
@@ -1595,7 +1602,7 @@ already_AddRefed<nsIHTMLCollection> Element::GetElementsByTagNameNS(
 
 bool Element::HasAttributeNS(const nsAString& aNamespaceURI,
                              const nsAString& aLocalName) const {
-  int32_t nsid = nsContentUtils::NameSpaceManager()->GetNameSpaceID(
+  int32_t nsid = nsNameSpaceManager::GetInstance()->GetNameSpaceID(
       aNamespaceURI, nsContentUtils::IsChromeDoc(OwnerDoc()));
 
   if (nsid == kNameSpaceID_Unknown) {
@@ -1709,7 +1716,7 @@ nsresult Element::BindToTree(BindContext& aContext, nsINode& aParent) {
     if (CustomElementData* data = GetCustomElementData()) {
       if (data->mState == CustomElementData::State::eCustom) {
         nsContentUtils::EnqueueLifecycleCallback(
-            ElementCallbackType::eConnected, this);
+            ElementCallbackType::eConnected, this, {});
       } else {
         // Step 7.7.2.2 https://dom.spec.whatwg.org/#concept-node-insert
         nsContentUtils::TryToUpgradeElement(this);
@@ -1942,7 +1949,7 @@ void Element::UnbindFromTree(bool aNullParent) {
     if (data) {
       if (data->mState == CustomElementData::State::eCustom) {
         nsContentUtils::EnqueueLifecycleCallback(
-            ElementCallbackType::eDisconnected, this);
+            ElementCallbackType::eDisconnected, this, {});
       } else {
         // Remove an unresolved custom element that is a candidate for upgrade
         // when a custom element is disconnected.
@@ -2094,8 +2101,18 @@ bool Element::ShouldBlur(nsIContent* aContent) {
   nsCOMPtr<nsPIDOMWindowOuter> focusedFrame;
   nsIContent* contentToBlur = nsFocusManager::GetFocusedDescendant(
       window, nsFocusManager::eOnlyCurrentWindow, getter_AddRefs(focusedFrame));
+
+  if (!contentToBlur) {
+    return false;
+  }
+
   if (contentToBlur == aContent) return true;
 
+  ShadowRoot* root = aContent->GetShadowRoot();
+  if (root && root->DelegatesFocus() &&
+      contentToBlur->IsShadowIncludingInclusiveDescendantOf(root)) {
+    return true;
+  }
   // if focus on this element would get redirected, then check the redirected
   // content as well when blurring.
   return (contentToBlur &&
@@ -2487,18 +2504,18 @@ nsresult Element::SetAttrAndNotify(
       }
       RefPtr<nsAtom> newValueAtom = valueForAfterSetAttr.GetAsAtom();
       nsAutoString ns;
-      nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
+      nsNameSpaceManager::GetInstance()->GetNameSpaceURI(aNamespaceID, ns);
 
-      LifecycleCallbackArgs args = {nsDependentAtomString(aName),
-                                    aModType == MutationEvent_Binding::ADDITION
-                                        ? VoidString()
-                                        : nsDependentAtomString(oldValueAtom),
-                                    nsDependentAtomString(newValueAtom),
-                                    (ns.IsEmpty() ? VoidString() : ns)};
+      LifecycleCallbackArgs args;
+      args.mName = nsDependentAtomString(aName);
+      args.mOldValue = (aModType == MutationEvent_Binding::ADDITION
+                            ? VoidString()
+                            : nsDependentAtomString(oldValueAtom));
+      args.mNewValue = nsDependentAtomString(newValueAtom);
+      args.mNamespaceURI = (ns.IsEmpty() ? VoidString() : ns);
 
       nsContentUtils::EnqueueLifecycleCallback(
-          ElementCallbackType::eAttributeChanged, this, &args, nullptr,
-          definition);
+          ElementCallbackType::eAttributeChanged, this, args, definition);
     }
   }
 
@@ -2528,7 +2545,7 @@ nsresult Element::SetAttrAndNotify(
     InternalMutationEvent mutation(true, eLegacyAttrModified);
 
     nsAutoString ns;
-    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
+    nsNameSpaceManager::GetInstance()->GetNameSpaceURI(aNamespaceID, ns);
     Attr* attrNode =
         GetAttributeNodeNSInternal(ns, nsDependentAtomString(aName));
     mutation.mRelatedNode = attrNode;
@@ -2673,15 +2690,17 @@ nsresult Element::OnAttrSetButNotChanged(int32_t aNamespaceID, nsAtom* aName,
 
     if (definition->IsInObservedAttributeList(aName)) {
       nsAutoString ns;
-      nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNamespaceID, ns);
+      nsNameSpaceManager::GetInstance()->GetNameSpaceURI(aNamespaceID, ns);
 
       nsAutoString value(aValue.String());
-      LifecycleCallbackArgs args = {nsDependentAtomString(aName), value, value,
-                                    (ns.IsEmpty() ? VoidString() : ns)};
+      LifecycleCallbackArgs args;
+      args.mName = nsDependentAtomString(aName);
+      args.mOldValue = value;
+      args.mNewValue = value;
+      args.mNamespaceURI = (ns.IsEmpty() ? VoidString() : ns);
 
       nsContentUtils::EnqueueLifecycleCallback(
-          ElementCallbackType::eAttributeChanged, this, &args, nullptr,
-          definition);
+          ElementCallbackType::eAttributeChanged, this, args, definition);
     }
   }
 
@@ -2750,7 +2769,7 @@ nsresult Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName, bool aNotify) {
   RefPtr<Attr> attrNode;
   if (hasMutationListeners) {
     nsAutoString ns;
-    nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
+    nsNameSpaceManager::GetInstance()->GetNameSpaceURI(aNameSpaceID, ns);
     attrNode = GetAttributeNodeNSInternal(ns, nsDependentAtomString(aName));
   }
 
@@ -2785,16 +2804,17 @@ nsresult Element::UnsetAttr(int32_t aNameSpaceID, nsAtom* aName, bool aNotify) {
 
     if (definition->IsInObservedAttributeList(aName)) {
       nsAutoString ns;
-      nsContentUtils::NameSpaceManager()->GetNameSpaceURI(aNameSpaceID, ns);
+      nsNameSpaceManager::GetInstance()->GetNameSpaceURI(aNameSpaceID, ns);
 
       RefPtr<nsAtom> oldValueAtom = oldValue.GetAsAtom();
-      LifecycleCallbackArgs args = {
-          nsDependentAtomString(aName), nsDependentAtomString(oldValueAtom),
-          VoidString(), (ns.IsEmpty() ? VoidString() : ns)};
+      LifecycleCallbackArgs args;
+      args.mName = nsDependentAtomString(aName);
+      args.mOldValue = nsDependentAtomString(oldValueAtom);
+      args.mNewValue = VoidString();
+      args.mNamespaceURI = (ns.IsEmpty() ? VoidString() : ns);
 
       nsContentUtils::EnqueueLifecycleCallback(
-          ElementCallbackType::eAttributeChanged, this, &args, nullptr,
-          definition);
+          ElementCallbackType::eAttributeChanged, this, args, definition);
     }
   }
 
@@ -3181,7 +3201,7 @@ nsresult Element::CopyInnerTo(Element* aDst, ReparseAttributes aReparse) {
     // The cloned node may be a custom element that may require
     // enqueing upgrade reaction.
     if (nsAtom* typeAtom = data->GetCustomElementType()) {
-      aDst->SetCustomElementData(new CustomElementData(typeAtom));
+      aDst->SetCustomElementData(MakeUnique<CustomElementData>(typeAtom));
       MOZ_ASSERT(dstNodeInfo->NameAtom()->Equals(dstNodeInfo->LocalName()));
       CustomElementDefinition* definition =
           nsContentUtils::LookupCustomElementDefinition(
@@ -4026,7 +4046,7 @@ void Element::ClearServoData(Document* aDoc) {
   }
 }
 
-void Element::SetCustomElementData(CustomElementData* aData) {
+void Element::SetCustomElementData(UniquePtr<CustomElementData> aData) {
   SetHasCustomElementData();
 
   if (aData->mState != CustomElementData::State::eCustom) {
@@ -4057,7 +4077,7 @@ void Element::SetCustomElementData(CustomElementData* aData) {
     }
   }
 #endif
-  slots->mCustomElementData = aData;
+  slots->mCustomElementData = std::move(aData);
 }
 
 CustomElementDefinition* Element::GetCustomElementDefinition() const {
@@ -4503,6 +4523,126 @@ void Element::RegUnRegAccessKey(bool aDoReg) {
     } else {
       esm->UnregisterAccessKey(this, (uint32_t)accessKey.First());
     }
+  }
+}
+
+void Element::SetHTML(const nsAString& aInnerHTML,
+                      const SetHTMLOptions& aOptions, ErrorResult& aError) {
+  FragmentOrElement* target = this;
+  // Throw for disallowed elements
+  if (IsHTMLElement(nsGkAtoms::script)) {
+    aError.ThrowTypeError("This does not work on <script> elements");
+    return;
+  }
+  if (IsHTMLElement(nsGkAtoms::object)) {
+    aError.ThrowTypeError("This does not work on <object> elements");
+    return;
+  }
+  if (IsHTMLElement(nsGkAtoms::iframe)) {
+    aError.ThrowTypeError("This does not work on <iframe> elements");
+    return;
+  }
+
+  // Handle template case.
+  if (target->IsTemplateElement()) {
+    DocumentFragment* frag =
+        static_cast<HTMLTemplateElement*>(target)->Content();
+    MOZ_ASSERT(frag);
+    target = frag;
+  }
+
+  // TODO: Avoid parsing and implement a fast-path for non-markup input,
+  // Filed as bug 1731215.
+
+  Document* doc = target->OwnerDoc();
+
+  // Batch possible DOMSubtreeModified events.
+  mozAutoSubtreeModified subtree(doc, nullptr);
+
+  target->FireNodeRemovedForChildren();
+
+  // Needed when innerHTML is used in combination with contenteditable
+  mozAutoDocUpdate updateBatch(doc, true);
+
+  // Remove childnodes.
+  nsAutoMutationBatch mb(target, true, false);
+  while (target->HasChildren()) {
+    target->RemoveChildNode(target->GetFirstChild(), true);
+  }
+  mb.RemovalDone();
+
+  nsAutoScriptLoaderDisabler sld(doc);
+
+  FragmentOrElement* parseContext = this;
+  if (ShadowRoot* shadowRoot = ShadowRoot::FromNode(parseContext)) {
+    // Fix up the context to be the host of the ShadowRoot.  See
+    // https://w3c.github.io/DOM-Parsing/#dom-innerhtml-innerhtml setter step 1.
+    parseContext = shadowRoot->GetHost();
+  }
+
+  // We MUST NOT cause any requests during parsing, so we'll
+  // create an inert Document and parse into a new DocumentFragment.
+  RefPtr<Document> inertDoc;
+  nsAtom* contextLocalName = parseContext->NodeInfo()->NameAtom();
+  int32_t contextNameSpaceID = parseContext->GetNameSpaceID();
+  ElementCreationOptionsOrString options;
+  RefPtr<DocumentFragment> fragment;
+  if (doc->IsHTMLDocument()) {
+    inertDoc = nsContentUtils::CreateInertHTMLDocument(nullptr);
+    if (!inertDoc) {
+      aError = NS_ERROR_FAILURE;
+      return;
+    }
+    fragment = new (inertDoc->NodeInfoManager())
+        DocumentFragment(inertDoc->NodeInfoManager());
+
+    aError = nsContentUtils::ParseFragmentHTML(aInnerHTML, fragment,
+                                               contextLocalName,
+                                               contextNameSpaceID, false, true);
+
+  } else if (doc->IsXMLDocument()) {
+    inertDoc = nsContentUtils::CreateInertXMLDocument(nullptr);
+    if (!inertDoc) {
+      aError = NS_ERROR_FAILURE;
+      return;
+    }
+    fragment = new (inertDoc->NodeInfoManager())
+        DocumentFragment(inertDoc->NodeInfoManager());
+
+    // TODO(freddyb) `nsContentUtils::CreateContextualFragment` is actually
+    // collecting a ton of stacks to get in an (X)HTMLish state.
+    // I'm afraid we might need that too. Ugh.
+    AutoTArray<nsString, 0> emptyTagStack;
+    aError =
+        nsContentUtils::ParseFragmentXML(aInnerHTML, inertDoc, emptyTagStack,
+                                         true, -1, getter_AddRefs(fragment));
+  }
+
+  if (!aError.Failed()) {
+    // Suppress assertion about node removal mutation events that can't have
+    // listeners anyway, because no one has had the chance to register
+    // mutation listeners on the fragment that comes from the parser.
+    nsAutoScriptBlockerSuppressNodeRemoved scriptBlocker;
+
+    int32_t oldChildCount = static_cast<int32_t>(target->GetChildCount());
+
+    if (!aOptions.IsAnyMemberPresent() || !aOptions.mSanitizer.WasPassed()) {
+      SanitizerConfig options;
+      nsCOMPtr<nsIGlobalObject> ownerGlobal = GetOwnerGlobal();
+      if (!ownerGlobal) {
+        aError.Throw(NS_ERROR_FAILURE);
+        return;
+      }
+      RefPtr<Sanitizer> sanitizer = new Sanitizer(ownerGlobal, options);
+      sanitizer->SanitizeFragment(fragment, aError);
+    } else {
+      aOptions.mSanitizer.Value().SanitizeFragment(fragment, aError);
+    }
+
+    target->AppendChild(*fragment, aError);
+    mb.NodesAdded();
+    nsContentUtils::FireMutationEventsForDirectParsing(doc, target,
+                                                       oldChildCount);
   }
 }
 

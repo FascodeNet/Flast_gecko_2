@@ -423,50 +423,10 @@ var Policies = {
         });
       }
 
-      if (
-        param.Default !== undefined ||
-        param.AcceptThirdParty !== undefined ||
-        param.RejectTracker !== undefined ||
-        param.Locked
-      ) {
-        const ACCEPT_COOKIES = 0;
-        const REJECT_THIRD_PARTY_COOKIES = 1;
-        const REJECT_ALL_COOKIES = 2;
-        const REJECT_UNVISITED_THIRD_PARTY = 3;
-        const REJECT_TRACKER = 4;
-
-        let newCookieBehavior = ACCEPT_COOKIES;
-        if (param.Default !== undefined && !param.Default) {
-          newCookieBehavior = REJECT_ALL_COOKIES;
-        } else if (param.AcceptThirdParty) {
-          if (param.AcceptThirdParty == "never") {
-            newCookieBehavior = REJECT_THIRD_PARTY_COOKIES;
-          } else if (param.AcceptThirdParty == "from-visited") {
-            newCookieBehavior = REJECT_UNVISITED_THIRD_PARTY;
-          }
-        } else if (param.RejectTracker !== undefined && param.RejectTracker) {
-          newCookieBehavior = REJECT_TRACKER;
-        }
-
-        setDefaultPref(
-          "network.cookie.cookieBehavior",
-          newCookieBehavior,
-          param.Locked
-        );
-        setDefaultPref(
-          "network.cookie.cookieBehavior.pbmode",
-          newCookieBehavior,
-          param.Locked
-        );
-      }
-
-      const KEEP_COOKIES_UNTIL_EXPIRATION = 0;
-      const KEEP_COOKIES_UNTIL_END_OF_SESSION = 2;
-
       if (param.ExpireAtSessionEnd !== undefined || param.Locked) {
-        let newLifetimePolicy = KEEP_COOKIES_UNTIL_EXPIRATION;
+        let newLifetimePolicy = Ci.nsICookieService.ACCEPT_NORMALLY;
         if (param.ExpireAtSessionEnd) {
-          newLifetimePolicy = KEEP_COOKIES_UNTIL_END_OF_SESSION;
+          newLifetimePolicy = Ci.nsICookieService.ACCEPT_SESSION;
         }
 
         setDefaultPref(
@@ -475,6 +435,68 @@ var Policies = {
           param.Locked
         );
       }
+
+      // New Cookie Behavior option takes precendence
+      let defaultPref = Services.prefs.getDefaultBranch("");
+      let newCookieBehavior = defaultPref.getIntPref(
+        "network.cookie.cookieBehavior"
+      );
+      let newCookieBehaviorPB = defaultPref.getIntPref(
+        "network.cookie.cookieBehavior.pbmode"
+      );
+      if ("Behavior" in param || "BehaviorPrivateBrowsing" in param) {
+        let behaviors = {
+          accept: Ci.nsICookieService.BEHAVIOR_ACCEPT,
+          "reject-foreign": Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN,
+          reject: Ci.nsICookieService.BEHAVIOR_REJECT,
+          "limit-foreign": Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN,
+          "reject-tracker": Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER,
+          "reject-tracker-and-partition-foreign":
+            Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN,
+        };
+        if ("Behavior" in param) {
+          newCookieBehavior = behaviors[param.Behavior];
+        }
+        if ("BehaviorPrivateBrowsing" in param) {
+          newCookieBehaviorPB = behaviors[param.BehaviorPrivateBrowsing];
+        }
+      } else {
+        // Default, AcceptThirdParty, and RejectTracker are being
+        // deprecated in favor of Behavior. They will continue
+        // to be supported, though.
+        if (
+          param.Default !== undefined ||
+          param.AcceptThirdParty !== undefined ||
+          param.RejectTracker !== undefined ||
+          param.Locked
+        ) {
+          newCookieBehavior = Ci.nsICookieService.BEHAVIOR_ACCEPT;
+          if (param.Default !== undefined && !param.Default) {
+            newCookieBehavior = Ci.nsICookieService.BEHAVIOR_REJECT;
+          } else if (param.AcceptThirdParty) {
+            if (param.AcceptThirdParty == "never") {
+              newCookieBehavior = Ci.nsICookieService.BEHAVIOR_REJECT_FOREIGN;
+            } else if (param.AcceptThirdParty == "from-visited") {
+              newCookieBehavior = Ci.nsICookieService.BEHAVIOR_LIMIT_FOREIGN;
+            }
+          } else if (param.RejectTracker) {
+            newCookieBehavior = Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER;
+          }
+        }
+        // With the old cookie policy, we made private browsing the same.
+        newCookieBehaviorPB = newCookieBehavior;
+      }
+      // We set the values no matter what just in case the policy was only used to lock.
+      setDefaultPref(
+        "network.cookie.cookieBehavior",
+        newCookieBehavior,
+        param.Locked
+      );
+      setDefaultPref(
+        "network.cookie.cookieBehavior.pbmode",
+        newCookieBehaviorPB,
+        param.Locked
+      );
     },
   },
 
@@ -770,11 +792,7 @@ var Policies = {
         // declaratively open the bookmarks toolbar. Otherwise, default
         // to showing it on the New Tab Page.
         let visibilityPref = "browser.toolbars.bookmarks.visibility";
-        let bookmarksFeaturePref = "browser.toolbars.bookmarks.2h2020";
-        let visibility = param ? "always" : "never";
-        if (Services.prefs.getBoolPref(bookmarksFeaturePref, false)) {
-          visibility = param ? "always" : "newtab";
-        }
+        let visibility = param ? "always" : "newtab";
         Services.prefs.setCharPref(visibilityPref, visibility);
         gXulStore.setValue(
           BROWSER_DOCUMENT_URL,
@@ -1123,6 +1141,13 @@ var Policies = {
           locked
         );
       }
+      if ("SponsoredTopSites" in param) {
+        setDefaultPref(
+          "browser.newtabpage.activity-stream.showSponsoredTopSites",
+          param.SponsoredTopSites,
+          locked
+        );
+      }
       if ("Highlights" in param) {
         setDefaultPref(
           "browser.newtabpage.activity-stream.feeds.section.highlights",
@@ -1134,6 +1159,18 @@ var Policies = {
         setDefaultPref(
           "browser.newtabpage.activity-stream.feeds.system.topstories",
           param.Pocket,
+          locked
+        );
+        setDefaultPref(
+          "browser.newtabpage.activity-stream.feeds.section.topstories",
+          param.Pocket,
+          locked
+        );
+      }
+      if ("SponsoredPocket" in param) {
+        setDefaultPref(
+          "browser.newtabpage.activity-stream.showSponsored",
+          param.SponsoredPocket,
           locked
         );
       }
@@ -1544,6 +1581,7 @@ var Policies = {
         "geo.",
         "gfx.",
         "intl.",
+        "keyword.enabled",
         "layers.",
         "layout.",
         "media.",
@@ -1553,6 +1591,7 @@ var Policies = {
         "print.",
         "signon.",
         "spellchecker.",
+        "toolkit.legacyUserProfileCustomizations.stylesheets",
         "ui.",
         "widget.",
       ];

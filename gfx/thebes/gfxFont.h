@@ -362,6 +362,22 @@ class gfxFontCache final : private gfxFontCacheExpirationTracker {
   void FlushShapedWordCaches();
   void NotifyGlyphsChanged();
 
+  void RunWordCacheExpirationTimer() {
+    if (mWordCacheExpirationTimer && !mTimerRunning) {
+      mWordCacheExpirationTimer->InitWithNamedFuncCallback(
+          WordCacheExpirationTimerCallback, this,
+          SHAPED_WORD_TIMEOUT_SECONDS * 1000, nsITimer::TYPE_REPEATING_SLACK,
+          "gfxFontCache::WordCacheExpiration");
+      mTimerRunning = true;
+    }
+  }
+  void PauseWordCacheExpirationTimer() {
+    if (mWordCacheExpirationTimer && mTimerRunning) {
+      mWordCacheExpirationTimer->Cancel();
+      mTimerRunning = false;
+    }
+  }
+
   void AddSizeOfExcludingThis(mozilla::MallocSizeOf aMallocSizeOf,
                               FontCacheSizes* aSizes) const;
   void AddSizeOfIncludingThis(mozilla::MallocSizeOf aMallocSizeOf,
@@ -444,6 +460,7 @@ class gfxFontCache final : private gfxFontCacheExpirationTracker {
 
   static void WordCacheExpirationTimerCallback(nsITimer* aTimer, void* aCache);
   nsCOMPtr<nsITimer> mWordCacheExpirationTimer;
+  bool mTimerRunning = false;
 };
 
 class gfxTextPerfMetrics {
@@ -1803,7 +1820,8 @@ class gfxFont {
   }
 
   template <typename T>
-  bool InitFakeSmallCapsRun(DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
+  bool InitFakeSmallCapsRun(nsPresContext* aPresContext,
+                            DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
                             const T* aText, uint32_t aOffset, uint32_t aLength,
                             FontMatchType aMatchType,
                             mozilla::gfx::ShapedTextFlags aOrientation,
@@ -1840,8 +1858,9 @@ class gfxFont {
   }
 
   // Called by the gfxFontCache timer to increment the age of all the words,
-  // so that they'll expire after a sufficient period of non-use
-  void AgeCachedWords();
+  // so that they'll expire after a sufficient period of non-use.
+  // Returns true if the cache is now empty, otherwise false.
+  bool AgeCachedWords();
 
   // Discard all cached word records; called on memory-pressure notification.
   void ClearCachedWords() {
@@ -1876,6 +1895,10 @@ class gfxFont {
 
   virtual already_AddRefed<mozilla::gfx::ScaledFont> GetScaledFont(
       DrawTarget* aTarget) = 0;
+  virtual already_AddRefed<mozilla::gfx::ScaledFont> GetScaledFontNoGDI(
+      DrawTarget* aTarget) {
+    return GetScaledFont(aTarget);
+  }
 
   void InitializeScaledFont();
 
@@ -2282,6 +2305,7 @@ struct MOZ_STACK_CLASS TextRunDrawParams {
   bool isVerticalRun;
   bool isRTL;
   bool paintSVGGlyphs;
+  bool allowGDI;
 };
 
 struct MOZ_STACK_CLASS FontDrawParams {

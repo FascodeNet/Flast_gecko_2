@@ -556,14 +556,11 @@ nsDocShellLoadState::GetLoadingSessionHistoryInfo() const {
 }
 
 void nsDocShellLoadState::SetLoadIsFromSessionHistory(
-    int32_t aRequestedIndex, int32_t aSessionHistoryLength,
-    bool aLoadingFromActiveEntry) {
+    int32_t aOffset, bool aLoadingCurrentEntry) {
   if (mLoadingSessionHistoryInfo) {
     mLoadingSessionHistoryInfo->mLoadIsFromSessionHistory = true;
-    mLoadingSessionHistoryInfo->mRequestedIndex = aRequestedIndex;
-    mLoadingSessionHistoryInfo->mSessionHistoryLength = aSessionHistoryLength;
-    mLoadingSessionHistoryInfo->mLoadingCurrentActiveEntry =
-        aLoadingFromActiveEntry;
+    mLoadingSessionHistoryInfo->mOffset = aOffset;
+    mLoadingSessionHistoryInfo->mLoadingCurrentEntry = aLoadingCurrentEntry;
   }
 }
 
@@ -960,7 +957,6 @@ nsLoadFlags nsDocShellLoadState::CalculateChannelLoadFlags(
           nsIRequest::LOAD_BYPASS_CACHE | nsIRequest::LOAD_FRESH_CONNECTION;
       [[fallthrough]];
 
-    case LOAD_RELOAD_NORMAL:
     case LOAD_REFRESH:
       loadFlags |= nsIRequest::VALIDATE_ALWAYS;
       break;
@@ -976,6 +972,13 @@ nsLoadFlags nsDocShellLoadState::CalculateChannelLoadFlags(
           nsIRequest::LOAD_BYPASS_CACHE | nsIRequest::LOAD_FRESH_CONNECTION;
       break;
 
+    case LOAD_RELOAD_NORMAL:
+      if (!StaticPrefs::
+              browser_soft_reload_only_force_validate_top_level_document()) {
+        loadFlags |= nsIRequest::VALIDATE_ALWAYS;
+        break;
+      }
+      [[fallthrough]];
     case LOAD_NORMAL:
     case LOAD_LINK:
       // Set cache checking flags

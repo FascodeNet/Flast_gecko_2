@@ -525,7 +525,7 @@ already_AddRefed<CacheEntryHandle> CacheEntry::ReopenTruncated(
     nsresult rv = CacheStorageService::Self()->AddStorageEntry(
         GetStorageID(), GetURI(), GetEnhanceID(), mUseDisk && !aMemoryOnly,
         mSkipSizeCheck, mPinned,
-        true,  // truncate existing (this one)
+        nsICacheStorage::OPEN_TRUNCATE,  // truncate existing (this one)
         getter_AddRefs(handle));
 
     if (NS_SUCCEEDED(rv)) {
@@ -1130,6 +1130,19 @@ nsresult CacheEntry::ForceValidFor(uint32_t aSecondsToTheFuture) {
   return NS_OK;
 }
 
+nsresult CacheEntry::MarkForcedValidUse() {
+  LOG(("CacheEntry::MarkForcedValidUse [this=%p, ]", this));
+
+  nsAutoCString key;
+  nsresult rv = HashingKey(key);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  CacheStorageService::Self()->MarkForcedValidEntryUse(mStorageID, key);
+  return NS_OK;
+}
+
 nsresult CacheEntry::SetExpirationTime(uint32_t aExpirationTime) {
   NS_ENSURE_SUCCESS(mFileStatus, NS_ERROR_NOT_AVAILABLE);
 
@@ -1312,7 +1325,7 @@ nsresult CacheEntry::GetSecurityInfo(nsISupports** aSecurityInfo) {
   {
     mozilla::MutexAutoLock lock(mLock);
     if (mSecurityInfoLoaded) {
-      NS_IF_ADDREF(*aSecurityInfo = mSecurityInfo);
+      *aSecurityInfo = do_AddRef(mSecurityInfo).take();
       return NS_OK;
     }
   }
@@ -1337,7 +1350,7 @@ nsresult CacheEntry::GetSecurityInfo(nsISupports** aSecurityInfo) {
     mSecurityInfo.swap(secInfo);
     mSecurityInfoLoaded = true;
 
-    NS_IF_ADDREF(*aSecurityInfo = mSecurityInfo);
+    *aSecurityInfo = do_AddRef(mSecurityInfo).take();
   }
 
   return NS_OK;

@@ -684,6 +684,7 @@ class UrlbarInput {
    *
    */
   handoff(searchString, searchEngine) {
+    this._isHandoffSession = true;
     if (UrlbarPrefs.get("shouldHandOffToSearchMode") && searchEngine) {
       this.search(searchString, {
         searchEngine,
@@ -1376,10 +1377,11 @@ class UrlbarInput {
     if (focus) {
       this.focus();
     }
-
-    let tokens = value.trim().split(UrlbarTokenizer.REGEXP_SPACES);
+    let trimmedValue = value.trim();
+    let end = trimmedValue.search(UrlbarTokenizer.REGEXP_SPACES);
+    let firstToken = end == -1 ? trimmedValue : trimmedValue.substring(0, end);
     // Enter search mode if the string starts with a restriction token.
-    let searchMode = UrlbarUtils.searchModeForToken(tokens[0]);
+    let searchMode = UrlbarUtils.searchModeForToken(firstToken);
     if (!searchMode && searchEngine) {
       searchMode = { engineName: searchEngine.name };
     }
@@ -1389,26 +1391,22 @@ class UrlbarInput {
       this.searchMode = searchMode;
       // Remove the restriction token/alias from the string to be searched for
       // in search mode.
-      value = value.replace(tokens[0], "");
+      value = value.replace(firstToken, "");
       if (UrlbarTokenizer.REGEXP_SPACES.test(value[0])) {
         // If there was a trailing space after the restriction token/alias,
         // remove it.
         value = value.slice(1);
       }
-      this.inputField.value = value;
-      this._revertOnBlurValue = this.value;
-    } else if (Object.values(UrlbarTokenizer.RESTRICT).includes(tokens[0])) {
+      this._revertOnBlurValue = value;
+    } else if (Object.values(UrlbarTokenizer.RESTRICT).includes(firstToken)) {
       this.searchMode = null;
       // If the entire value is a restricted token, append a space.
       if (Object.values(UrlbarTokenizer.RESTRICT).includes(value)) {
         value += " ";
       }
-      this.inputField.value = value;
-      this._revertOnBlurValue = this.value;
-    } else {
-      this.inputField.value = value;
+      this._revertOnBlurValue = value;
     }
-
+    this.inputField.value = value;
     // Avoid selecting the text if this method is called twice in a row.
     this.selectionStart = -1;
 
@@ -1419,8 +1417,12 @@ class UrlbarInput {
     // same as the previous search, but we want to allow consecutive searches
     // with the same string. So clear _lastSearchString first.
     this._lastSearchString = "";
-    let event = this.document.createEvent("UIEvents");
-    event.initUIEvent("input", true, false, this.window, 0);
+    let event = new UIEvent("input", {
+      bubbles: true,
+      cancelable: false,
+      view: this.window,
+      detail: 0,
+    });
     this.inputField.dispatchEvent(event);
   }
 
@@ -2232,15 +2234,22 @@ class UrlbarInput {
   _recordSearch(engine, event, searchActionDetails = {}) {
     const isOneOff = this.view.oneOffSearchButtons.eventTargetIsAOneOff(event);
 
-    BrowserSearchTelemetry.recordSearch(
-      this.window.gBrowser.selectedBrowser,
-      engine,
+    let source = "urlbar";
+    if (this._isHandoffSession) {
+      source = "urlbar-handoff";
+    } else if (this.searchMode && !isOneOff) {
       // Without checking !isOneOff, we might record the string
       // oneoff_urlbar-searchmode in the SEARCH_COUNTS probe (in addition to
       // oneoff_urlbar and oneoff_searchbar). The extra information is not
       // necessary; the intent is the same regardless of whether the user is
       // in search mode when they do a key-modified click/enter on a one-off.
-      this.searchMode && !isOneOff ? "urlbar-searchmode" : "urlbar",
+      source = "urlbar-searchmode";
+    }
+
+    BrowserSearchTelemetry.recordSearch(
+      this.window.gBrowser.selectedBrowser,
+      engine,
+      source,
       { ...searchActionDetails, isOneOff }
     );
   }
@@ -2733,6 +2742,8 @@ class UrlbarInput {
 
   _on_blur(event) {
     this.focusedViaMousedown = false;
+    this._isHandoffSession = false;
+
     // We cannot count every blur events after a missed engagement as abandoment
     // because the user may have clicked on some view element that executes
     // a command causing a focus change. For example opening preferences from
@@ -3523,8 +3534,12 @@ class CopyCutController {
         urlbar.inputField.value.substring(end);
       urlbar.selectionStart = urlbar.selectionEnd = start;
 
-      let event = urlbar.document.createEvent("UIEvents");
-      event.initUIEvent("input", true, false, urlbar.window, 0);
+      let event = new UIEvent("input", {
+        bubbles: true,
+        cancelable: false,
+        view: urlbar.window,
+        detail: 0,
+      });
       urlbar.inputField.dispatchEvent(event);
     }
 

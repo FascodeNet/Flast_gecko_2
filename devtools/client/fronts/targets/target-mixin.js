@@ -30,7 +30,7 @@ loader.lazyRequireGetter(
  * - close: The target window has been closed. All tools attached to this
  *          target should close. This event is not currently cancelable.
  *
- * Optional events only dispatched by BrowsingContextTarget:
+ * Optional events only dispatched by WindowGlobalTarget:
  * - will-navigate: The target window will navigate to a different URL
  * - navigate: The target window has navigated to a different URL
  */
@@ -208,7 +208,7 @@ function TargetMixin(parentClass) {
         if (watcherFront.traits.frame) {
           // Retrieve the Watcher, which manage all the targets and should already have a reference to
           // to the parent target.
-          return watcherFront.getParentBrowsingContextTarget(
+          return watcherFront.getParentWindowGlobalTarget(
             this.browsingContextID
           );
         }
@@ -229,14 +229,14 @@ function TargetMixin(parentClass) {
      *
      * @return {TargetMixin} the requested target.
      */
-    async getBrowsingContextTarget(browsingContextID) {
+    async getWindowGlobalTarget(browsingContextID) {
       // Tab and Process Descriptors expose a Watcher, which is creating the
       // targets and should be used to fetch any.
       const watcherFront = await this.getWatcherFront();
       if (watcherFront) {
         // Safety check, in theory all watcher should support frames.
         if (watcherFront.traits.frame) {
-          return watcherFront.getBrowsingContextTarget(browsingContextID);
+          return watcherFront.getWindowGlobalTarget(browsingContextID);
         }
         return null;
       }
@@ -246,7 +246,7 @@ function TargetMixin(parentClass) {
       // removed in FF77.
       // Support for watcher in WebExtension descriptors is Bug 1644341.
       throw new Error(
-        `Unable to call getBrowsingContextTarget for ${this.actorID}`
+        `Unable to call getWindowGlobalTarget for ${this.actorID}`
       );
     }
 
@@ -272,12 +272,6 @@ function TargetMixin(parentClass) {
      * @return {Mixed}
      */
     getTrait(traitName) {
-      // @backward-compat { version 93 } All traits should be on the `targetForm`, remove
-      // this backward compatibility code.
-      if (this.traits && this.traits[traitName]) {
-        return this.traits[traitName];
-      }
-
       // If the targeted actor exposes traits and has a defined value for this
       // traits, override the root actor traits
       if (this.targetForm.traits && traitName in this.targetForm.traits) {
@@ -369,11 +363,15 @@ function TargetMixin(parentClass) {
       this._forceChrome = true;
     }
 
-    // Tells us if the related actor implements BrowsingContextTargetActor
+    // Tells us if the related actor implements WindowGlobalTargetActor
     // interface and requires to call `attach` request before being used and
     // `detach` during cleanup.
     get isBrowsingContext() {
-      return this.typeName === "browsingContextTarget";
+      // @backward-compat { version 94 } Fx 94 renamed typeName from browsingContextTarget to windowGlobalTarget
+      return (
+        this.typeName === "windowGlobalTarget" ||
+        this.typeName == "browsingContextTarget"
+      );
     }
 
     get name() {
@@ -462,25 +460,6 @@ function TargetMixin(parentClass) {
         // Return the url if unable to resolve the pathname.
         return url;
       }
-    }
-
-    // Attach the console actor
-    async attachConsole() {
-      const consoleFront = await this.getFront("console");
-
-      if (this.isDestroyedOrBeingDestroyed()) {
-        return;
-      }
-
-      // Calling startListeners will populate the traits as it's the first request we
-      // make to the front.
-      await consoleFront.startListeners([]);
-
-      this._onInspectObject = packet => this.emit("inspect-object", packet);
-      this.removeOnInspectObjectListener = consoleFront.on(
-        "inspectObject",
-        this._onInspectObject
-      );
     }
 
     /**
@@ -643,12 +622,7 @@ function TargetMixin(parentClass) {
           console.warn("Error while destroying front:", name, e);
         }
       }
-
-      // Remove listeners set in attachConsole
-      if (this.removeOnInspectObjectListener) {
-        this.removeOnInspectObjectListener();
-        this.removeOnInspectObjectListener = null;
-      }
+      this.fronts.clear();
 
       this.threadFront = null;
       this._offResourceEvent = null;

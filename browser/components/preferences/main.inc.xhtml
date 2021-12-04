@@ -28,13 +28,7 @@
 
   <vbox id="startupPageBox">
     <checkbox id="browserRestoreSession"
-              data-l10n-id="startup-restore-previous-session"/>
-    <hbox class="indent">
-      <checkbox id="browserRestoreSessionQuitWarning"
-                preference="browser.sessionstore.warnOnQuit"
-                disabled="true"
-                data-l10n-id="startup-restore-warn-on-quit"/>
-    </hbox>
+              data-l10n-id="startup-restore-windows-and-tabs"/>
   </vbox>
 
 #ifdef HAVE_SHELL_SERVICE
@@ -73,14 +67,18 @@
     <checkbox id="linkTargeting" data-l10n-id="open-new-link-as-tabs"
               preference="browser.link.open_newwindow"/>
 
-    <checkbox id="warnCloseMultiple" data-l10n-id="warn-on-close-multiple-tabs"
-              preference="browser.tabs.warnOnClose"/>
-
     <checkbox id="warnOpenMany" data-l10n-id="warn-on-open-many-tabs"
               preference="browser.tabs.warnOnOpen"/>
 
     <checkbox id="switchToNewTabs" data-l10n-id="switch-to-new-tabs"
               preference="browser.tabs.loadInBackground"/>
+
+    <checkbox id="warnCloseMultiple" data-l10n-id="confirm-on-close-multiple-tabs"
+              preference="browser.tabs.warnOnClose"/>
+
+#ifndef XP_WIN
+    <checkbox id="warnOnQuitKey" preference="browser.warnOnQuitShortcut"/>
+#endif
 
 #ifdef XP_WIN
     <checkbox id="showTabsInTaskbar" data-l10n-id="show-tabs-in-taskbar"
@@ -89,8 +87,13 @@
 
     <vbox id="browserContainersbox" hidden="true">
       <hbox id="browserContainersExtensionContent"
-            align="center" class="extension-controlled">
-        <description control="disableContainersExtension" flex="1" />
+            align="center" class="extension-controlled info-box-container">
+        <hbox flex="1">
+          <hbox class="info-icon-container">
+            <image class="info-icon"></image>
+          </hbox>
+          <description control="disableContainersExtension" class="description-with-side-element" flex="1" />
+        </hbox>
         <button id="disableContainersExtension"
                 is="highlightable-button"
                 class="extension-controlled-button accessory-button"
@@ -548,7 +551,7 @@
 
 #ifdef MOZ_UPDATER
   <description id="updateAllowDescription" data-l10n-id="update-application-allow-description"></description>
-  <vbox id="updateSettingsContainer">
+  <vbox id="updateSettingsContainer" class="info-box-container">
     <radiogroup id="updateRadioGroup">
       <radio id="autoDesktop"
              value="true"
@@ -563,9 +566,15 @@
              value="false"
              data-l10n-id="update-application-check-choose"/>
     </radiogroup>
-    <description id="updateSettingCrossUserWarning" hidden="true"
-                 data-l10n-id="update-application-warning-cross-user-setting">
-    </description>
+    <hbox id="updateSettingCrossUserWarningDesc" hidden="true">
+      <hbox class="info-icon-container">
+        <image class="info-icon"></image>
+      </hbox>
+      <description id="updateSettingCrossUserWarning"
+                   flex="1"
+                   data-l10n-id="update-application-warning-cross-user-setting">
+      </description>
+    </hbox>
   </vbox>
 #ifdef MOZ_MAINTENANCE_SERVICE
   <checkbox id="useService"

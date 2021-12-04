@@ -63,15 +63,15 @@ Status SizeHeader::Set(size_t xsize64, size_t ysize64) {
   const uint32_t xsize32 = static_cast<uint32_t>(xsize64);
   const uint32_t ysize32 = static_cast<uint32_t>(ysize64);
   if (xsize64 == 0 || ysize64 == 0) return JXL_FAILURE("Empty image");
-  small_ = xsize64 <= 256 && ysize64 <= 256 && (xsize64 % kBlockDim) == 0 &&
-           (ysize64 % kBlockDim) == 0;
+  ratio_ = FindAspectRatio(xsize32, ysize32);
+  small_ = ysize64 <= 256 && (ysize64 % kBlockDim) == 0 &&
+           (ratio_ != 0 || (xsize64 <= 256 && (xsize64 % kBlockDim) == 0));
   if (small_) {
     ysize_div8_minus_1_ = ysize32 / 8 - 1;
   } else {
     ysize_ = ysize32;
   }
 
-  ratio_ = FindAspectRatio(xsize32, ysize32);
   if (ratio_ == 0) {
     if (small_) {
       xsize_div8_minus_1_ = xsize32 / 8 - 1;
@@ -195,7 +195,8 @@ Status WriteSizeHeader(const SizeHeader& size, BitWriter* JXL_RESTRICT writer,
                        size_t layer, AuxOut* aux_out) {
   const size_t max_bits = Bundle::MaxBits(size);
   if (max_bits != SizeHeader::kMaxBits) {
-    JXL_ABORT("Please update SizeHeader::kMaxBits from %zu to %zu\n",
+    JXL_ABORT("Please update SizeHeader::kMaxBits from %" PRIuS " to %" PRIuS
+              "\n",
               SizeHeader::kMaxBits, max_bits);
   }
 

@@ -196,10 +196,6 @@ static constexpr Register WasmTableCallIndexReg = ABINonArgReg3;
 // must be a volatile register.
 static constexpr Register WasmJitEntryReturnScratch = r5;
 
-// Register used to store a reference to an exception thrown by Wasm to an
-// exception handling block. Should not overlap with WasmTlsReg.
-static constexpr Register WasmExceptionReg = ABINonArgReg2;
-
 static constexpr Register PreBarrierReg = r1;
 
 static constexpr Register InterpreterPCReg = r9;
@@ -1338,6 +1334,7 @@ class Assembler : public AssemblerShared {
   // Write a single instruction into the instruction stream.  Very hot,
   // inlined for performance
   MOZ_ALWAYS_INLINE BufferOffset writeInst(uint32_t x) {
+    MOZ_ASSERT(hasCreator());
     BufferOffset offs = m_buffer.putInt(x);
 #ifdef JS_DISASM_ARM
     spew(m_buffer.getInstOrNull(offs));

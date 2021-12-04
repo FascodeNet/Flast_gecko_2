@@ -398,6 +398,9 @@ def build_src(install_dir, host, targets, patches):
         extended = true
         tools = ["analysis", "cargo", "rustfmt", "clippy", "src"]
 
+        [rust]
+        ignore-git = false
+
         [install]
         prefix = "{prefix}"
         sysconfdir = "etc"
@@ -514,6 +517,8 @@ def repack(
         hack_targets = (
             "x86_64-unknown-linux-gnu",
             "i686-unknown-linux-gnu",
+            "x86_64-linux-android",
+            "i686-linux-android",
             "thumbv7neon-linux-androideabi",
             "aarch64-linux-android",
         )

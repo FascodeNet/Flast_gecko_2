@@ -7,6 +7,7 @@
 
 #include "ParentProcessDocumentChannel.h"
 
+#include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/net/ParentChannelWrapper.h"
 #include "mozilla/net/UrlClassifierCommon.h"
 #include "mozilla/StaticPrefs_extensions.h"
@@ -15,6 +16,8 @@
 #include "nsIObserverService.h"
 #include "nsIClassifiedChannel.h"
 #include "nsIXULRuntime.h"
+#include "nsHttpHandler.h"
+#include "nsDocShellLoadState.h"
 
 extern mozilla::LazyLogModule gDocumentChannelLog;
 #define LOG(fmt) MOZ_LOG(gDocumentChannelLog, mozilla::LogLevel::Verbose, fmt)
@@ -171,15 +174,15 @@ NS_IMETHODIMP ParentProcessDocumentChannel::AsyncOpen(
   RefPtr<DocumentLoadListener::OpenPromise> promise;
   if (isDocumentLoad) {
     promise = mDocumentLoadListener->OpenDocument(
-        mLoadState, mCacheKey, Some(mChannelId), mAsyncOpenTime, mTiming,
+        mLoadState, mCacheKey, Some(mChannelId), TimeStamp::Now(), mTiming,
         std::move(initialClientInfo), Some(mUriModified), Some(mIsXFOError),
         nullptr /* ContentParent */, &rv);
   } else {
     promise = mDocumentLoadListener->OpenObject(
-        mLoadState, mCacheKey, Some(mChannelId), mAsyncOpenTime, mTiming,
+        mLoadState, mCacheKey, Some(mChannelId), TimeStamp::Now(), mTiming,
         std::move(initialClientInfo), InnerWindowIDForExtantDoc(docShell),
         mLoadFlags, mLoadInfo->InternalContentPolicyType(),
-        UserActivation::IsHandlingUserInput(), nullptr /* ContentParent */,
+        dom::UserActivation::IsHandlingUserInput(), nullptr /* ContentParent */,
         nullptr /* ObjectUpgradeHandler */, &rv);
   }
 

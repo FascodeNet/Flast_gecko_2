@@ -43,6 +43,10 @@ static constexpr FloatRegister xmm6 =
 static constexpr FloatRegister xmm7 =
     FloatRegister(X86Encoding::xmm7, FloatRegisters::Double);
 
+// Vector registers fixed for use with some instructions, e.g. PBLENDVB.
+static constexpr FloatRegister vmm0 =
+    FloatRegister(X86Encoding::xmm0, FloatRegisters::Simd128);
+
 static constexpr Register InvalidReg{X86Encoding::invalid_reg};
 static constexpr FloatRegister InvalidFloatReg = FloatRegister();
 
@@ -51,7 +55,6 @@ static constexpr Register JSReturnReg_Data = edx;
 static constexpr Register StackPointer = esp;
 static constexpr Register FramePointer = ebp;
 static constexpr Register ReturnReg = eax;
-static constexpr Register64 ReturnReg64(edi, eax);
 static constexpr FloatRegister ReturnFloat32Reg =
     FloatRegister(X86Encoding::xmm0, FloatRegisters::Single);
 static constexpr FloatRegister ReturnDoubleReg =
@@ -64,6 +67,17 @@ static constexpr FloatRegister ScratchDoubleReg_ =
     FloatRegister(X86Encoding::xmm7, FloatRegisters::Double);
 static constexpr FloatRegister ScratchSimd128Reg =
     FloatRegister(X86Encoding::xmm7, FloatRegisters::Simd128);
+
+// Note, EDX:EAX is the system ABI 64-bit return register, and it is to our
+// advantage to keep the SpiderMonkey ABI in sync with the system ABI.
+//
+// However, using EDX here means that we have to use a register that does not
+// have a word or byte part (eg DX/DH/DL) in some other places; notably,
+// ABINonArgReturnReg1 is EDI.  If this becomes a problem and ReturnReg64 has to
+// be something other than EDX:EAX, then jitted code that calls directly to C++
+// will need to shuffle the return value from EDX:EAX into ReturnReg64 directly
+// after the call.  See bug 1730161 for discussion and a patch that does that.
+static constexpr Register64 ReturnReg64(edx, eax);
 
 // Avoid ebp, which is the FramePointer, which is unavailable in some modes.
 static constexpr Register CallTempReg0 = edi;
@@ -103,7 +117,7 @@ static constexpr FloatRegister ABINonArgDoubleReg =
 // These registers may be volatile or nonvolatile.
 // Note: these three registers are all guaranteed to be different
 static constexpr Register ABINonArgReturnReg0 = ecx;
-static constexpr Register ABINonArgReturnReg1 = edx;
+static constexpr Register ABINonArgReturnReg1 = edi;
 static constexpr Register ABINonVolatileReg = ebx;
 
 // This register is guaranteed to be clobberable during the prologue and
@@ -127,10 +141,6 @@ static constexpr Register WasmTableCallIndexReg = ABINonArgReg3;
 // code.  This must not overlap ReturnReg, JSReturnOperand, or WasmTlsReg. It
 // must be a volatile register.
 static constexpr Register WasmJitEntryReturnScratch = ebx;
-
-// Register used to store a reference to an exception thrown by Wasm to an
-// exception handling block. Should not overlap with WasmTlsReg.
-static constexpr Register WasmExceptionReg = ABINonArgReg0;
 
 static constexpr Register OsrFrameReg = edx;
 static constexpr Register PreBarrierReg = edx;

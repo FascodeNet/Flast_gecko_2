@@ -242,14 +242,6 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
                             nsIFrame** aFirstVisual,
                             nsIFrame** aLastVisual) override;
 
-  /** Find the next originating cell frame that originates in the row.
-   * @param aFrame      - cell frame to start with, will return the next cell
-   *                      originating in a row
-   * @param aLineNumber - the index of the row relative to the table
-   */
-  NS_IMETHOD GetNextSiblingOnLine(nsIFrame*& aFrame,
-                                  int32_t aLineNumber) const override;
-
   // row cursor methods to speed up searching for the row(s)
   // containing a point. The basic idea is that we set the cursor
   // property if the rows' y and yMosts are non-decreasing (considering only
@@ -302,7 +294,8 @@ class nsTableRowGroupFrame final : public nsContainerFrame,
    */
   FrameCursorData* SetupRowCursor();
 
-  virtual nsILineIterator* GetLineIterator() override { return this; }
+  bool CanProvideLineIterator() const final { return true; }
+  nsILineIterator* GetLineIterator() final { return this; }
 
   virtual bool IsFrameOfType(uint32_t aFlags) const override {
     if (aFlags & (eSupportsContainLayoutAndPaint | eSupportsAspectRatio)) {

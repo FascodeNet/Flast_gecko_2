@@ -128,11 +128,11 @@ FunctionBox::FunctionBox(JSContext* cx, SourceExtent extent,
       isInitialCompilation(isInitialCompilation),
       isStandalone(false) {}
 
-void FunctionBox::initFromLazyFunction(JSFunction* fun,
+void FunctionBox::initFromLazyFunction(const ScriptStencilExtra& extra,
                                        ScopeContext& scopeContext,
                                        FunctionFlags flags,
                                        FunctionSyntaxKind kind) {
-  initFromLazyFunctionShared(fun);
+  initFromScriptStencilExtra(extra);
   initStandaloneOrLazy(scopeContext, flags, kind);
 }
 
@@ -339,7 +339,8 @@ void FunctionBox::copyFunctionFields(ScriptStencil& script) {
   MOZ_ASSERT(!isFunctionFieldCopiedToStencil);
 
   if (atom_) {
-    compilationState_.parserAtoms.markUsedByStencil(atom_);
+    compilationState_.parserAtoms.markUsedByStencil(atom_,
+                                                    ParserAtom::Atomize::Yes);
     script.functionAtom = atom_;
   }
   script.functionFlags = flags_;
@@ -394,7 +395,8 @@ void FunctionBox::copyUpdatedEnclosingScopeIndex() {
 void FunctionBox::copyUpdatedAtomAndFlags() {
   ScriptStencil& script = functionStencil();
   if (atom_) {
-    compilationState_.parserAtoms.markUsedByStencil(atom_);
+    compilationState_.parserAtoms.markUsedByStencil(atom_,
+                                                    ParserAtom::Atomize::Yes);
     script.functionAtom = atom_;
   }
   script.functionFlags = flags_;

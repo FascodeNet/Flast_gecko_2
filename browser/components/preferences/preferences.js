@@ -10,6 +10,7 @@
 /* import-globals-from privacy.js */
 /* import-globals-from sync.js */
 /* import-globals-from experimental.js */
+/* import-globals-from moreFromMozilla.js */
 /* import-globals-from findInPage.js */
 /* import-globals-from ../../base/content/utilityOverlay.js */
 /* import-globals-from ../../../toolkit/content/preferencesBindings.js */
@@ -29,6 +30,10 @@ ChromeUtils.defineModuleGetter(
   "resource://formautofill/FormAutofillParent.jsm"
 );
 
+XPCOMUtils.defineLazyModuleGetters(this, {
+  NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
+});
+
 XPCOMUtils.defineLazyGetter(this, "gSubDialog", function() {
   const { SubDialogManager } = ChromeUtils.import(
     "resource://gre/modules/SubDialog.jsm"
@@ -41,12 +46,15 @@ XPCOMUtils.defineLazyGetter(this, "gSubDialog", function() {
         "chrome://browser/skin/preferences/dialog.css",
         "chrome://browser/skin/preferences/preferences.css",
       ],
-      resizeCallback: ({ title, frame }) => {
+      resizeCallback: async ({ title, frame }) => {
         // Search within main document and highlight matched keyword.
-        gSearchResultsPane.searchWithinNode(title, gSearchResultsPane.query);
+        await gSearchResultsPane.searchWithinNode(
+          title,
+          gSearchResultsPane.query
+        );
 
         // Search within sub-dialog document and highlight matched keyword.
-        gSearchResultsPane.searchWithinNode(
+        await gSearchResultsPane.searchWithinNode(
           frame.contentDocument.firstElementChild,
           gSearchResultsPane.query
         );
@@ -122,6 +130,7 @@ function init_all() {
   // Asks Preferences to queue an update of the attribute values of
   // the entire document.
   Preferences.queueUpdateOfAllElements();
+  Services.telemetry.setEventRecordingEnabled("aboutpreferences", true);
 
   register_module("paneGeneral", gMainPane);
   register_module("paneHome", gHomePane);
@@ -137,6 +146,12 @@ function init_all() {
       false
     );
     register_module("paneExperimental", gExperimentalPane);
+  }
+
+  NimbusFeatures.moreFromMozilla.recordExposureEvent({ once: true });
+  if (NimbusFeatures.moreFromMozilla.getVariable("enabled")) {
+    document.getElementById("category-more-from-mozilla").hidden = false;
+    register_module("paneMoreFromMozilla", gMoreFromMozillaPane);
   }
   // The Sync category needs to be the last of the "real" categories
   // registered and inititalized since many tests wait for the
@@ -211,16 +226,19 @@ function telemetryBucketForCategory(category) {
 }
 
 function onHashChange() {
-  gotoPref();
+  gotoPref(null, "hash");
 }
 
-async function gotoPref(aCategory) {
+async function gotoPref(
+  aCategory,
+  aShowReason = aCategory ? "click" : "initial"
+) {
   let categories = document.getElementById("categories");
   const kDefaultCategoryInternalName = "paneGeneral";
   const kDefaultCategory = "general";
   let hash = document.location.hash;
-
   let category = aCategory || hash.substr(1) || kDefaultCategoryInternalName;
+
   let breakIndex = category.indexOf("-");
   // Subcategories allow for selecting smaller sections of the preferences
   // until proper search support is enabled (bug 1353954).
@@ -306,6 +324,14 @@ async function gotoPref(aCategory) {
   mainContent.scrollTop = 0;
 
   spotlight(subcategory, category);
+
+  // Record which category is shown
+  Services.telemetry.recordEvent(
+    "aboutpreferences",
+    "show",
+    aShowReason,
+    category
+  );
 }
 
 function search(aQuery, aAttribute) {

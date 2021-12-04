@@ -195,7 +195,7 @@ struct MOZ_STACK_CLASS SavedFrame::Lookup {
     MOZ_ASSERT(source);
     MOZ_ASSERT_IF(framePtr.isSome(), activation);
     if (js::SupportDifferentialTesting()) {
-      column = 0;
+      this->column = 0;
     }
   }
 
@@ -1492,7 +1492,6 @@ bool SavedStacks::insertFrames(JSContext* cx, MutableHandleSavedFrame frame,
                                 nullptr,  // parent (not known yet)
                                 principals, iter.mutedErrors(), framePtr,
                                 iter.pc(), &activation)) {
-      ReportOutOfMemory(cx);
       return false;
     }
 

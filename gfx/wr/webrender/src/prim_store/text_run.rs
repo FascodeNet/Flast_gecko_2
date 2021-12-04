@@ -17,7 +17,7 @@ use crate::renderer::{MAX_VERTEX_TEXTURE_WIDTH};
 use crate::resource_cache::{ResourceCache};
 use crate::util::{MatrixHelpers};
 use crate::prim_store::{InternablePrimitive, PrimitiveInstanceKind};
-use crate::spatial_tree::{SpatialTree, SpatialNodeIndex, ROOT_SPATIAL_NODE_INDEX};
+use crate::spatial_tree::{SpatialTree, SpatialNodeIndex};
 use crate::space::SpaceSnapper;
 use crate::util::PrimaryArc;
 
@@ -397,7 +397,7 @@ impl TextRunPrimitive {
         device_pixel_scale: DevicePixelScale,
         spatial_tree: &SpatialTree,
     ) -> RasterSpace {
-        let prim_spatial_node = &spatial_tree.spatial_nodes[prim_spatial_node_index.0 as usize];
+        let prim_spatial_node = spatial_tree.get_spatial_node(prim_spatial_node_index);
         if prim_spatial_node.is_ancestor_or_self_zooming {
             if low_quality_pinch_zoom {
                 // In low-quality mode, we set the scale to be 1.0. However, the device-pixel
@@ -408,12 +408,14 @@ impl TextRunPrimitive {
                 // the end of a pinch-zoom.
                 RasterSpace::Local(1.0)
             } else {
+                let root_spatial_node_index = spatial_tree.root_reference_frame_index();
+
                 // For high-quality mode, we quantize the exact scale factor as before. However,
                 // we want to _undo_ the effect of the device-pixel scale on the picture cache
                 // tiles (which changes now that they are raster roots). Divide the rounded value
                 // by the device-pixel scale so that the local -> device conversion has no effect.
                 let scale_factors = spatial_tree
-                    .get_relative_transform(prim_spatial_node_index, ROOT_SPATIAL_NODE_INDEX)
+                    .get_relative_transform(prim_spatial_node_index, root_spatial_node_index)
                     .scale_factors();
 
                 // Round the scale up to the nearest power of 2, but don't exceed 8.
@@ -423,7 +425,12 @@ impl TextRunPrimitive {
                 RasterSpace::Local(rounded_up / device_pixel_scale.0)
             }
         } else {
-            self.requested_raster_space
+            // Assume that if we have a RasterSpace::Local, it is frequently changing, in which
+            // case we want to undo the device-pixel scale, as we do above.
+            match self.requested_raster_space {
+                RasterSpace::Local(scale) => RasterSpace::Local(scale / device_pixel_scale.0),
+                RasterSpace::Screen => RasterSpace::Screen,
+            }
         }
     }
 

@@ -38,10 +38,6 @@ namespace gfx {
 class DrawTarget;
 }  // namespace gfx
 
-namespace layers {
-class LayerManager;
-}  // namespace layers
-
 /**
  * Integration of SVG effects (clipPath clipping, masking and filters) into
  * regular display list based painting and hit-testing.
@@ -151,10 +147,9 @@ class SVGIntegrationUtils final {
   struct MOZ_STACK_CLASS PaintFramesParams {
     gfxContext& ctx;
     nsIFrame* frame;
-    const nsRect& dirtyRect;
-    const nsRect& borderArea;
+    nsRect dirtyRect;
+    nsRect borderArea;
     nsDisplayListBuilder* builder;
-    layers::LayerManager* layerManager;
     bool handleOpacity;  // If true, PaintMaskAndClipPath/ PaintFilter should
                          // apply css opacity.
     Maybe<gfx::Rect> maskRect;
@@ -164,7 +159,6 @@ class SVGIntegrationUtils final {
                                const nsRect& aDirtyRect,
                                const nsRect& aBorderArea,
                                nsDisplayListBuilder* aBuilder,
-                               layers::LayerManager* aLayerManager,
                                bool aHandleOpacity,
                                imgDrawingParams& aImgParams)
         : ctx(aCtx),
@@ -172,7 +166,6 @@ class SVGIntegrationUtils final {
           dirtyRect(aDirtyRect),
           borderArea(aBorderArea),
           builder(aBuilder),
-          layerManager(aLayerManager),
           handleOpacity(aHandleOpacity),
           imgParams(aImgParams) {}
   };
@@ -192,11 +185,6 @@ class SVGIntegrationUtils final {
    */
   static bool PaintMask(const PaintFramesParams& aParams,
                         bool& aOutIsMaskComplete);
-
-  /**
-   * Return true if all the mask resource of aFrame are ready.
-   */
-  static bool IsMaskResourceReady(nsIFrame* aFrame);
 
   /**
    * Paint the frame contents.

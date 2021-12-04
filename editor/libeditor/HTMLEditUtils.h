@@ -31,12 +31,15 @@ namespace mozilla {
 enum class EditAction;
 
 class HTMLEditUtils final {
+  using AbstractRange = dom::AbstractRange;
   using Element = dom::Element;
   using Selection = dom::Selection;
+  using Text = dom::Text;
 
  public:
   static constexpr char16_t kNewLine = '\n';
-  static constexpr char16_t kCarridgeReturn = '\r';
+  static constexpr char16_t kCarriageReturn = '\r';
+  static constexpr char16_t kTab = '\t';
   static constexpr char16_t kSpace = ' ';
   static constexpr char16_t kNBSP = 0x00A0;
   static constexpr char16_t kGreaterThan = '>';
@@ -148,12 +151,19 @@ class HTMLEditUtils final {
   }
 
   static bool IsInlineStyle(nsINode* aNode);
+
+  /**
+   * IsDisplayOutsideInline() returns true if display-outside value is
+   * "inside".  This does NOT flush the layout.
+   */
+  static bool IsDisplayOutsideInline(const Element& aElement);
+
   /**
    * IsRemovableInlineStyleElement() returns true if aElement is an inline
    * element and can be removed or split to in order to modifying inline
    * styles.
    */
-  static bool IsRemovableInlineStyleElement(dom::Element& aElement);
+  static bool IsRemovableInlineStyleElement(Element& aElement);
   static bool IsFormatNode(const nsINode* aNode);
   static bool IsNodeThatCanOutdent(nsINode* aNode);
   static bool IsHeader(nsINode& aNode);
@@ -164,7 +174,7 @@ class HTMLEditUtils final {
   static bool IsAnyTableElementButNotTable(nsINode* aNode);
   static bool IsTableCell(const nsINode* aNode);
   static bool IsTableCellOrCaption(nsINode& aNode);
-  static bool IsAnyListElement(nsINode* aNode);
+  static bool IsAnyListElement(const nsINode* aNode);
   static bool IsPre(const nsINode* aNode);
   static bool IsImage(nsINode* aNode);
   static bool IsLink(nsINode* aNode);
@@ -291,37 +301,102 @@ class HTMLEditUtils final {
   /**
    * IsVisibleTextNode() returns true if aText has visible text.  If it has
    * only white-spaces and they are collapsed, returns false.
-   *
-   * If aEditingHost is omitted, this computes parent editable block for you.
-   * But if you call this a lot, please specify proper editing host (or parent
-   * block) for the performance.
    */
-  static bool IsVisibleTextNode(const dom::Text& aText,
-                                const Element* aEditingHost = nullptr);
+  static bool IsVisibleTextNode(const Text& aText);
 
   /**
    * IsInVisibleTextFrames() returns true if all text in aText is in visible
    * text frames.  Callers have to guarantee that there is no pending reflow.
    */
   static bool IsInVisibleTextFrames(nsPresContext* aPresContext,
-                                    const dom::Text& aText);
+                                    const Text& aText);
 
   /**
    * IsVisibleBRElement() and IsInvisibleBRElement() return true if aContent is
    * a visible HTML <br> element, i.e., not a padding <br> element for making
    * last line in a block element visible, or an invisible <br> element.
-   *
-   * If aEditingHost is omitted, this computes parent editable block for you.
-   * But if you call this a lot, please specify proper editing host (or parent
-   * block) for the performance.
    */
-  static bool IsVisibleBRElement(const nsIContent& aContent,
-                                 const Element* aEditingHost = nullptr);
-  static bool IsInvisibleBRElement(const nsIContent& aContent,
-                                   const Element* aEditingHost = nullptr) {
-    return aContent.IsHTMLElement(nsGkAtoms::br) &&
-           !HTMLEditUtils::IsVisibleBRElement(aContent, aEditingHost);
+  static bool IsVisibleBRElement(const nsIContent& aContent) {
+    if (!aContent.IsHTMLElement(nsGkAtoms::br)) {
+      return false;
+    }
+    // If followed by a block boundary without visible content, it's invisible
+    // <br> element.
+    return !HTMLEditUtils::GetElementOfImmediateBlockBoundary(
+        aContent, WalkTreeDirection::Forward);
   }
+  static bool IsInvisibleBRElement(const nsIContent& aContent) {
+    return aContent.IsHTMLElement(nsGkAtoms::br) &&
+           !HTMLEditUtils::IsVisibleBRElement(aContent);
+  }
+
+  /**
+   * IsVisiblePreformattedNewLine() and IsInvisiblePreformattedNewLine() return
+   * true if the point is preformatted linefeed and it's visible or invisible.
+   * If linefeed is immediately before a block boundary, it's invisible.
+   *
+   * @param aFollowingBlockElement  [out] If the node is followed by a block
+   *                                boundary, this is set to the element
+   *                                creating the block boundary.
+   */
+  template <typename EditorDOMPointType>
+  static bool IsVisiblePreformattedNewLine(
+      const EditorDOMPointType& aPoint,
+      Element** aFollowingBlockElement = nullptr) {
+    if (aFollowingBlockElement) {
+      *aFollowingBlockElement = nullptr;
+    }
+    if (!aPoint.IsInTextNode() || aPoint.IsEndOfContainer() ||
+        !aPoint.IsCharPreformattedNewLine()) {
+      return false;
+    }
+    // If there are some other characters in the text node, it's a visible
+    // linefeed.
+    if (!aPoint.IsAtLastContent()) {
+      if (EditorUtils::IsWhiteSpacePreformatted(*aPoint.ContainerAsText())) {
+        return true;
+      }
+      const nsTextFragment& textFragment =
+          aPoint.ContainerAsText()->TextFragment();
+      for (uint32_t offset = aPoint.Offset() + 1;
+           offset < textFragment.GetLength(); ++offset) {
+        char16_t ch = textFragment.CharAt(AssertedCast<int32_t>(offset));
+        if (nsCRT::IsAsciiSpace(ch) && ch != HTMLEditUtils::kNewLine) {
+          continue;  // ASCII white-space which is collapsed into the linefeed.
+        }
+        return true;  // There is a visible character after it.
+      }
+    }
+    // If followed by a block boundary without visible content, it's invisible
+    // linefeed.
+    Element* followingBlockElement =
+        HTMLEditUtils::GetElementOfImmediateBlockBoundary(
+            *aPoint.ContainerAsText(), WalkTreeDirection::Forward);
+    if (aFollowingBlockElement) {
+      *aFollowingBlockElement = followingBlockElement;
+    }
+    return !followingBlockElement;
+  }
+  template <typename EditorDOMPointType>
+  static bool IsInvisiblePreformattedNewLine(
+      const EditorDOMPointType& aPoint,
+      Element** aFollowingBlockElement = nullptr) {
+    if (!aPoint.IsInTextNode() || aPoint.IsEndOfContainer() ||
+        !aPoint.IsCharPreformattedNewLine()) {
+      if (aFollowingBlockElement) {
+        *aFollowingBlockElement = nullptr;
+      }
+      return false;
+    }
+    return !IsVisiblePreformattedNewLine(aPoint, aFollowingBlockElement);
+  }
+
+  /**
+   * ShouldInsertLinefeedCharacter() returns true if the caller should insert
+   * a linefeed character instead of <br> element.
+   */
+  static bool ShouldInsertLinefeedCharacter(EditorDOMPoint& aPointToInsert,
+                                            const Element& aEditingHost);
 
   /**
    * IsEmptyNode() returns false if aNode has some visible content nodes,
@@ -1220,6 +1295,89 @@ class HTMLEditUtils final {
   }
 
   /**
+   * GetRangeSelectingAllContentInAllListItems() returns a range which selects
+   * from start of the first list item to end of the last list item of
+   * aListElement.  Note that the result may be in different list element if
+   * aListElement has child list element(s) directly.
+   */
+  template <typename EditorDOMRangeType>
+  static EditorDOMRangeType GetRangeSelectingAllContentInAllListItems(
+      const Element& aListElement) {
+    MOZ_ASSERT(HTMLEditUtils::IsAnyListElement(&aListElement));
+    Element* firstListItem =
+        HTMLEditUtils::GetFirstListItemElement(aListElement);
+    Element* lastListItem = HTMLEditUtils::GetLastListItemElement(aListElement);
+    MOZ_ASSERT_IF(firstListItem, lastListItem);
+    MOZ_ASSERT_IF(!firstListItem, !lastListItem);
+    if (!firstListItem || !lastListItem) {
+      return EditorDOMRangeType();
+    }
+    return EditorDOMRangeType(
+        typename EditorDOMRangeType::PointType(
+            firstListItem->GetFirstChild() &&
+                    firstListItem->GetFirstChild()->IsText()
+                ? firstListItem->GetFirstChild()
+                : static_cast<nsIContent*>(firstListItem),
+            0u),
+        EditorDOMRangeType::PointType::AtEndOf(
+            lastListItem->GetLastChild() &&
+                    lastListItem->GetLastChild()->IsText()
+                ? *lastListItem->GetFirstChild()
+                : static_cast<nsIContent&>(*lastListItem)));
+  }
+
+  /**
+   * GetFirstListItemElement() returns the first list item element in the
+   * pre-order tree traversal of the DOM.
+   */
+  static Element* GetFirstListItemElement(const Element& aListElement) {
+    MOZ_ASSERT(HTMLEditUtils::IsAnyListElement(&aListElement));
+    for (nsIContent* maybeFirstListItem = aListElement.GetFirstChild();
+         maybeFirstListItem;
+         maybeFirstListItem = maybeFirstListItem->GetNextNode()) {
+      if (HTMLEditUtils::IsListItem(maybeFirstListItem)) {
+        return maybeFirstListItem->AsElement();
+      }
+    }
+    return nullptr;
+  }
+
+  /**
+   * GetLastListItemElement() returns the last list item element in the
+   * post-order tree traversal of the DOM.  I.e., returns the last list
+   * element whose close tag appears at last.
+   */
+  static Element* GetLastListItemElement(const Element& aListElement) {
+    MOZ_ASSERT(HTMLEditUtils::IsAnyListElement(&aListElement));
+    for (nsIContent* maybeLastListItem = aListElement.GetLastChild();
+         maybeLastListItem;) {
+      if (HTMLEditUtils::IsListItem(maybeLastListItem)) {
+        return maybeLastListItem->AsElement();
+      }
+      if (maybeLastListItem->HasChildren()) {
+        maybeLastListItem = maybeLastListItem->GetLastChild();
+        continue;
+      }
+      if (maybeLastListItem->GetPreviousSibling()) {
+        maybeLastListItem = maybeLastListItem->GetPreviousSibling();
+        continue;
+      }
+      for (Element* parent = maybeLastListItem->GetParentElement(); parent;
+           parent = parent->GetParentElement()) {
+        maybeLastListItem = nullptr;
+        if (parent == &aListElement) {
+          return nullptr;
+        }
+        if (parent->GetPreviousSibling()) {
+          maybeLastListItem = parent->GetPreviousSibling();
+          break;
+        }
+      }
+    }
+    return nullptr;
+  }
+
+  /**
    * GetMostDistantAncestorInlineElement() returns the most distant ancestor
    * inline element between aContent and the aEditingHost.  Even if aEditingHost
    * is an inline element, this method never returns aEditingHost as the result.
@@ -1294,36 +1452,40 @@ class HTMLEditUtils final {
    * GetElementIfOnlyOneSelected() returns an element if aRange selects only
    * the element node (and its descendants).
    */
+  static Element* GetElementIfOnlyOneSelected(const AbstractRange& aRange) {
+    return GetElementIfOnlyOneSelected(EditorRawDOMRange(aRange));
+  }
+  template <typename EditorDOMPointType>
   static Element* GetElementIfOnlyOneSelected(
-      const dom::AbstractRange& aRange) {
+      const EditorDOMRangeBase<EditorDOMPointType>& aRange) {
     if (!aRange.IsPositioned() || aRange.Collapsed()) {
       return nullptr;
     }
-    const RangeBoundary& start = aRange.StartRef();
-    const RangeBoundary& end = aRange.EndRef();
+    const auto& start = aRange.StartRef();
+    const auto& end = aRange.EndRef();
     if (NS_WARN_IF(!start.IsSetAndValid()) ||
         NS_WARN_IF(!end.IsSetAndValid()) ||
-        start.Container() != end.Container()) {
+        start.GetContainer() != end.GetContainer()) {
       return nullptr;
     }
-    nsIContent* childAtStart = start.GetChildAtOffset();
+    nsIContent* childAtStart = start.GetChild();
     if (!childAtStart || !childAtStart->IsElement()) {
       return nullptr;
     }
     // If start child is not the last sibling and only if end child is its
     // next sibling, the start child is selected.
     if (childAtStart->GetNextSibling()) {
-      return childAtStart->GetNextSibling() == end.GetChildAtOffset()
+      return childAtStart->GetNextSibling() == end.GetChild()
                  ? childAtStart->AsElement()
                  : nullptr;
     }
     // If start child is the last sibling and only if no child at the end,
     // the start child is selected.
-    return !end.GetChildAtOffset() ? childAtStart->AsElement() : nullptr;
+    return !end.GetChild() ? childAtStart->AsElement() : nullptr;
   }
 
   static Element* GetTableCellElementIfOnlyOneSelected(
-      const dom::AbstractRange& aRange) {
+      const AbstractRange& aRange) {
     Element* element = HTMLEditUtils::GetElementIfOnlyOneSelected(aRange);
     return element && HTMLEditUtils::IsTableCell(element) ? element : nullptr;
   }
@@ -1401,125 +1563,221 @@ class HTMLEditUtils final {
   static EditAction GetEditActionForAlignment(const nsAString& aAlignType);
 
   /**
-   * GetPreviousCharOffsetExceptASCIIWhiteSpace() returns offset of previous
-   * character which is not ASCII white-space characters.
+   * GetPreviousNonCollapsibleCharOffset() returns offset of previous
+   * character which is not collapsible white-space characters.
    */
-  static Maybe<uint32_t> GetPreviousCharOffsetExceptASCIIWhiteSpaces(
-      const EditorDOMPointInText& aPoint) {
+  enum class WalkTextOption {
+    TreatNBSPsCollapsible,
+  };
+  using WalkTextOptions = EnumSet<WalkTextOption>;
+  static Maybe<uint32_t> GetPreviousNonCollapsibleCharOffset(
+      const EditorDOMPointInText& aPoint,
+      const WalkTextOptions& aWalkTextOptions = {}) {
     MOZ_ASSERT(aPoint.IsSetAndValid());
-    return GetPreviousCharOffsetExceptASCIIWhiteSpaces(
-        *aPoint.ContainerAsText(), aPoint.Offset());
+    return GetPreviousNonCollapsibleCharOffset(
+        *aPoint.ContainerAsText(), aPoint.Offset(), aWalkTextOptions);
   }
-  static Maybe<uint32_t> GetPreviousCharOffsetExceptASCIIWhiteSpaces(
-      const dom::Text& aTextNode, uint32_t aOffset) {
+  static Maybe<uint32_t> GetPreviousNonCollapsibleCharOffset(
+      const Text& aTextNode, uint32_t aOffset,
+      const WalkTextOptions& aWalkTextOptions = {}) {
+    const bool isWhiteSpaceCollapsible =
+        !EditorUtils::IsWhiteSpacePreformatted(aTextNode);
+    const bool isNewLineCollapsible =
+        !EditorUtils::IsNewLinePreformatted(aTextNode);
+    const bool isNBSPCollapsible =
+        isWhiteSpaceCollapsible &&
+        aWalkTextOptions.contains(WalkTextOption::TreatNBSPsCollapsible);
     const nsTextFragment& textFragment = aTextNode.TextFragment();
     MOZ_ASSERT(aOffset <= textFragment.GetLength());
     for (uint32_t i = aOffset; i; i--) {
-      if (!nsCRT::IsAsciiSpace(textFragment.CharAt(i - 1))) {
-        return Some(i - 1);
+      // TODO: Perhaps, nsTextFragment should have scanner methods because
+      //       the text may be in per-one-byte storage or per-two-byte storage,
+      //       and `CharAt` needs to check it everytime.
+      switch (textFragment.CharAt(i - 1)) {
+        case HTMLEditUtils::kSpace:
+        case HTMLEditUtils::kCarriageReturn:
+        case HTMLEditUtils::kTab:
+          if (!isWhiteSpaceCollapsible) {
+            return Some(i - 1);
+          }
+          break;
+        case HTMLEditUtils::kNewLine:
+          if (!isNewLineCollapsible) {
+            return Some(i - 1);
+          }
+          break;
+        case HTMLEditUtils::kNBSP:
+          if (!isNBSPCollapsible) {
+            return Some(i - 1);
+          }
+          break;
+        default:
+          MOZ_ASSERT(!nsCRT::IsAsciiSpace(textFragment.CharAt(i - 1)));
+          return Some(i - 1);
       }
     }
     return Nothing();
   }
 
   /**
-   * GetNextCharOffsetExceptASCIIWhiteSpace() returns offset of next character
-   * which is not ASCII white-space characters.
+   * GetNextNonCollapsibleCharOffset() returns offset of next character which is
+   * not collapsible white-space characters.
    */
-  static Maybe<uint32_t> GetNextCharOffsetExceptASCIIWhiteSpaces(
-      const EditorDOMPointInText& aPoint) {
+  static Maybe<uint32_t> GetNextNonCollapsibleCharOffset(
+      const EditorDOMPointInText& aPoint,
+      const WalkTextOptions& aWalkTextOptions = {}) {
     MOZ_ASSERT(aPoint.IsSetAndValid());
-    return GetNextCharOffsetExceptASCIIWhiteSpaces(*aPoint.ContainerAsText(),
-                                                   aPoint.Offset());
+    return GetNextNonCollapsibleCharOffset(*aPoint.ContainerAsText(),
+                                           aPoint.Offset(), aWalkTextOptions);
   }
-  static Maybe<uint32_t> GetNextCharOffsetExceptASCIIWhiteSpaces(
-      const dom::Text& aTextNode, uint32_t aOffset) {
-    const nsTextFragment& textFragment = aTextNode.TextFragment();
-    MOZ_ASSERT(aOffset <= textFragment.GetLength());
-    for (uint32_t i = aOffset + 1; i < textFragment.GetLength(); i++) {
-      if (!nsCRT::IsAsciiSpace(textFragment.CharAt(i))) {
-        return Some(i);
-      }
-    }
-    return Nothing();
+  static Maybe<uint32_t> GetNextNonCollapsibleCharOffset(
+      const Text& aTextNode, uint32_t aOffset,
+      const WalkTextOptions& aWalkTextOptions = {}) {
+    return GetInclusiveNextNonCollapsibleCharOffset(aTextNode, aOffset + 1,
+                                                    aWalkTextOptions);
   }
 
   /**
-   * GetPreviousCharOffsetExceptWhiteSpaces() returns first offset where
-   * the character is neither an ASCII white-space nor an NBSP before aPoint.
+   * GetInclusiveNextNonCollapsibleCharOffset() returns offset of inclusive next
+   * character which is not collapsible white-space characters.
    */
-  static Maybe<uint32_t> GetPreviousCharOffsetExceptWhiteSpaces(
-      const EditorDOMPointInText& aPoint) {
+  static Maybe<uint32_t> GetInclusiveNextNonCollapsibleCharOffset(
+      const EditorDOMPointInText& aPoint,
+      const WalkTextOptions& aWalkTextOptions = {}) {
     MOZ_ASSERT(aPoint.IsSetAndValid());
-    return GetPreviousCharOffsetExceptWhiteSpaces(*aPoint.ContainerAsText(),
-                                                  aPoint.Offset());
+    return GetInclusiveNextNonCollapsibleCharOffset(
+        *aPoint.ContainerAsText(), aPoint.Offset(), aWalkTextOptions);
   }
-  static Maybe<uint32_t> GetPreviousCharOffsetExceptWhiteSpaces(
-      const dom::Text& aTextNode, uint32_t aOffset) {
-    if (!aOffset) {
-      return Nothing();
-    }
-    const nsTextFragment& textFragment = aTextNode.TextFragment();
-    MOZ_ASSERT(aOffset <= textFragment.GetLength());
-    for (uint32_t i = aOffset; i; i--) {
-      char16_t ch = textFragment.CharAt(i - 1);
-      if (!nsCRT::IsAsciiSpace(ch) && ch != HTMLEditUtils::kNBSP) {
-        return Some(i - 1);
-      }
-    }
-    return Nothing();
-  }
-
-  /**
-   * GetInclusiveNextCharOffsetExceptWhiteSpaces() returns first offset where
-   * the character is neither an ASCII white-space nor an NBSP at aPoint or
-   * after it.
-   */
-  static Maybe<uint32_t> GetInclusiveNextCharOffsetExceptWhiteSpaces(
-      const EditorDOMPointInText& aPoint) {
-    MOZ_ASSERT(aPoint.IsSetAndValid());
-    return GetInclusiveNextCharOffsetExceptWhiteSpaces(
-        *aPoint.ContainerAsText(), aPoint.Offset());
-  }
-  static Maybe<uint32_t> GetInclusiveNextCharOffsetExceptWhiteSpaces(
-      const dom::Text& aTextNode, uint32_t aOffset) {
+  static Maybe<uint32_t> GetInclusiveNextNonCollapsibleCharOffset(
+      const Text& aTextNode, uint32_t aOffset,
+      const WalkTextOptions& aWalkTextOptions = {}) {
+    const bool isWhiteSpaceCollapsible =
+        !EditorUtils::IsWhiteSpacePreformatted(aTextNode);
+    const bool isNewLineCollapsible =
+        !EditorUtils::IsNewLinePreformatted(aTextNode);
+    const bool isNBSPCollapsible =
+        isWhiteSpaceCollapsible &&
+        aWalkTextOptions.contains(WalkTextOption::TreatNBSPsCollapsible);
     const nsTextFragment& textFragment = aTextNode.TextFragment();
     MOZ_ASSERT(aOffset <= textFragment.GetLength());
     for (uint32_t i = aOffset; i < textFragment.GetLength(); i++) {
-      char16_t ch = textFragment.CharAt(i);
-      if (!nsCRT::IsAsciiSpace(ch) && ch != HTMLEditUtils::kNBSP) {
-        return Some(i);
+      // TODO: Perhaps, nsTextFragment should have scanner methods because
+      //       the text may be in per-one-byte storage or per-two-byte storage,
+      //       and `CharAt` needs to check it everytime.
+      switch (textFragment.CharAt(i)) {
+        case HTMLEditUtils::kSpace:
+        case HTMLEditUtils::kCarriageReturn:
+        case HTMLEditUtils::kTab:
+          if (!isWhiteSpaceCollapsible) {
+            return Some(i);
+          }
+          break;
+        case HTMLEditUtils::kNewLine:
+          if (!isNewLineCollapsible) {
+            return Some(i);
+          }
+          break;
+        case HTMLEditUtils::kNBSP:
+          if (!isNBSPCollapsible) {
+            return Some(i);
+          }
+          break;
+        default:
+          MOZ_ASSERT(!nsCRT::IsAsciiSpace(textFragment.CharAt(i)));
+          return Some(i);
       }
     }
     return Nothing();
   }
 
   /**
-   * GetFirstASCIIWhiteSpaceOffsetCollapsedWith() returns first ASCII
+   * GetFirstWhiteSpaceOffsetCollapsedWith() returns first collapsible
    * white-space offset which is collapsed with a white-space at the given
-   * position.  I.e., the character at the position must be an ASCII
+   * position.  I.e., the character at the position must be a collapsible
    * white-space.
    */
-  static uint32_t GetFirstASCIIWhiteSpaceOffsetCollapsedWith(
-      const EditorDOMPointInText& aPoint) {
+  static uint32_t GetFirstWhiteSpaceOffsetCollapsedWith(
+      const EditorDOMPointInText& aPoint,
+      const WalkTextOptions& aWalkTextOptions = {}) {
     MOZ_ASSERT(aPoint.IsSetAndValid());
     MOZ_ASSERT(!aPoint.IsEndOfContainer());
-    MOZ_ASSERT(aPoint.IsCharASCIISpace());
-    return GetFirstASCIIWhiteSpaceOffsetCollapsedWith(*aPoint.ContainerAsText(),
-                                                      aPoint.Offset());
+    MOZ_ASSERT_IF(
+        aWalkTextOptions.contains(WalkTextOption::TreatNBSPsCollapsible),
+        aPoint.IsCharCollapsibleASCIISpaceOrNBSP());
+    MOZ_ASSERT_IF(
+        !aWalkTextOptions.contains(WalkTextOption::TreatNBSPsCollapsible),
+        aPoint.IsCharCollapsibleASCIISpace());
+    return GetFirstWhiteSpaceOffsetCollapsedWith(
+        *aPoint.ContainerAsText(), aPoint.Offset(), aWalkTextOptions);
   }
-  static uint32_t GetFirstASCIIWhiteSpaceOffsetCollapsedWith(
-      const dom::Text& aTextNode, uint32_t aOffset) {
+  static uint32_t GetFirstWhiteSpaceOffsetCollapsedWith(
+      const Text& aTextNode, uint32_t aOffset,
+      const WalkTextOptions& aWalkTextOptions = {}) {
     MOZ_ASSERT(aOffset < aTextNode.TextLength());
-    MOZ_ASSERT(nsCRT::IsAsciiSpace(aTextNode.TextFragment().CharAt(aOffset)));
+    MOZ_ASSERT_IF(
+        aWalkTextOptions.contains(WalkTextOption::TreatNBSPsCollapsible),
+        EditorRawDOMPoint(&aTextNode, aOffset)
+            .IsCharCollapsibleASCIISpaceOrNBSP());
+    MOZ_ASSERT_IF(
+        !aWalkTextOptions.contains(WalkTextOption::TreatNBSPsCollapsible),
+        EditorRawDOMPoint(&aTextNode, aOffset).IsCharCollapsibleASCIISpace());
     if (!aOffset) {
       return 0;
     }
     Maybe<uint32_t> previousVisibleCharOffset =
-        GetPreviousCharOffsetExceptASCIIWhiteSpaces(aTextNode, aOffset);
+        GetPreviousNonCollapsibleCharOffset(aTextNode, aOffset,
+                                            aWalkTextOptions);
     return previousVisibleCharOffset.isSome()
                ? previousVisibleCharOffset.value() + 1
                : 0;
+  }
+
+  /**
+   * GetPreviousPreformattedNewLineInTextNode() returns a point which points
+   * previous preformatted linefeed if there is and aPoint is in a text node.
+   * If the node's linefeed characters are not preformatted or aPoint is not
+   * in a text node, this returns unset DOM point.
+   */
+  template <typename EditorDOMPointType, typename ArgEditorDOMPointType>
+  static EditorDOMPointType GetPreviousPreformattedNewLineInTextNode(
+      const ArgEditorDOMPointType& aPoint) {
+    if (!aPoint.IsInTextNode() || aPoint.IsStartOfContainer() ||
+        !EditorUtils::IsNewLinePreformatted(*aPoint.ContainerAsText())) {
+      return EditorDOMPointType();
+    }
+    Text* textNode = aPoint.ContainerAsText();
+    const nsTextFragment& textFragment = textNode->TextFragment();
+    MOZ_ASSERT(aPoint.Offset() <= textFragment.GetLength());
+    for (uint32_t offset = aPoint.Offset(); offset; --offset) {
+      if (textFragment.CharAt(offset - 1) == HTMLEditUtils::kNewLine) {
+        return EditorDOMPointType(textNode, offset - 1);
+      }
+    }
+    return EditorDOMPointType();
+  }
+
+  /**
+   * GetInclusiveNextPreformattedNewLineInTextNode() returns a point which
+   * points inclusive next preformatted linefeed if there is and aPoint is in a
+   * text node. If the node's linefeed characters are not preformatted or aPoint
+   * is not in a text node, this returns unset DOM point.
+   */
+  template <typename EditorDOMPointType, typename ArgEditorDOMPointType>
+  static EditorDOMPointType GetInclusiveNextPreformattedNewLineInTextNode(
+      const ArgEditorDOMPointType& aPoint) {
+    if (!aPoint.IsInTextNode() || aPoint.IsEndOfContainer() ||
+        !EditorUtils::IsNewLinePreformatted(*aPoint.ContainerAsText())) {
+      return EditorDOMPointType();
+    }
+    Text* textNode = aPoint.ContainerAsText();
+    const nsTextFragment& textFragment = textNode->TextFragment();
+    for (uint32_t offset = aPoint.Offset(); offset < textFragment.GetLength();
+         ++offset) {
+      if (textFragment.CharAt(offset) == HTMLEditUtils::kNewLine) {
+        return EditorDOMPointType(textNode, offset);
+      }
+    }
+    return EditorDOMPointType();
   }
 
   /**
@@ -1670,7 +1928,7 @@ class HTMLEditUtils final {
     }
     if (aOptions.contains(WalkTreeOption::IgnoreWhiteSpaceOnlyText) &&
         aContent.IsText() &&
-        const_cast<dom::Text*>(aContent.AsText())->TextIsOnlyWhitespace()) {
+        const_cast<Text*>(aContent.AsText())->TextIsOnlyWhitespace()) {
       return true;
     }
     return false;
@@ -1704,6 +1962,17 @@ class HTMLEditUtils final {
       const nsINode& aNode, WalkTreeDirection aWalkTreeDirection,
       const WalkTreeOptions& aOptions,
       const Element* aAncestorLimiter = nullptr);
+
+  /**
+   * GetElementOfImmediateBlockBoundary() returns a block element if its
+   * block boundary and aContent may be first visible thing before/after the
+   * boundary.  And it may return a <br> element only when aContent is a
+   * text node and follows a <br> element because only in this case, the
+   * start white-spaces are invisible.  So the <br> element works same as
+   * a block boundary.
+   */
+  static Element* GetElementOfImmediateBlockBoundary(
+      const nsIContent& aContent, const WalkTreeDirection aDirection);
 };
 
 /**
@@ -1711,9 +1980,11 @@ class HTMLEditUtils final {
  * Then, you can check whether `<dt>` and/or `<dd>` elements are in it.
  */
 class MOZ_STACK_CLASS DefinitionListItemScanner final {
+  using Element = dom::Element;
+
  public:
   DefinitionListItemScanner() = delete;
-  explicit DefinitionListItemScanner(dom::Element& aDLElement) {
+  explicit DefinitionListItemScanner(Element& aDLElement) {
     MOZ_ASSERT(aDLElement.IsHTMLElement(nsGkAtoms::dl));
     for (nsIContent* child = aDLElement.GetFirstChild(); child;
          child = child->GetNextSibling()) {
@@ -1748,10 +2019,13 @@ class MOZ_STACK_CLASS DefinitionListItemScanner final {
  * only one table cell element, the ranges are just ignored.
  */
 class MOZ_STACK_CLASS SelectedTableCellScanner final {
+  using Element = dom::Element;
+  using Selection = dom::Selection;
+
  public:
   SelectedTableCellScanner() = delete;
-  explicit SelectedTableCellScanner(const dom::Selection& aSelection) {
-    dom::Element* firstSelectedCellElement =
+  explicit SelectedTableCellScanner(const Selection& aSelection) {
+    Element* firstSelectedCellElement =
         HTMLEditUtils::GetFirstSelectedTableCellElement(aSelection);
     if (!firstSelectedCellElement) {
       return;  // We're not in table cell selection mode.
@@ -1766,7 +2040,7 @@ class MOZ_STACK_CLASS SelectedTableCellScanner final {
       // Just ignore selection ranges which do not select only one table
       // cell element.  This is possible case if web apps sets multiple
       // selections and first range selects a table cell element.
-      if (dom::Element* selectedCellElement =
+      if (Element* selectedCellElement =
               HTMLEditUtils::GetTableCellElementIfOnlyOneSelected(*range)) {
         mSelectedCellElements.AppendElement(*selectedCellElement);
       }
@@ -1777,7 +2051,7 @@ class MOZ_STACK_CLASS SelectedTableCellScanner final {
     if (aRanges.Ranges().IsEmpty()) {
       return;
     }
-    dom::Element* firstSelectedCellElement =
+    Element* firstSelectedCellElement =
         HTMLEditUtils::GetTableCellElementIfOnlyOneSelected(
             aRanges.FirstRangeRef());
     if (!firstSelectedCellElement) {
@@ -1793,7 +2067,7 @@ class MOZ_STACK_CLASS SelectedTableCellScanner final {
       // Just ignore selection ranges which do not select only one table
       // cell element.  This is possible case if web apps sets multiple
       // selections and first range selects a table cell element.
-      if (dom::Element* selectedCellElement =
+      if (Element* selectedCellElement =
               HTMLEditUtils::GetTableCellElementIfOnlyOneSelected(*range)) {
         mSelectedCellElements.AppendElement(*selectedCellElement);
       }
@@ -1804,7 +2078,7 @@ class MOZ_STACK_CLASS SelectedTableCellScanner final {
     return !mSelectedCellElements.IsEmpty();
   }
 
-  const nsTArray<OwningNonNull<dom::Element>>& ElementsRef() const {
+  const nsTArray<OwningNonNull<Element>>& ElementsRef() const {
     return mSelectedCellElements;
   }
 
@@ -1812,13 +2086,13 @@ class MOZ_STACK_CLASS SelectedTableCellScanner final {
    * GetFirstElement() and GetNextElement() are stateful iterator methods.
    * This is useful to port legacy code which used old `nsITableEditor` API.
    */
-  dom::Element* GetFirstElement() const {
+  Element* GetFirstElement() const {
     MOZ_ASSERT(!mSelectedCellElements.IsEmpty());
     mIndex = 0;
     return !mSelectedCellElements.IsEmpty() ? mSelectedCellElements[0].get()
                                             : nullptr;
   }
-  dom::Element* GetNextElement() const {
+  Element* GetNextElement() const {
     MOZ_ASSERT(mIndex < mSelectedCellElements.Length());
     return ++mIndex < mSelectedCellElements.Length()
                ? mSelectedCellElements[mIndex].get()
@@ -1826,7 +2100,7 @@ class MOZ_STACK_CLASS SelectedTableCellScanner final {
   }
 
  private:
-  AutoTArray<OwningNonNull<dom::Element>, 16> mSelectedCellElements;
+  AutoTArray<OwningNonNull<Element>, 16> mSelectedCellElements;
   mutable size_t mIndex = 0;
 };
 

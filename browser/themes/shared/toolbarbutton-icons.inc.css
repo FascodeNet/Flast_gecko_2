@@ -4,6 +4,7 @@
 
 :root {
   --toolbarbutton-icon-fill-attention: -moz-accent-color;
+  --warning-icon-bgcolor: #FFA436;
 }
 
 :root:-moz-lwtheme {
@@ -13,6 +14,15 @@
 :root[lwt-popup-brighttext] panel,
 toolbar[brighttext]:-moz-lwtheme {
   --toolbarbutton-icon-fill-attention: var(--lwt-toolbarbutton-icon-fill-attention, rgb(0,221,255));
+  --warning-icon-bgcolor: #FFBD4F;
+}
+
+:root,
+/* Pick up the panel- and toolbar-specific --toolbarbutton-icon-fill-attention
+   values from above. */
+panel,
+toolbar {
+  --toolbar-field-icon-fill-attention: var(--lwt-toolbar-field-icon-fill-attention, var(--toolbarbutton-icon-fill-attention));
 }
 
 .toolbarbutton-animatable-box,
@@ -271,7 +281,7 @@ toolbar[brighttext]:-moz-lwtheme {
 }
 
 #developer-button {
-  list-style-image: url("chrome://browser/skin/developer.svg");
+  list-style-image: url("chrome://global/skin/icons/developer.svg");
 }
 
 #profiler-button-button > .toolbarbutton-icon {
@@ -320,7 +330,7 @@ toolbar[brighttext]:-moz-lwtheme {
 }
 
 #copy-button {
-  list-style-image: url("chrome://browser/skin/edit-copy.svg");
+  list-style-image: url("chrome://global/skin/icons/edit-copy.svg");
 }
 
 #paste-button {
@@ -416,7 +426,7 @@ toolbar[brighttext] #panic-button[open] {
 }
 
 #save-to-pocket-button {
-  list-style-image: url("chrome://browser/skin/pocket-outline.svg");
+  list-style-image: url("chrome://global/skin/icons/pocket-outline.svg");
   fill: var(--toolbarbutton-icon-fill);
 }
 
@@ -462,7 +472,7 @@ toolbarbutton.bookmark-item {
 }
 
 #whats-new-menu-button {
-  list-style-image: url("chrome://browser/skin/whatsnew.svg");
+  list-style-image: url("chrome://global/skin/icons/whatsnew.svg");
 }
 
 #ion-button {

@@ -5,8 +5,8 @@
 use api::{AlphaType, ClipMode, ImageRendering, ImageBufferKind};
 use api::{FontInstanceFlags, YuvColorSpace, YuvFormat, ColorDepth, ColorRange, PremultipliedColorF};
 use api::units::*;
-use crate::clip::{ClipDataStore, ClipNodeFlags, ClipNodeRange, ClipItemKind, ClipStore};
-use crate::spatial_tree::{SpatialTree, ROOT_SPATIAL_NODE_INDEX, SpatialNodeIndex, CoordinateSystemId};
+use crate::clip::{ClipNodeFlags, ClipNodeRange, ClipItemKind, ClipStore};
+use crate::spatial_tree::{SpatialTree, SpatialNodeIndex, CoordinateSystemId};
 use crate::composite::{CompositeState};
 use crate::glyph_rasterizer::{GlyphFormat, SubpixelDirection};
 use crate::gpu_cache::{GpuBlockData, GpuCache, GpuCacheAddress};
@@ -27,7 +27,7 @@ use crate::render_task_graph::{RenderTaskId, RenderTaskGraph};
 use crate::render_task::RenderTaskAddress;
 use crate::renderer::{BlendMode, ShaderColorMode};
 use crate::renderer::MAX_VERTEX_TEXTURE_WIDTH;
-use crate::resource_cache::{GlyphFetchResult, ImageProperties, ImageRequest, ResourceCache};
+use crate::resource_cache::{GlyphFetchResult, ImageProperties, ImageRequest};
 use crate::space::SpaceMapper;
 use crate::visibility::{PrimitiveVisibilityFlags, VisibilityState};
 use smallvec::SmallVec;
@@ -864,12 +864,13 @@ impl BatchBuilder {
         surface_spatial_node_index: SpatialNodeIndex,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        prim_instances: &[PrimitiveInstance],
     ) {
         for cluster in &pic.prim_list.clusters {
             if !cluster.flags.contains(ClusterFlags::IS_VISIBLE) {
                 continue;
             }
-            for prim_instance in &pic.prim_list.prim_instances[cluster.prim_range()] {
+            for prim_instance in &prim_instances[cluster.prim_range()] {
                 // Add each run in this picture to the batch.
                 self.add_prim_to_batch(
                     prim_instance,
@@ -884,6 +885,7 @@ impl BatchBuilder {
                     surface_spatial_node_index,
                     z_generator,
                     composite_state,
+                    prim_instances,
                 );
             }
         }
@@ -907,6 +909,7 @@ impl BatchBuilder {
         surface_spatial_node_index: SpatialNodeIndex,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        prim_instances: &[PrimitiveInstance],
     ) {
         let (batch_filter, vis_flags) = match prim_instance.vis.state {
             VisibilityState::Culled => {
@@ -929,7 +932,7 @@ impl BatchBuilder {
                     // Convert all children of the 3D hierarchy root into batches.
                     Picture3DContext::In { root_data: Some(ref list), .. } => {
                         for child in list {
-                            let child_prim_instance = &picture.prim_list.prim_instances[child.anchor.instance_index];
+                            let child_prim_instance = &prim_instances[child.anchor.instance_index];
                             let child_prim_info = &child_prim_instance.vis;
 
                             let child_pic_index = match child_prim_instance.kind {
@@ -1028,6 +1031,7 @@ impl BatchBuilder {
                             surface_spatial_node_index,
                             z_generator,
                             composite_state,
+                            prim_instances,
                         );
                     }
                 }
@@ -3396,8 +3400,7 @@ impl ClipBatcher {
         }
 
         let mask_screen_rect_size = mask_screen_rect.size().to_i32();
-        let clip_spatial_node = &spatial_tree
-            .spatial_nodes[clip_spatial_node_index.0 as usize];
+        let clip_spatial_node = spatial_tree.get_spatial_node(clip_spatial_node_index);
 
         // Only support clips that are axis-aligned to the root coordinate space,
         // for now, to simplify the logic below. This handles the vast majority
@@ -3485,30 +3488,26 @@ impl ClipBatcher {
         clip_node_range: ClipNodeRange,
         root_spatial_node_index: SpatialNodeIndex,
         render_tasks: &RenderTaskGraph,
-        resource_cache: &ResourceCache,
         gpu_cache: &GpuCache,
         clip_store: &ClipStore,
-        spatial_tree: &SpatialTree,
         transforms: &mut TransformPalette,
-        clip_data_store: &ClipDataStore,
         actual_rect: DeviceRect,
-        world_rect: &WorldRect,
         surface_device_pixel_scale: DevicePixelScale,
-        global_device_pixel_scale: DevicePixelScale,
         task_origin: DevicePoint,
         screen_origin: DevicePoint,
+        ctx: &RenderTargetContext,
     ) -> bool {
         let mut is_first_clip = true;
         let mut clear_to_one = false;
 
         for i in 0 .. clip_node_range.count {
             let clip_instance = clip_store.get_instance_from_range(&clip_node_range, i);
-            let clip_node = &clip_data_store[clip_instance.handle];
+            let clip_node = &ctx.data_stores.clip[clip_instance.handle];
 
             let clip_transform_id = transforms.get_id(
                 clip_instance.spatial_node_index,
-                ROOT_SPATIAL_NODE_INDEX,
-                spatial_tree,
+                ctx.root_spatial_node_index,
+                ctx.spatial_tree,
             );
 
             // For clip mask images, we need to map from the primitive's layout space to
@@ -3520,14 +3519,14 @@ impl ClipBatcher {
                     transforms.get_id(
                         clip_instance.spatial_node_index,
                         root_spatial_node_index,
-                        spatial_tree,
+                        ctx.spatial_tree,
                     )
                 }
                 _ => {
                     transforms.get_id(
                         root_spatial_node_index,
-                        ROOT_SPATIAL_NODE_INDEX,
-                        spatial_tree,
+                        ctx.root_spatial_node_index,
+                        ctx.spatial_tree,
                     )
                 }
             };
@@ -3553,11 +3552,11 @@ impl ClipBatcher {
                         root_spatial_node_index,
                         clip_instance.spatial_node_index,
                         WorldRect::max_rect(),
-                        spatial_tree,
+                        ctx.spatial_tree,
                     );
 
                     let mut add_image = |request: ImageRequest, tile_rect: LayoutRect, sub_rect: DeviceRect| {
-                        let cache_item = match resource_cache.get_cached_image(request) {
+                        let cache_item = match ctx.resource_cache.get_cached_image(request) {
                             Ok(item) => item,
                             Err(..) => {
                                 warn!("Warnings: skip a image mask");
@@ -3611,7 +3610,7 @@ impl ClipBatcher {
                             });
                     };
 
-                    let clip_spatial_node = &spatial_tree.spatial_nodes[clip_instance.spatial_node_index.0 as usize];
+                    let clip_spatial_node = ctx.spatial_tree.get_spatial_node(clip_instance.spatial_node_index);
                     let clip_is_axis_aligned = clip_spatial_node.coordinate_system_id == CoordinateSystemId::root();
 
                     if clip_instance.has_visible_tiles() {
@@ -3698,9 +3697,9 @@ impl ClipBatcher {
                             actual_rect,
                             rect,
                             clip_instance.spatial_node_index,
-                            spatial_tree,
-                            world_rect,
-                            global_device_pixel_scale,
+                            ctx.spatial_tree,
+                            &ctx.screen_world_rect,
+                            ctx.global_device_pixel_scale,
                             &common,
                             is_first_clip,
                         ) {

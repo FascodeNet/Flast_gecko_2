@@ -719,8 +719,7 @@ already_AddRefed<dom::Promise> StyleSheet::Replace(const nsACString& aText,
       css::Loader::UseSystemPrincipal::No, css::StylePreloadKind::None,
       /* aPreloadEncoding */ nullptr,
       /* aObserver */ nullptr, mConstructorDocument->NodePrincipal(),
-      GetReferrerInfo(),
-      /* aRequestingNode */ nullptr);
+      GetReferrerInfo());
 
   // In parallel
   // 5.1 Parse aText into rules.
@@ -1207,8 +1206,7 @@ RefPtr<StyleSheetParsePromise> StyleSheet::ParseSheet(
             StyleSanitizationKind::None,
             /* sanitized_output = */ nullptr)
             .Consume();
-    aLoadData.mUseCounters = std::move(counters);
-    FinishAsyncParse(contents.forget());
+    FinishAsyncParse(contents.forget(), std::move(counters));
   } else {
     auto holder = MakeRefPtr<css::SheetLoadDataHolder>(__func__, &aLoadData);
     Servo_StyleSheet_FromUTF8BytesAsync(
@@ -1220,10 +1218,12 @@ RefPtr<StyleSheetParsePromise> StyleSheet::ParseSheet(
 }
 
 void StyleSheet::FinishAsyncParse(
-    already_AddRefed<RawServoStyleSheetContents> aSheetContents) {
+    already_AddRefed<RawServoStyleSheetContents> aSheetContents,
+    UniquePtr<StyleUseCounters> aUseCounters) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!mParsePromise.IsEmpty());
   Inner().mContents = aSheetContents;
+  Inner().mUseCounters = std::move(aUseCounters);
   FinishParse();
   mParsePromise.Resolve(true, __func__);
 }
@@ -1447,8 +1447,8 @@ nsresult StyleSheet::InsertRuleIntoGroupInternal(const nsACString& aRule,
                                                  uint32_t aIndex) {
   MOZ_ASSERT(!IsReadOnly());
 
-  auto rules = static_cast<ServoCSSRuleList*>(aGroup->CssRules());
-  MOZ_ASSERT(rules->GetParentRule() == aGroup);
+  ServoCSSRuleList* rules = aGroup->GetCssRules();
+  MOZ_ASSERT(rules && rules->GetParentRule() == aGroup);
   return rules->InsertRule(aRule, aIndex);
 }
 

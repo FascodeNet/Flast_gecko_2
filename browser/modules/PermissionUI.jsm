@@ -166,9 +166,9 @@ var PermissionPromptPrototype = {
   },
 
   /**
-   * These are the options that will be passed to the
-   * PopupNotification when it is shown. See the documentation
-   * for PopupNotification for more details.
+   * These are the options that will be passed to the PopupNotification when it
+   * is shown. See the documentation of `PopupNotifications_show` in
+   * PopupNotifications.jsm for details.
    *
    * Note that prompt() will automatically set displayURI to
    * be the URI of the requesting pricipal, unless the displayURI is exactly
@@ -193,7 +193,7 @@ var PermissionPromptPrototype = {
 
   /**
    * If true, the prompt will be cancelled automatically unless
-   * request.isHandlingUserInput is true.
+   * request.hasValidTransientUserGestureActivation is true.
    */
   get requiresUserInput() {
     return false;
@@ -209,7 +209,7 @@ var PermissionPromptPrototype = {
    * then you need to make sure its ID has the "-notification" suffix,
    * and then return the prefix here.
    *
-   * See PopupNotification.jsm for more details.
+   * See PopupNotifications.jsm for more details.
    *
    * @return {string}
    *         The unique ID that will be used to as the
@@ -230,9 +230,8 @@ var PermissionPromptPrototype = {
   },
 
   /**
-   * The message to show to the user in the PopupNotification. A string
-   * with "<>" as a placeholder that is usually replaced by an addon name
-   * or a host name, formatted in bold, to describe the permission that is being requested.
+   * The message to show to the user in the PopupNotification, see
+   * `PopupNotifications_show` in PopupNotifications.jsm.
    *
    * Subclasses must override this.
    *
@@ -396,7 +395,7 @@ var PermissionPromptPrototype = {
 
       if (
         state == SitePermissions.ALLOW &&
-        !this.request.maybeUnsafePermissionDelegate
+        !this.request.isRequestDelegatedToUnsafeThirdParty
       ) {
         this.allow();
         return;
@@ -416,7 +415,10 @@ var PermissionPromptPrototype = {
       }
     }
 
-    if (this.requiresUserInput && !this.request.isHandlingUserInput) {
+    if (
+      this.requiresUserInput &&
+      !this.request.hasValidTransientUserGestureActivation
+    ) {
       if (this.postPromptEnabled) {
         this.postPrompt();
       }
@@ -711,7 +713,7 @@ GeolocationPermissionPrompt.prototype = {
       };
     }
 
-    if (this.request.maybeUnsafePermissionDelegate) {
+    if (this.request.isRequestDelegatedToUnsafeThirdParty) {
       // Second name should be the third party origin
       options.secondName = this.getPrincipalName(this.request.principal);
       options.checkbox = { show: false };
@@ -739,7 +741,7 @@ GeolocationPermissionPrompt.prototype = {
       return gBrowserBundle.GetStringFromName("geolocation.shareWithFile4");
     }
 
-    if (this.request.maybeUnsafePermissionDelegate) {
+    if (this.request.isRequestDelegatedToUnsafeThirdParty) {
       return gBrowserBundle.formatStringFromName(
         "geolocation.shareWithSiteUnsafeDelegation2",
         ["<>", "{}"]
@@ -1238,7 +1240,7 @@ StorageAccessPermissionPrompt.prototype = {
 
   get permissionKey() {
     // Make sure this name is unique per each third-party tracker
-    return "storage-access-" + this.principal.origin;
+    return `3rdPartyStorage${SitePermissions.PERM_KEY_DELIMITER}${this.principal.origin}`;
   },
 
   prettifyHostPort(hostport) {

@@ -21,6 +21,7 @@
 #include "mozilla/MathAlgorithms.h"
 #include "vm/ArrayBufferObject.h"
 #include "wasm/WasmCodegenTypes.h"
+#include "wasm/WasmProcess.h"
 
 using mozilla::IsPowerOfTwo;
 
@@ -61,6 +62,189 @@ bool wasm::ToIndexType(JSContext* cx, HandleValue value, IndexType* indexType) {
   return true;
 }
 
+/*
+ * [SMDOC] Linear memory addresses and bounds checking
+ *
+ * (Also see "WASM Linear Memory structure" in vm/ArrayBufferObject.cpp)
+ *
+ *
+ * Memory addresses, bounds check avoidance, and the huge memory trick.
+ *
+ * A memory address in an access instruction has three components, the "memory
+ * base", the "pointer", and the "offset".  The "memory base" - the HeapReg on
+ * most platforms and a value loaded from the Tls on x86 - is a native pointer
+ * that points to the start of the linear memory array; we'll ignore the memory
+ * base in the following.  The "pointer" is the i32 or i64 index supplied by the
+ * program as a separate value argument to the access instruction; it is usually
+ * variable but can be constant.  The "offset" is a constant encoded in the
+ * access instruction.
+ *
+ * The "effective address" (EA) is the non-overflowed sum of the pointer and the
+ * offset (if the sum overflows the program traps); the pointer, offset, and EA
+ * all have the same type, i32 or i64.
+ *
+ * An access has an "access size", which is the number of bytes that are
+ * accessed - currently up to 16 (for V128).  The highest-addressed byte to be
+ * accessed by an access is thus the byte at (pointer+offset+access_size-1),
+ * where offset+access_size-1 is compile-time evaluable.
+ *
+ * Bounds checking ensures that the entire access is in bounds, ie, that the
+ * highest-addressed byte is at an offset in the linear memory below that of the
+ * memory's current byteLength.
+ *
+ * To avoid performing an addition with overflow check and a compare-and-branch
+ * bounds check for every memory access, we use some tricks:
+ *
+ * - An access-protected guard region of size R at the end of each memory is
+ *   used to trap accesses to out-of-bounds offsets in the range
+ *   0..R-access_size.  Thus the offset and the access size need not be added
+ *   into the pointer before the bounds check, saving the add and overflow
+ *   check.  The offset is added into the pointer without an overflow check
+ *   either directly before the access or in the access instruction itself
+ *   (depending on the ISA).  The pointer must still be explicitly
+ *   bounds-checked.
+ *
+ * - On 64-bit systems where we determine there is plenty of virtual memory
+ *   space (and ideally we determine that the VM system uses overcommit), a
+ *   32-bit memory is implemented as a 4GB + R reservation, where the memory
+ *   from the current heap length through the end of the reservation is
+ *   access-protected.  The protected area R allows offsets up to R-access_size
+ *   to be encoded in the access instruction.  The pointer need not be bounds
+ *   checked explicitly, since it has only a 4GB range and thus points into the
+ *   4GB part of the reservation.  The offset can be added into the pointer
+ *   (using 64-bit arithmetic) either directly before the access or in the
+ *   access instruction.
+ *
+ * The value of R differs in the two situations; in the first case it tends to
+ * be small, currently 64KB; in the second case it is large, currently 2GB+64KB.
+ * The difference is due to explicit bounds checking tending to be used on
+ * 32-bit systems where memory and address space are scarce, while the implicit
+ * bounds check is used only on 64-bit systems after ensuring that sufficient
+ * address space is available in the process.  (2GB is really overkill, and
+ * there's nothing magic about it; we could use something much smaller.)
+ *
+ * The implicit bounds checking strategy with the large reservation is known
+ * below and elsewhere as the "huge memory trick" or just "huge memory".
+ *
+ * All memories in a process use the same strategy, selected at process startup.
+ * The immediate reason for that is that the machine code embeds the strategy
+ * it's been compiled with, and may later be exposed to memories originating
+ * from different modules or directly from JS.  If the memories did not all use
+ * the same strategy, and the same strategy as the code, linking would fail or
+ * we would have to recompile the code.
+ *
+ *
+ * The boundsCheckLimit.
+ *
+ * The bounds check limit that is stored in the Tls is always valid and is
+ * always a 64-bit datum, and it is always correct to load it and use it as a
+ * 64-bit value.  However, in situations when the 32 upper bits are known to be
+ * zero, it is also correct to load just the low 32 bits from the address of the
+ * limit (which is always little-endian when a JIT is enabled), and use that
+ * value as the limit.
+ *
+ * On x86 and arm32 (and on any other 32-bit platform, should there ever be
+ * one), there is explicit bounds checking and the heap, whether memory32 or
+ * memory64, is limited to 2GB; the bounds check limit can be treated as a
+ * 32-bit quantity.
+ *
+ * On all 64-bit platforms, we may use explicit bounds checking or the huge
+ * memory trick for memory32, but must always use explicit bounds checking for
+ * memory64.  If the heap does not have a known maximum size or the known
+ * maximum is greater than or equal to 4GB, then the bounds check limit must be
+ * treated as a 64-bit quantity; otherwise it can be treated as a 32-bit
+ * quantity.
+ *
+ * On x64 and arm64 with Baseline and Ion, we allow 32-bit memories up to 4GB,
+ * and 64-bit memories can be larger.
+ *
+ * On arm64 with Cranelift, memories limited to 4GB-128K, since new code would
+ * have to be written to deal with the 64-bit limit.
+ *
+ * On mips64, memories are limited to 2GB, for now.
+ *
+ * Asm.js memories are limited to 2GB even on 64-bit platforms, and we can
+ * always assume a 32-bit bounds check limit for asm.js.
+ *
+ *
+ * Constant pointers.
+ *
+ * If the pointer is constant then the EA can be computed at compile time, and
+ * if the EA is below the initial memory size then the bounds check can be
+ * elided.
+ *
+ *
+ * Alignment checks.
+ *
+ * On all platforms, some accesses (currently atomics) require an alignment
+ * check: the EA must be naturally aligned for the datum being accessed.
+ * However, we do not need to compute the EA properly, we care only about the
+ * low bits - a cheap, overflowing add is fine, and if the offset is known
+ * to be aligned, only the pointer need be checked.
+ */
+
+// Bounds checks always compare the base of the memory access with the bounds
+// check limit. If the memory access is unaligned, this means that, even if the
+// bounds check succeeds, a few bytes of the access can extend past the end of
+// memory. To guard against this, extra space is included in the guard region to
+// catch the overflow. MaxMemoryAccessSize is a conservative approximation of
+// the maximum guard space needed to catch all unaligned overflows.
+//
+// Also see "Linear memory addresses and bounds checking" above.
+
+static const unsigned MaxMemoryAccessSize = LitVal::sizeofLargestValue();
+
+// All plausible targets must be able to do at least IEEE754 double
+// loads/stores, hence the lower limit of 8.  Some Intel processors support
+// AVX-512 loads/stores, hence the upper limit of 64.
+static_assert(MaxMemoryAccessSize >= 8, "MaxMemoryAccessSize too low");
+static_assert(MaxMemoryAccessSize <= 64, "MaxMemoryAccessSize too high");
+static_assert((MaxMemoryAccessSize & (MaxMemoryAccessSize - 1)) == 0,
+              "MaxMemoryAccessSize is not a power of two");
+
+#ifdef WASM_SUPPORTS_HUGE_MEMORY
+
+static_assert(MaxMemoryAccessSize <= HugeUnalignedGuardPage,
+              "rounded up to static page size");
+static_assert(HugeOffsetGuardLimit < UINT32_MAX,
+              "checking for overflow against OffsetGuardLimit is enough.");
+
+// We have only tested huge memory on x64 and arm64.
+#  if !(defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64))
+#    error "Not an expected configuration"
+#  endif
+
+#endif
+
+// On !WASM_SUPPORTS_HUGE_MEMORY platforms:
+//  - To avoid OOM in ArrayBuffer::prepareForAsmJS, asm.js continues to use the
+//    original ArrayBuffer allocation which has no guard region at all.
+//  - For WebAssembly memories, an additional GuardSize is mapped after the
+//    accessible region of the memory to catch folded (base+offset) accesses
+//    where `offset < OffsetGuardLimit` as well as the overflow from unaligned
+//    accesses, as described above for MaxMemoryAccessSize.
+
+static const size_t OffsetGuardLimit = PageSize - MaxMemoryAccessSize;
+
+static_assert(MaxMemoryAccessSize < GuardSize,
+              "Guard page handles partial out-of-bounds");
+static_assert(OffsetGuardLimit < UINT32_MAX,
+              "checking for overflow against OffsetGuardLimit is enough.");
+
+size_t wasm::GetMaxOffsetGuardLimit(bool hugeMemory) {
+#ifdef WASM_SUPPORTS_HUGE_MEMORY
+  return hugeMemory ? HugeOffsetGuardLimit : OffsetGuardLimit;
+#else
+  return OffsetGuardLimit;
+#endif
+}
+
+// Assert that our minimum offset guard limit covers our inline
+// memory.copy/fill optimizations.
+static const size_t MinOffsetGuardLimit = OffsetGuardLimit;
+static_assert(MaxInlineMemoryCopyLength < MinOffsetGuardLimit, "precondition");
+static_assert(MaxInlineMemoryFillLength < MinOffsetGuardLimit, "precondition");
+
 #ifdef JS_64BIT
 #  ifdef ENABLE_WASM_CRANELIFT
 // TODO (large ArrayBuffer): Cranelift needs to be updated to use more than the
@@ -70,31 +254,53 @@ bool wasm::ToIndexType(JSContext* cx, HandleValue value, IndexType* indexType) {
 // The "-2" here accounts for the !huge-memory case in CreateSpecificWasmBuffer,
 // which is guarding against an overflow.  Also see
 // WasmMemoryObject::boundsCheckLimit() for related assertions.
-wasm::Pages wasm::MaxMemoryPages() {
+wasm::Pages wasm::MaxMemoryPages(IndexType) {
   size_t desired = MaxMemory32LimitField - 2;
   size_t actual = ArrayBufferObject::maxBufferByteLength() / PageSize;
   return wasm::Pages(std::min(desired, actual));
 }
-
-size_t wasm::MaxMemoryBoundsCheckLimit() {
-  return UINT32_MAX - 2 * PageSize + 1;
-}
 #  else
-wasm::Pages wasm::MaxMemoryPages() {
-  size_t desired = MaxMemory32LimitField;
-  size_t actual = ArrayBufferObject::maxBufferByteLength() / PageSize;
+wasm::Pages wasm::MaxMemoryPages(IndexType t) {
+  size_t offsetGuardAllowance = 0;
+  if (t == IndexType::I64) {
+    // For memory64, the max memory size is larger than any reasonable buffer
+    // size.  The guard pages must fit within the confines of the buffer, so
+    // reduce the maximum actual memory size accordingly.  Since this memory is
+    // !huge, there is no extra page to deal with unaligned accesses.
+    MOZ_ASSERT(!IsHugeMemoryEnabled(t));
+    offsetGuardAllowance = OffsetGuardLimit;
+  }
+
+  size_t desired =
+      t == IndexType::I64 ? MaxMemory64LimitField : MaxMemory32LimitField;
+  size_t actual =
+      (ArrayBufferObject::maxBufferByteLength() - offsetGuardAllowance) /
+      PageSize;
   return wasm::Pages(std::min(desired, actual));
 }
-
-size_t wasm::MaxMemoryBoundsCheckLimit() { return size_t(UINT32_MAX) + 1; }
 #  endif
+
+size_t wasm::MaxMemoryBoundsCheckLimit(IndexType t) {
+  return MaxMemoryPages(t).byteLength();
+}
+
 #else
-wasm::Pages wasm::MaxMemoryPages() {
+// On 32-bit systems, the heap limit must be representable in the nonnegative
+// range of an int32_t, which means the maximum heap size as observed by wasm
+// code is one wasm page less than 2GB.
+wasm::Pages wasm::MaxMemoryPages(IndexType t) {
   MOZ_ASSERT(ArrayBufferObject::maxBufferByteLength() >= INT32_MAX / PageSize);
   return wasm::Pages(INT32_MAX / PageSize);
 }
 
-size_t wasm::MaxMemoryBoundsCheckLimit() { return size_t(INT32_MAX) + 1; }
+// The max bounds check limit can be larger than the MaxMemoryPages because it
+// is really MaxMemoryPages rounded up to the next valid bounds check immediate,
+// see ComputeMappedSize().
+size_t wasm::MaxMemoryBoundsCheckLimit(IndexType t) {
+  size_t boundsCheckLimit = size_t(INT32_MAX) + 1;
+  MOZ_ASSERT(IsValidBoundsCheckImmediate(boundsCheckLimit));
+  return boundsCheckLimit;
+}
 #endif
 
 // Because ARM has a fixed-width instruction encoding, ARM can only express a
@@ -131,7 +337,7 @@ uint64_t wasm::RoundUpToNextValidARMImmediate(uint64_t i) {
   return i;
 }
 
-Pages wasm::ClampedMaxPages(Pages initialPages,
+Pages wasm::ClampedMaxPages(IndexType t, Pages initialPages,
                             const Maybe<Pages>& sourceMaxPages,
                             bool useHugeMemory) {
   Pages clampedMaxPages;
@@ -139,7 +345,7 @@ Pages wasm::ClampedMaxPages(Pages initialPages,
   if (sourceMaxPages.isSome()) {
     // There is a specified maximum, clamp it to the implementation limit of
     // maximum pages
-    clampedMaxPages = std::min(*sourceMaxPages, wasm::MaxMemoryPages());
+    clampedMaxPages = std::min(*sourceMaxPages, wasm::MaxMemoryPages(t));
 
 #if defined(JS_64BIT) && defined(ENABLE_WASM_CRANELIFT)
     // On 64-bit platforms when we aren't using huge memory and we're using
@@ -154,10 +360,10 @@ Pages wasm::ClampedMaxPages(Pages initialPages,
 #ifndef JS_64BIT
     static_assert(sizeof(uintptr_t) == 4, "assuming not 64 bit implies 32 bit");
 
-    // On 32-bit platforms, prevent applications specifying a large max
-    // (like MaxMemory32Pages) from unintentially OOMing the browser: they just
-    // want "a lot of memory". Maintain the invariant that
-    // initialPages <= clampedMaxPages.
+    // On 32-bit platforms, prevent applications specifying a large max (like
+    // MaxMemoryPages()) from unintentially OOMing the browser: they just want
+    // "a lot of memory". Maintain the invariant that initialPages <=
+    // clampedMaxPages.
     static const uint64_t OneGib = 1 << 30;
     static const Pages OneGibPages = Pages(OneGib >> wasm::PageBits);
     static_assert(HighestValidARMImmediate > OneGib,
@@ -169,13 +375,13 @@ Pages wasm::ClampedMaxPages(Pages initialPages,
   } else {
     // There is not a specified maximum, fill it in with the implementation
     // limit of maximum pages
-    clampedMaxPages = wasm::MaxMemoryPages();
+    clampedMaxPages = wasm::MaxMemoryPages(t);
   }
 
   // Double-check our invariants
   MOZ_RELEASE_ASSERT(sourceMaxPages.isNothing() ||
                      clampedMaxPages <= *sourceMaxPages);
-  MOZ_RELEASE_ASSERT(clampedMaxPages <= wasm::MaxMemoryPages());
+  MOZ_RELEASE_ASSERT(clampedMaxPages <= wasm::MaxMemoryPages(t));
   MOZ_RELEASE_ASSERT(initialPages <= clampedMaxPages);
 
   return clampedMaxPages;
@@ -189,7 +395,8 @@ size_t wasm::ComputeMappedSize(wasm::Pages clampedMaxPages) {
   // It is the bounds-check limit, not the mapped size, that gets baked into
   // code. Thus round up the maxSize to the next valid immediate value
   // *before* adding in the guard page.
-
+  //
+  // Also see "Wasm Linear Memory Structure" in vm/ArrayBufferObject.cpp.
   uint64_t boundsCheckLimit = RoundUpToNextValidBoundsCheckImmediate(maxSize);
   MOZ_ASSERT(IsValidBoundsCheckImmediate(boundsCheckLimit));
 
@@ -213,71 +420,3 @@ uint64_t wasm::RoundUpToNextValidBoundsCheckImmediate(uint64_t i) {
   return i;
 #endif
 }
-
-// Bounds checks always compare the base of the memory access with the bounds
-// check limit. If the memory access is unaligned, this means that, even if the
-// bounds check succeeds, a few bytes of the access can extend past the end of
-// memory. To guard against this, extra space is included in the guard region to
-// catch the overflow. MaxMemoryAccessSize is a conservative approximation of
-// the maximum guard space needed to catch all unaligned overflows.
-
-static const unsigned MaxMemoryAccessSize = LitVal::sizeofLargestValue();
-
-// All plausible targets must be able to do at least IEEE754 double
-// loads/stores, hence the lower limit of 8.  Some Intel processors support
-// AVX-512 loads/stores, hence the upper limit of 64.
-static_assert(MaxMemoryAccessSize >= 8, "MaxMemoryAccessSize too low");
-static_assert(MaxMemoryAccessSize <= 64, "MaxMemoryAccessSize too high");
-static_assert((MaxMemoryAccessSize & (MaxMemoryAccessSize - 1)) == 0,
-              "MaxMemoryAccessSize is not a power of two");
-
-#ifdef WASM_SUPPORTS_HUGE_MEMORY
-
-static_assert(MaxMemoryAccessSize <= HugeUnalignedGuardPage,
-              "rounded up to static page size");
-static_assert(HugeOffsetGuardLimit < UINT32_MAX,
-              "checking for overflow against OffsetGuardLimit is enough.");
-
-// We have only tested huge memory on x64 and arm64.
-#  if !(defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM64))
-#    error "Not an expected configuration"
-#  endif
-
-// TODO: We want this static_assert back, but it reqires MaxMemory32Bytes to be
-// a constant or constexpr function, not a regular function as now.
-//
-// The assert is also present in WasmMemoryObject::isHuge and
-// WasmMemoryObject::grow, so it's OK to comment out here for now.
-
-// static_assert(MaxMemory32Bytes < HugeMappedSize(),
-//               "Normal array buffer could be confused with huge memory");
-#endif
-
-// On !WASM_SUPPORTS_HUGE_MEMORY platforms:
-//  - To avoid OOM in ArrayBuffer::prepareForAsmJS, asm.js continues to use the
-//    original ArrayBuffer allocation which has no guard region at all.
-//  - For WebAssembly memories, an additional GuardSize is mapped after the
-//    accessible region of the memory to catch folded (base+offset) accesses
-//    where `offset < OffsetGuardLimit` as well as the overflow from unaligned
-//    accesses, as described above for MaxMemoryAccessSize.
-
-static const size_t OffsetGuardLimit = PageSize - MaxMemoryAccessSize;
-
-static_assert(MaxMemoryAccessSize < GuardSize,
-              "Guard page handles partial out-of-bounds");
-static_assert(OffsetGuardLimit < UINT32_MAX,
-              "checking for overflow against OffsetGuardLimit is enough.");
-
-size_t wasm::GetMaxOffsetGuardLimit(bool hugeMemory) {
-#ifdef WASM_SUPPORTS_HUGE_MEMORY
-  return hugeMemory ? HugeOffsetGuardLimit : OffsetGuardLimit;
-#else
-  return OffsetGuardLimit;
-#endif
-}
-
-// Assert that our minimum offset guard limit covers our inline
-// memory.copy/fill optimizations.
-static const size_t MinOffsetGuardLimit = OffsetGuardLimit;
-static_assert(MaxInlineMemoryCopyLength < MinOffsetGuardLimit, "precondition");
-static_assert(MaxInlineMemoryFillLength < MinOffsetGuardLimit, "precondition");

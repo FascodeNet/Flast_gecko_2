@@ -674,6 +674,25 @@ This reports the user's interaction with those Pocket tiles.
 }
 ```
 
+### Load more button ping
+
+```js
+{
+  "event": "CLICK",
+  "source": "DS_LOAD_MORE_BUTTON",
+
+  // Basic metadata
+  "action": "activity_stream_event",
+  "page": ["about:newtab" | "about:home" | "about:welcome" | "unknown"],
+  "client_id": "26288a14-5cc4-d14f-ae0a-bb01ef45be9c",
+  "session_id": "005deed0-e3e4-4c02-a041-17405fd703f6",
+  "browser_session_id": "e7e52665-7db3-f348-9918-e93160eb2ef3",
+  "addon_version": "20180710100040",
+  "locale": "en-US",
+  "user_prefs": 7
+}
+```
+
 ## Save to Pocket button pings
 
 Right now the save to Pocket button, while technically outside of newtab, has some similarities with the newtab telemetry.
@@ -1049,21 +1068,28 @@ Unlike other Activity Stream pings, this is a Firefox Events telemetry event, an
 ### Experiment attribute errors
 
 This records whether issues were encountered with any of the targeting attributes used in the experiment enrollment or message targeting.
-Two different types of events are sent: `attribute_error` and `attribute_timeout` along with the attribute that caused it.
+Two different types of events are sent: `attribute_error` and `attribute_timeout` along with the attribute that caused it. An attribute
+is a variable inside the JEXL targeting expression that is evaluated client side by the browser.
 
 ```js
-[
+{
   "messaging_experiments",
   "targeting",
   "attribute_error", // event
-  "foo" // attribute
-],
-[
+  "foo", // attribute,
+  "extra_keys": {
+    "source": "message id or experiment slug",
+  },
+},
+{
   "messaging_experiments",
   "targeting",
   "attribute_timeout", // event
-  "bar" // attribute
-]
+  "bar", // attribute,
+  "extra_keys": {
+    "source": "message id or experiment slug",
+  },
+}
 ```
 
 ## Firefox Onboarding (about:welcome) pings

@@ -13,7 +13,6 @@
 
 #ifdef MOZ_WAYLAND
 #  include "mozilla/StaticPrefs_widget.h"
-#  include "WindowSurfaceWayland.h"
 #  include "WindowSurfaceWaylandMultiBuffer.h"
 #endif
 #ifdef MOZ_X11
@@ -69,28 +68,35 @@ void WindowSurfaceProvider::Initialize(Window aWindow, Visual* aVisual,
 }
 #endif
 
-void WindowSurfaceProvider::CleanupResources() { mWindowSurface = nullptr; }
+void WindowSurfaceProvider::CleanupResources() {
+  mWindowSurface = nullptr;
+#ifdef MOZ_WAYLAND
+  mWidget = nullptr;
+#endif
+#ifdef MOZ_X11
+  mXWindow = 0;
+  mXVisual = 0;
+  mXDepth = 0;
+  mIsShaped = false;
+#endif
+}
 
 RefPtr<WindowSurface> WindowSurfaceProvider::CreateWindowSurface() {
 #ifdef MOZ_WAYLAND
   if (GdkIsWaylandDisplay()) {
-    if (StaticPrefs::
-            widget_wayland_multi_buffer_software_backend_enabled_AtStartup()) {
-      LOG(
-          ("Drawing to nsWindow %p will use wl_surface. Using multi-buffered "
-           "backend.\n",
-           mWidget.get()));
-      return MakeRefPtr<WindowSurfaceWaylandMB>(mWidget);
+    // We're called too early or we're unmapped.
+    if (!mWidget) {
+      return nullptr;
     }
-    LOG(
-        ("Drawing to nsWindow %p will use wl_surface. Using single-buffered "
-         "backend.\n",
-         mWidget.get()));
-    return MakeRefPtr<WindowSurfaceWayland>(mWidget);
+    return MakeRefPtr<WindowSurfaceWaylandMB>(mWidget);
   }
 #endif
 #ifdef MOZ_X11
   if (GdkIsX11Display()) {
+    // We're called too early or we're unmapped.
+    if (!mXWindow) {
+      return nullptr;
+    }
     // Blit to the window with the following priority:
     // 1. MIT-SHM
     // 2. XPutImage
@@ -114,11 +120,15 @@ already_AddRefed<gfx::DrawTarget>
 WindowSurfaceProvider::StartRemoteDrawingInRegion(
     const LayoutDeviceIntRegion& aInvalidRegion,
     layers::BufferMode* aBufferMode) {
-  if (aInvalidRegion.IsEmpty()) return nullptr;
+  if (aInvalidRegion.IsEmpty()) {
+    return nullptr;
+  }
 
   if (!mWindowSurface) {
     mWindowSurface = CreateWindowSurface();
-    if (!mWindowSurface) return nullptr;
+    if (!mWindowSurface) {
+      return nullptr;
+    }
   }
 
   *aBufferMode = BufferMode::BUFFER_NONE;

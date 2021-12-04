@@ -287,8 +287,13 @@ static mozilla::LogModule* GetTimerFiringsLog() { return sTimerFiringsLog; }
 
 #include <math.h>
 
+/* static */
+mozilla::StaticMutex nsTimerImpl::sDeltaMutex;
+/* static */
 double nsTimerImpl::sDeltaSumSquared = 0;
+/* static */
 double nsTimerImpl::sDeltaSum = 0;
+/* static */
 double nsTimerImpl::sDeltaNum = 0;
 
 static void myNS_MeanAndStdDev(double n, double sumOfValues,
@@ -347,6 +352,7 @@ nsresult nsTimerImpl::Startup() { return gThreadWrapper.Init(); }
 
 void nsTimerImpl::Shutdown() {
   if (MOZ_LOG_TEST(GetTimerLog(), LogLevel::Debug)) {
+    mozilla::StaticMutexAutoLock lock(sDeltaMutex);
     double mean = 0, stddev = 0;
     myNS_MeanAndStdDev(sDeltaNum, sDeltaSum, sDeltaSumSquared, &mean, &stddev);
 
@@ -572,7 +578,7 @@ void nsTimerImpl::Fire(int32_t aGeneration) {
   uint32_t oldDelay;
   TimeStamp oldTimeout;
   Callback callbackDuringFire{UnknownCallback{}};
-  nsCOMPtr<nsITimer> kungFuDeathGrip;
+  nsCOMPtr<nsITimer> timer;
 
   {
     // Don't fire callbacks or fiddle with refcounts when the mutex is locked.
@@ -590,7 +596,7 @@ void nsTimerImpl::Fire(int32_t aGeneration) {
     // Ensure that the nsITimer does not unhook from the nsTimerImpl during
     // Fire; this will cause null pointer crashes if the user of the timer drops
     // its reference, and then uses the nsITimer* passed in the callback.
-    kungFuDeathGrip = mITimer;
+    timer = mITimer;
   }
 
   AUTO_PROFILER_LABEL("nsTimerImpl::Fire", OTHER);
@@ -599,9 +605,12 @@ void nsTimerImpl::Fire(int32_t aGeneration) {
   if (MOZ_LOG_TEST(GetTimerLog(), LogLevel::Debug)) {
     TimeDuration delta = fireTime - oldTimeout;
     int32_t d = delta.ToMilliseconds();  // delta in ms
-    sDeltaSum += abs(d);
-    sDeltaSumSquared += double(d) * double(d);
-    sDeltaNum++;
+    {
+      mozilla::StaticMutexAutoLock lock(sDeltaMutex);
+      sDeltaSum += abs(d);
+      sDeltaSumSquared += double(d) * double(d);
+      sDeltaNum++;
+    }
 
     MOZ_LOG(GetTimerLog(), LogLevel::Debug,
             ("[this=%p] expected delay time %4ums\n", this, oldDelay));
@@ -619,12 +628,12 @@ void nsTimerImpl::Fire(int32_t aGeneration) {
 
   callbackDuringFire.match(
       [](const UnknownCallback&) {},
-      [&](const InterfaceCallback& i) { i->Notify(mITimer); },
+      [&](const InterfaceCallback& i) { i->Notify(timer); },
       [&](const ObserverCallback& o) {
-        o->Observe(mITimer, NS_TIMER_CALLBACK_TOPIC, nullptr);
+        o->Observe(timer, NS_TIMER_CALLBACK_TOPIC, nullptr);
       },
-      [&](const FuncCallback& f) { f.mFunc(mITimer, f.mClosure); },
-      [&](const ClosureCallback& c) { c.mFunc(mITimer); });
+      [&](const FuncCallback& f) { f.mFunc(timer, f.mClosure); },
+      [&](const ClosureCallback& c) { c.mFunc(timer); });
 
   TimeStamp now = TimeStamp::Now();
 

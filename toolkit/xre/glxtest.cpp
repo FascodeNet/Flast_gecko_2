@@ -36,6 +36,7 @@
 #ifdef MOZ_X11
 #  include "X11/Xlib.h"
 #  include "X11/Xutil.h"
+#  include <X11/extensions/Xrandr.h>
 #endif
 
 #ifdef MOZ_WAYLAND
@@ -636,19 +637,51 @@ static bool get_egl_status(EGLNativeDisplayType native_dpy, bool gles_test,
 }
 
 #ifdef MOZ_X11
-static void get_x11_screen_info(Display* dpy) {
-  int screenCount = ScreenCount(dpy);
-  int defaultScreen = DefaultScreen(dpy);
-  if (screenCount != 0) {
-    record_value("SCREEN_INFO\n");
-    for (int idx = 0; idx < screenCount; idx++) {
-      Screen* scrn = ScreenOfDisplay(dpy, idx);
-      int current_height = scrn->height;
-      int current_width = scrn->width;
+static void get_xrandr_info(Display* dpy) {
+  // When running on remote X11 the xrandr version may be stuck on an ancient
+  // version. There are still setups using remote X11 out there, so make sure we
+  // don't crash.
+  int eventBase, errorBase, major, minor;
+  if (!XRRQueryExtension(dpy, &eventBase, &errorBase) ||
+      !XRRQueryVersion(dpy, &major, &minor) ||
+      !(major > 1 || (major == 1 && minor >= 4))) {
+    return;
+  }
 
-      record_value("%dx%d:%d%s", current_width, current_height,
-                   idx == defaultScreen ? 1 : 0,
-                   idx == screenCount - 1 ? ";\n" : ";");
+  Window root = RootWindow(dpy, DefaultScreen(dpy));
+  XRRProviderResources* pr = XRRGetProviderResources(dpy, root);
+  XRRScreenResources* res = XRRGetScreenResourcesCurrent(dpy, root);
+  RROutput primary = XRRGetOutputPrimary(dpy, root);
+
+  if (res->noutput != 0) {
+    bool foundCRTC = false;
+
+    for (int i = 0; i < res->noutput; i++) {
+      XRROutputInfo* outputInfo = XRRGetOutputInfo(dpy, res, res->outputs[i]);
+      if (!outputInfo->crtc) {
+        continue;
+      }
+
+      if (!foundCRTC) {
+        record_value("SCREEN_INFO\n");
+        foundCRTC = true;
+      }
+
+      XRRCrtcInfo* crtcInfo = XRRGetCrtcInfo(dpy, res, outputInfo->crtc);
+      record_value("%dx%d:%d;", crtcInfo->width, crtcInfo->height,
+                   res->outputs[i] == primary ? 1 : 0);
+    }
+
+    if (foundCRTC) {
+      record_value("\n");
+    }
+  }
+
+  if (pr->nproviders != 0) {
+    record_value("DDX_DRIVER\n");
+    for (int i = 0; i < pr->nproviders; i++) {
+      XRRProviderInfo* info = XRRGetProviderInfo(dpy, res, pr->providers[i]);
+      record_value("%s%s", info->name, i == pr->nproviders - 1 ? ";\n" : ";");
     }
   }
 }
@@ -810,8 +843,8 @@ static void get_glx_status(int* gotGlxInfo, int* gotDriDriver) {
     }
   }
 
-  // Get monitor information
-  get_x11_screen_info(dpy);
+  // Get monitor and DDX driver information
+  get_xrandr_info(dpy);
 
   ///// Clean up. Indeed, the parent process might fail to kill us (e.g. if it
   ///// doesn't need to check GL info) so we might be staying alive for longer
@@ -845,13 +878,23 @@ static bool x11_egltest(int pci_count) {
   }
   XSetErrorHandler(x_error_handler);
 
+  // Bug 1667621: 30bit "Deep Color" is broken on EGL on Mesa (as of 2021/10).
+  // Disable all non-standard depths for the initial EGL roleout.
+  int screenCount = ScreenCount(dpy);
+  for (int idx = 0; idx < screenCount; idx++) {
+    if (DefaultDepth(dpy, idx) != 24) {
+      return false;
+    }
+  }
+
   // On at least amdgpu open source driver, eglInitialize fails unless
   // a valid XDisplay pointer is passed as the native display.
   if (!get_egl_status(dpy, true, pci_count != 1)) {
     return false;
   }
 
-  get_x11_screen_info(dpy);
+  // Get monitor and DDX driver information
+  get_xrandr_info(dpy);
 
   // Bug 1715245: Closing the display connection here crashes on NV prop.
   // drivers. Just leave it open, the process will exit shortly after anyway.

@@ -79,7 +79,7 @@ const STARTPAGE_VERSION = "6";
 const RS_SERVER_PREF = "services.settings.server";
 const RS_MAIN_BUCKET = "main";
 const RS_COLLECTION_L10N = "ms-language-packs"; // "ms" stands for Messaging System
-const RS_PROVIDERS_WITH_L10N = ["cfr", "whats-new-panel"];
+const RS_PROVIDERS_WITH_L10N = ["cfr"];
 const RS_FLUENT_VERSION = "v1";
 const RS_FLUENT_RECORD_PREFIX = `cfr-${RS_FLUENT_VERSION}`;
 const RS_DOWNLOAD_MAX_RETRIES = 2;
@@ -97,7 +97,7 @@ const USE_REMOTE_L10N_PREF =
 // Experiment groups that need to report the reach event in Messaging-Experiments.
 // If you're adding new groups to it, make sure they're also added in the
 // `messaging_experiments.reach.objects` defined in "toolkit/components/telemetry/Events.yaml"
-const REACH_EVENT_GROUPS = ["cfr", "moments-page"];
+const REACH_EVENT_GROUPS = ["cfr", "moments-page", "infobar", "spotlight"];
 const REACH_EVENT_CATEGORY = "messaging_experiments";
 const REACH_EVENT_METHOD = "reach";
 
@@ -297,7 +297,9 @@ const MessageLoaderUtils = {
           if (record && record.data) {
             const downloader = new Downloader(
               RS_MAIN_BUCKET,
-              RS_COLLECTION_L10N
+              RS_COLLECTION_L10N,
+              "browser",
+              "newtab"
             );
             // Await here in order to capture the exceptions for reporting.
             await downloader.download(record.data, {
@@ -342,8 +344,8 @@ const MessageLoaderUtils = {
       // If the feature is not enabled there is no message to send back.
       // Other branches might be enabled so we check those as well in case we
       // need to send a reach ping.
-      let featureData = experimentData.branch.feature;
-      if (featureData.enabled) {
+      let featureData = experimentData.branch[featureId];
+      if (featureData?.value?.id) {
         experiments.push({
           forExposureEvent: {
             experimentSlug: experimentData.slug,
@@ -363,8 +365,11 @@ const MessageLoaderUtils = {
       const branches =
         (await ExperimentAPI.getAllBranches(experimentData.slug)) || [];
       for (const branch of branches) {
-        let branchValue = branch.feature.value;
-        if (branch.slug !== experimentData.branch.slug && branchValue.trigger) {
+        let branchValue = branch[featureId].value;
+        if (
+          branch.slug !== experimentData.branch.slug &&
+          branchValue?.trigger
+        ) {
           experiments.push({
             forReachEvent: { sent: false, group: featureId },
             experimentSlug: experimentData.slug,

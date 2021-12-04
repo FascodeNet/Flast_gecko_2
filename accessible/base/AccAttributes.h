@@ -43,10 +43,9 @@ struct DeleteEntry {
 };
 
 class AccAttributes {
-  friend struct IPC::ParamTraits<AccAttributes*>;
-
-  using AttrValueType = Variant<bool, float, double, int32_t, RefPtr<nsAtom>,
-                                CSSCoord, FontSize, Color, DeleteEntry>;
+  using AttrValueType =
+      Variant<bool, float, double, int32_t, RefPtr<nsAtom>, nsTArray<int32_t>,
+              CSSCoord, FontSize, Color, DeleteEntry, UniquePtr<nsString>>;
   static_assert(sizeof(AttrValueType) <= 16);
   using AtomVariantMap = nsTHashMap<nsRefPtrHashKey<nsAtom>, AttrValueType>;
 
@@ -62,29 +61,40 @@ class AccAttributes {
 
   NS_INLINE_DECL_REFCOUNTING(mozilla::a11y::AccAttributes)
 
-  template <typename T>
-  void SetAttribute(nsAtom* aAttrName, const T& aAttrValue) {
-    if constexpr (std::is_base_of_v<nsAtom, std::remove_pointer_t<T>>) {
-      mData.InsertOrUpdate(aAttrName, AsVariant(RefPtr<nsAtom>(aAttrValue)));
-    } else if constexpr (std::is_base_of_v<nsAString, T> ||
-                         std::is_base_of_v<nsLiteralString, T>) {
-      RefPtr<nsAtom> atomValue = NS_Atomize(aAttrValue);
-      mData.InsertOrUpdate(aAttrName, AsVariant(atomValue));
-    } else {
-      mData.InsertOrUpdate(aAttrName, AsVariant(aAttrValue));
-    }
+  template <typename T,
+            typename std::enable_if<!std::is_convertible_v<T, nsString> &&
+                                        !std::is_convertible_v<T, nsAtom*>,
+                                    bool>::type = true>
+  void SetAttribute(nsAtom* aAttrName, T&& aAttrValue) {
+    mData.InsertOrUpdate(aAttrName, AsVariant(std::forward<T>(aAttrValue)));
+  }
+
+  void SetAttribute(nsAtom* aAttrName, nsString&& aAttrValue) {
+    UniquePtr<nsString> value = MakeUnique<nsString>();
+    *value = std::forward<nsString>(aAttrValue);
+    mData.InsertOrUpdate(aAttrName, AsVariant(std::move(value)));
+  }
+
+  void SetAttributeStringCopy(nsAtom* aAttrName, nsString aAttrValue) {
+    SetAttribute(aAttrName, std::move(aAttrValue));
+  }
+
+  void SetAttribute(nsAtom* aAttrName, nsAtom* aAttrValue) {
+    mData.InsertOrUpdate(aAttrName, AsVariant(RefPtr<nsAtom>(aAttrValue)));
   }
 
   template <typename T>
-  Maybe<T> GetAttribute(nsAtom* aAttrName) {
+  Maybe<const T&> GetAttribute(nsAtom* aAttrName) {
     if (auto value = mData.Lookup(aAttrName)) {
-      if constexpr (std::is_base_of_v<nsAtom, std::remove_pointer_t<T>>) {
-        if (value->is<RefPtr<nsAtom>>()) {
-          return Some(value->as<RefPtr<nsAtom>>().get());
+      if constexpr (std::is_same_v<nsString, T>) {
+        if (value->is<UniquePtr<nsString>>()) {
+          const T& val = *(value->as<UniquePtr<nsString>>().get());
+          return SomeRef(val);
         }
       } else {
         if (value->is<T>()) {
-          return Some(value->as<T>());
+          const T& val = value->as<T>();
+          return SomeRef(val);
         }
       }
     }
@@ -98,6 +108,8 @@ class AccAttributes {
 
   uint32_t Count() const { return mData.Count(); }
 
+  // Update one instance with the entries in another. The supplied AccAttributes
+  // will be emptied.
   void Update(AccAttributes* aOther);
 
   // An entry class for our iterator.
@@ -109,14 +121,16 @@ class AccAttributes {
     nsAtom* Name() { return mName; }
 
     template <typename T>
-    Maybe<T> Value() {
-      if constexpr (std::is_base_of_v<nsAtom, std::remove_pointer_t<T>>) {
-        if (mValue->is<RefPtr<nsAtom>>()) {
-          return Some(mValue->as<RefPtr<nsAtom>>().get());
+    Maybe<const T&> Value() {
+      if constexpr (std::is_same_v<nsString, T>) {
+        if (mValue->is<UniquePtr<nsString>>()) {
+          const T& val = *(mValue->as<UniquePtr<nsString>>().get());
+          return SomeRef(val);
         }
       } else {
         if (mValue->is<T>()) {
-          return Some(mValue->as<T>());
+          const T& val = mValue->as<T>();
+          return SomeRef(val);
         }
       }
       return Nothing();
@@ -180,6 +194,8 @@ class AccAttributes {
                                      nsAString& aValueString);
 
   AtomVariantMap mData;
+
+  friend struct IPC::ParamTraits<AccAttributes*>;
 };
 
 }  // namespace a11y

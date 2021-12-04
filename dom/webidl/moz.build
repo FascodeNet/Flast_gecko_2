@@ -477,6 +477,7 @@ WEBIDL_FILES = [
     "CSSImportRule.webidl",
     "CSSKeyframeRule.webidl",
     "CSSKeyframesRule.webidl",
+    "CSSLayerRule.webidl",
     "CSSMediaRule.webidl",
     "CSSMozDocumentRule.webidl",
     "CSSNamespaceRule.webidl",
@@ -484,6 +485,7 @@ WEBIDL_FILES = [
     "CSSPseudoElement.webidl",
     "CSSRule.webidl",
     "CSSRuleList.webidl",
+    "CSSScrollTimelineRule.webidl",
     "CSSStyleDeclaration.webidl",
     "CSSStyleRule.webidl",
     "CSSStyleSheet.webidl",
@@ -966,7 +968,6 @@ WEBIDL_FILES = [
     "VTTRegion.webidl",
     "WaveShaperNode.webidl",
     "WebAuthentication.webidl",
-    "WebComponents.webidl",
     "WebGL2RenderingContext.webidl",
     "WebGLRenderingContext.webidl",
     "WebGPU.webidl",
@@ -998,6 +999,15 @@ WEBIDL_FILES = [
     "XULElement.webidl",
     "XULPopupElement.webidl",
 ]
+
+if CONFIG["MOZ_DOM_STREAMS"]:
+    WEBIDL_FILES += [
+        "QueuingStrategy.webidl",
+        "ReadableStream.webidl",
+        "ReadableStreamDefaultController.webidl",
+        "ReadableStreamDefaultReader.webidl",
+        "UnderlyingSource.webidl",
+    ]
 
 if CONFIG["MOZ_WEBRTC"]:
     WEBIDL_FILES += [
@@ -1056,11 +1066,14 @@ WEBIDL_FILES += [
 
 # WebExtensions API.
 WEBIDL_FILES += [
+    "ExtensionAlarms.webidl",
     "ExtensionBrowser.webidl",
     "ExtensionEventManager.webidl",
     # ExtensionMockAPI is not a real WebExtensions API, and it is only enabled in tests.
     "ExtensionMockAPI.webidl",
     "ExtensionPort.webidl",
+    "ExtensionRuntime.webidl",
+    "ExtensionTest.webidl",
 ]
 
 # We only expose our prefable test interfaces in debug builds, just to be on

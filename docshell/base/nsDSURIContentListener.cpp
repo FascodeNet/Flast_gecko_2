@@ -29,8 +29,9 @@ NS_IMPL_ADDREF(MaybeCloseWindowHelper)
 NS_IMPL_RELEASE(MaybeCloseWindowHelper)
 
 NS_INTERFACE_MAP_BEGIN(MaybeCloseWindowHelper)
-  NS_INTERFACE_MAP_ENTRY(nsISupports)
+  NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsITimerCallback)
   NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
+  NS_INTERFACE_MAP_ENTRY(nsINamed)
 NS_INTERFACE_MAP_END
 
 MaybeCloseWindowHelper::MaybeCloseWindowHelper(BrowsingContext* aContentContext)
@@ -97,6 +98,12 @@ MaybeCloseWindowHelper::Notify(nsITimer* timer) {
   mBCToClose = nullptr;
   mTimer = nullptr;
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+MaybeCloseWindowHelper::GetName(nsACString& aName) {
+  aName.AssignLiteral("MaybeCloseWindowHelper");
   return NS_OK;
 }
 
@@ -185,7 +192,7 @@ nsDSURIContentListener::DoContent(const nsACString& aContentType,
     mExistingJPEGRequest = baseChannel;
   }
 
-  if (rv == NS_ERROR_REMOTE_XUL || rv == NS_ERROR_DOCSHELL_DYING) {
+  if (rv == NS_ERROR_DOCSHELL_DYING) {
     aRequest->Cancel(rv);
     *aAbortProcess = true;
     return NS_OK;
@@ -249,8 +256,8 @@ nsDSURIContentListener::CanHandleContent(const char* aContentType,
   *aDesiredContentType = nullptr;
 
   if (aContentType) {
-    uint32_t canHandle = nsWebNavigationInfo::IsTypeSupported(
-        nsDependentCString(aContentType), mDocShell);
+    uint32_t canHandle =
+        nsWebNavigationInfo::IsTypeSupported(nsDependentCString(aContentType));
     *aCanHandleContent = (canHandle != nsIWebNavigationInfo::UNSUPPORTED);
   }
 

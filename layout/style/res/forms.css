@@ -218,11 +218,6 @@ textarea::-moz-text-control-editing-root {
   opacity: 0.54;
 }
 
-textarea::placeholder,
-textarea::-moz-text-control-preview {
-  white-space: pre-wrap !important;
-}
-
 input:read-write,
 textarea:read-write {
   -moz-user-modify: read-write !important;
@@ -262,6 +257,10 @@ select:-moz-select-list-box {
   vertical-align: text-bottom;
   appearance: auto;
   -moz-default-appearance: listbox;
+%ifdef XP_MACOSX
+  /* TODO(emilio): See if this is still necessary with the non-native theme */
+  scrollbar-width: thin;
+%endif
 }
 
 select > button {
@@ -420,7 +419,7 @@ option:disabled,
 optgroup:disabled,
 select:disabled {
   color: GrayText;
-  background-color: ThreeDLightShadow;
+  background-color: -moz-DisabledField;
   cursor: unset;
 }
 
@@ -620,29 +619,16 @@ button,
 ::file-selector-button:hover,
 button:hover,
 input:is([type=reset], [type=button], [type=submit], [type=color]):hover {
-  background-color: -moz-buttonhoverface;
-}
-
-::file-selector-button:hover,
-button:hover,
-input:is([type=reset], [type=button], [type=submit]):hover {
   color: -moz-buttonhovertext;
+  background-color: -moz-buttonhoverface;
 }
 
 ::file-selector-button:active:hover,
 button:active:hover,
 input:is([type=reset], [type=button], [type=submit], [type=color]):active:hover {
   border-style: inset;
-}
-
-::file-selector-button:active:hover,
-button:active:hover,
-input:is([type=reset], [type=button], [type=submit]):active:hover {
-%ifdef MOZ_WIDGET_GTK
-  color: -moz-gtk-buttonactivetext;
-%else
-  color: ButtonText;
-%endif
+  color: -moz-buttonactivetext;
+  background-color: -moz-buttonactiveface;
 }
 
 ::-moz-focus-inner {
@@ -669,6 +655,7 @@ button:is(:disabled, :disabled:active),
 input:is([type=reset], [type=button], [type=submit]):is(:disabled, :disabled:active),
 select:is(:disabled, :disabled:active) > button {
   color: GrayText;
+  background-color: -moz-ButtonDisabledFace;
 }
 
 /* file selector */
@@ -997,6 +984,26 @@ input:is([type=date], [type=time], [type=datetime-local]):is(:disabled, :read-on
 
 input:autofill {
   filter: grayscale(21%) brightness(88%) contrast(161%) invert(10%) sepia(40%) saturate(206%);
+}
+
+@supports -moz-bool-pref("layout.css.autofill.background") {
+  /* We find a few pages where using `filter` causes issues because it
+   * changes the z-order (see bug 1687682, bug 1727950).
+   *
+   * The idea behind using background-image instead of plain background-color,
+   * is that it's less likely to be overridden by the page.
+   *
+   * The color is chosen so that you get the same final color on a white
+   * background as the filter above (#fffcc8), but with some alpha so as to
+   * prevent fully illegible text.
+   *
+   * NOTE(emilio): Keep the color in sync with kAutofillColor in
+   * nsNativeBasicTheme!
+   */
+  input:autofill {
+    filter: none;
+    background-image: linear-gradient(rgba(255, 249, 145, 0.5), rgba(255, 249, 145, 0.5));
+  }
 }
 
 input:-moz-autofill-preview {

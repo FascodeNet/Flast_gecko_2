@@ -176,6 +176,15 @@ ExtensionPreferencesManager.addSetting("overrideDocumentColors", {
   },
 });
 
+ExtensionPreferencesManager.addSetting("overrideContentColorScheme", {
+  permission: "browserSettings",
+  prefNames: ["layout.css.prefers-color-scheme.content-override"],
+
+  setCallback(value) {
+    return { [this.prefNames[0]]: value };
+  },
+});
+
 ExtensionPreferencesManager.addSetting("useDocumentFonts", {
   permission: "browserSettings",
   prefNames: ["browser.display.use_document_fonts"],
@@ -435,6 +444,44 @@ this.browserSettings = class extends ExtensionAPI {
             },
           }
         ),
+        overrideContentColorScheme: Object.assign(
+          getSettingsAPI({
+            context,
+            name: "overrideContentColorScheme",
+            callback() {
+              let prefValue = Services.prefs.getIntPref(
+                "layout.css.prefers-color-scheme.content-override"
+              );
+              switch (prefValue) {
+                case 0:
+                  return "dark";
+                case 1:
+                  return "light";
+                case 2:
+                  return "system";
+                default:
+                  return "browser";
+              }
+            },
+          }),
+          {
+            set: details => {
+              let prefValue = ["dark", "light", "system", "browser"].indexOf(
+                details.value
+              );
+              if (prefValue === -1) {
+                throw new ExtensionError(
+                  `${details.value} is not a valid value for overrideContentColorScheme.`
+                );
+              }
+              return ExtensionPreferencesManager.setSetting(
+                extension.id,
+                "overrideContentColorScheme",
+                prefValue
+              );
+            },
+          }
+        ),
         useDocumentFonts: Object.assign(
           getSettingsAPI({
             context,
@@ -462,20 +509,52 @@ this.browserSettings = class extends ExtensionAPI {
             },
           }
         ),
-        zoomFullPage: getSettingsAPI({
-          context,
-          name: "zoomFullPage",
-          callback() {
-            return Services.prefs.getBoolPref("browser.zoom.full");
-          },
-        }),
-        zoomSiteSpecific: getSettingsAPI({
-          context,
-          name: "zoomSiteSpecific",
-          callback() {
-            return Services.prefs.getBoolPref("browser.zoom.siteSpecific");
-          },
-        }),
+        zoomFullPage: Object.assign(
+          getSettingsAPI({
+            context,
+            name: "zoomFullPage",
+            callback() {
+              return Services.prefs.getBoolPref("browser.zoom.full");
+            },
+          }),
+          {
+            set: details => {
+              if (typeof details.value !== "boolean") {
+                throw new ExtensionError(
+                  `${details.value} is not a valid value for zoomFullPage.`
+                );
+              }
+              return ExtensionPreferencesManager.setSetting(
+                extension.id,
+                "zoomFullPage",
+                details.value
+              );
+            },
+          }
+        ),
+        zoomSiteSpecific: Object.assign(
+          getSettingsAPI({
+            context,
+            name: "zoomSiteSpecific",
+            callback() {
+              return Services.prefs.getBoolPref("browser.zoom.siteSpecific");
+            },
+          }),
+          {
+            set: details => {
+              if (typeof details.value !== "boolean") {
+                throw new ExtensionError(
+                  `${details.value} is not a valid value for zoomSiteSpecific.`
+                );
+              }
+              return ExtensionPreferencesManager.setSetting(
+                extension.id,
+                "zoomSiteSpecific",
+                details.value
+              );
+            },
+          }
+        ),
         colorManagement: {
           mode: getSettingsAPI({
             context,

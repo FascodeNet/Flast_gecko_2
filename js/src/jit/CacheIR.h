@@ -779,7 +779,9 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
         lastIndex_(0) {
   }
 
-  bool failed() const { return buffer_.oom() || tooLarge_; }
+  bool tooLarge() const { return tooLarge_; }
+  bool oom() const { return buffer_.oom(); }
+  bool failed() const { return tooLarge() || oom(); }
 
   TrialInliningState trialInliningState() const { return trialInliningState_; }
 
@@ -917,14 +919,6 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     if (addArgc) {
       slotIndex += argc;
     }
-    MOZ_ASSERT(slotIndex >= 0);
-    MOZ_ASSERT(slotIndex <= UINT8_MAX);
-    return loadArgumentFixedSlot_(slotIndex);
-  }
-
-  ValOperandId loadStandardCallArgument(uint32_t index, uint32_t argc) {
-    int32_t slotIndex = -int32_t(index + 1);
-    slotIndex += argc;
     MOZ_ASSERT(slotIndex >= 0);
     MOZ_ASSERT(slotIndex <= UINT8_MAX);
     return loadArgumentFixedSlot_(slotIndex);
@@ -1605,7 +1599,9 @@ class MOZ_RAII TypeOfIRGenerator : public IRGenerator {
 class MOZ_RAII GetIteratorIRGenerator : public IRGenerator {
   HandleValue val_;
 
-  AttachDecision tryAttachNativeIterator(ObjOperandId objId, HandleObject obj);
+  AttachDecision tryAttachNativeIterator(ValOperandId valId);
+  AttachDecision tryAttachNullOrUndefined(ValOperandId valId);
+  AttachDecision tryAttachMegamorphic(ValOperandId valId);
 
  public:
   GetIteratorIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc,

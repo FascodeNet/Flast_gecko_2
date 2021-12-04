@@ -208,17 +208,22 @@ describe("TelemetryFeed", () => {
         assert.propertyVal(instance, "eventTelemetryEnabled", true);
       });
     });
-    it("should set a scalar for deletion-request", () => {
+    it("should set two scalars for deletion-request", () => {
       sandbox.spy(Services.telemetry, "scalarSet");
 
       instance.init();
 
-      assert.calledOnce(Services.telemetry.scalarSet);
-      assert.calledWith(
-        Services.telemetry.scalarSet,
-        "deletion.request.impression_id",
-        instance._impressionId
-      );
+      assert.calledTwice(Services.telemetry.scalarSet);
+
+      // impression_id
+      let [type, value] = Services.telemetry.scalarSet.firstCall.args;
+      assert.equal(type, "deletion.request.impression_id");
+      assert.equal(value, instance._impressionId);
+
+      // context_id
+      [type, value] = Services.telemetry.scalarSet.secondCall.args;
+      assert.equal(type, "deletion.request.context_id");
+      assert.equal(value, FAKE_UUID);
     });
   });
   describe("#handleEvent", () => {
@@ -329,14 +334,14 @@ describe("TelemetryFeed", () => {
       assert.equal(instance.sessions.get("foo"), session);
     });
     it("should set the session_id", () => {
-      sandbox.spy(global.gUUIDGenerator, "generateUUID");
+      sandbox.spy(Services.uuid, "generateUUID");
 
       const session = instance.addSession("foo");
 
-      assert.calledOnce(global.gUUIDGenerator.generateUUID);
+      assert.calledOnce(Services.uuid.generateUUID);
       assert.equal(
         session.session_id,
-        global.gUUIDGenerator.generateUUID.firstCall.returnValue
+        Services.uuid.generateUUID.firstCall.returnValue
       );
     });
     it("should set the page if a url parameter is given", () => {
@@ -1786,7 +1791,7 @@ describe("TelemetryFeed", () => {
       FakePrefs.prototype.prefs[
         STRUCTURED_INGESTION_ENDPOINT_PREF
       ] = fakeEndpoint;
-      sandbox.stub(global.gUUIDGenerator, "generateUUID").returns(fakeUUID);
+      sandbox.stub(Services.uuid, "generateUUID").returns(fakeUUID);
       const feed = new TelemetryFeed();
       const url = feed._generateStructuredIngestionEndpoint(
         "testNameSpace",

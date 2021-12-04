@@ -102,9 +102,7 @@ use api::units::*;
 use crate::batch::BatchFilter;
 use crate::box_shadow::BLUR_SAMPLE_SCALE;
 use crate::clip::{ClipStore, ClipChainInstance, ClipChainId, ClipInstance};
-use crate::spatial_tree::{ROOT_SPATIAL_NODE_INDEX,
-    SpatialTree, CoordinateSpaceMapping, SpatialNodeIndex, VisibleFace
-};
+use crate::spatial_tree::{SpatialTree, CoordinateSpaceMapping, SpatialNodeIndex, VisibleFace};
 use crate::composite::{CompositorKind, CompositeState, NativeSurfaceId, NativeTileId, CompositeTileSurface, tile_kind};
 use crate::composite::{ExternalSurfaceDescriptor, ExternalSurfaceDependency, CompositeTileDescriptor, CompositeTile};
 use crate::composite::{CompositorTransformIndex};
@@ -113,7 +111,7 @@ use euclid::{vec2, vec3, Point2D, Scale, Vector2D, Box2D, Transform3D, SideOffse
 use euclid::approxeq::ApproxEq;
 use crate::filterdata::SFilterData;
 use crate::intern::ItemUid;
-use crate::internal_types::{FastHashMap, FastHashSet, PlaneSplitter, Filter};
+use crate::internal_types::{FastHashMap, FastHashSet, PlaneSplitter, Filter, FrameId};
 use crate::internal_types::{PlaneSplitterIndex, PlaneSplitAnchor, TextureSource};
 use crate::frame_builder::{FrameBuildingContext, FrameBuildingState, PictureState, PictureContext};
 use crate::gpu_cache::{GpuCache, GpuCacheAddress, GpuCacheHandle};
@@ -122,7 +120,7 @@ use plane_split::{Clipper, Polygon, Splitter};
 use crate::prim_store::{PrimitiveTemplateKind, PictureIndex, PrimitiveInstance, PrimitiveInstanceKind};
 use crate::prim_store::{ColorBindingStorage, ColorBindingIndex, PrimitiveScratchBuffer};
 use crate::print_tree::{PrintTree, PrintTreePrinter};
-use crate::render_backend::{DataStores, FrameId};
+use crate::render_backend::DataStores;
 use crate::render_task_graph::RenderTaskId;
 use crate::render_target::RenderTargetKind;
 use crate::render_task::{BlurTask, RenderTask, RenderTaskLocation, BlurTaskCache};
@@ -136,7 +134,7 @@ use std::{mem, u8, marker, u32};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::collections::hash_map::Entry;
 use std::ops::Range;
-use crate::texture_cache::TextureCacheHandle;
+use crate::picture_textures::PictureCacheTextureHandle;
 use crate::util::{MaxRect, VecHelper, MatrixHelpers, Recycler, raster_rect_to_device_pixels, ScaleOffset};
 use crate::filterdata::{FilterDataHandle};
 use crate::tile_cache::{SliceDebugInfo, TileDebugInfo, DirtyTileDebugInfo};
@@ -424,7 +422,7 @@ impl SpatialNodeComparer {
     /// Construct a new comparer
     fn new() -> Self {
         SpatialNodeComparer {
-            ref_spatial_node_index: ROOT_SPATIAL_NODE_INDEX,
+            ref_spatial_node_index: SpatialNodeIndex::INVALID,
             spatial_nodes: FastHashMap::default(),
             compare_cache: FastHashMap::default(),
             referenced_frames: FastHashSet::default(),
@@ -619,7 +617,7 @@ pub enum SurfaceTextureDescriptor {
     /// When using the WR compositor, the tile is drawn into an entry
     /// in the WR texture cache.
     TextureCache {
-        handle: TextureCacheHandle
+        handle: Option<PictureCacheTextureHandle>,
     },
     /// When using an OS compositor, the tile is drawn into a native
     /// surface identified by arbitrary id.
@@ -657,11 +655,11 @@ impl SurfaceTextureDescriptor {
     ) -> ResolvedSurfaceTexture {
         match self {
             SurfaceTextureDescriptor::TextureCache { handle } => {
-                let cache_item = resource_cache.texture_cache.get(handle);
+                let texture = resource_cache
+                    .picture_textures
+                    .get_texture_source(handle.as_ref().unwrap());
 
-                ResolvedSurfaceTexture::TextureCache {
-                    texture: cache_item.texture_id,
-                }
+                ResolvedSurfaceTexture::TextureCache { texture }
             }
             SurfaceTextureDescriptor::Native { id } => {
                 ResolvedSurfaceTexture::Native {
@@ -1297,7 +1295,7 @@ impl Tile {
         //           native compositors that don't support dirty rects.
         if supports_dirty_rects {
             // Only allow splitting for normal content sized tiles
-            if ctx.current_tile_size == state.resource_cache.texture_cache.default_picture_tile_size() {
+            if ctx.current_tile_size == state.resource_cache.picture_textures.default_tile_size() {
                 let max_split_level = 3;
 
                 // Consider splitting / merging dirty regions
@@ -1368,7 +1366,7 @@ impl Tile {
                             // For a texture cache entry, create an invalid handle that
                             // will be allocated when update_picture_cache is called.
                             SurfaceTextureDescriptor::TextureCache {
-                                handle: TextureCacheHandle::invalid(),
+                                handle: None,
                             }
                         }
                         CompositorKind::Native { .. } => {
@@ -1697,7 +1695,7 @@ impl DirtyRegion {
         spatial_tree: &SpatialTree,
     ) {
         let map_pic_to_world = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            spatial_tree.root_reference_frame_index(),
             self.spatial_node_index,
             WorldRect::max_rect(),
             spatial_tree,
@@ -1724,7 +1722,7 @@ impl DirtyRegion {
         spatial_tree: &SpatialTree,
     ) -> DirtyRegion {
         let map_pic_to_world = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            spatial_tree.root_reference_frame_index(),
             self.spatial_node_index,
             WorldRect::max_rect(),
             spatial_tree,
@@ -2509,7 +2507,7 @@ impl TileCacheInstance {
         self.backdrop = BackdropInfo::empty();
 
         let pic_to_world_mapper = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             self.spatial_node_index,
             frame_context.global_screen_world_rect,
             frame_context.spatial_tree,
@@ -2601,7 +2599,7 @@ impl TileCacheInstance {
                             TILE_SIZE_SCROLLBAR_HORIZONTAL
                         }
                     } else {
-                        frame_state.resource_cache.texture_cache.default_picture_tile_size()
+                        frame_state.resource_cache.picture_textures.default_tile_size()
                     }
                 }
             };
@@ -2631,7 +2629,7 @@ impl TileCacheInstance {
         // Get the complete scale-offset from local space to device space
         let local_to_device = get_relative_scale_offset(
             self.spatial_node_index,
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             frame_context.spatial_tree,
         );
 
@@ -2938,7 +2936,7 @@ impl TileCacheInstance {
         }
 
         let mapper : SpaceMapper<PicturePixel, WorldPixel> = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             prim_spatial_node_index,
             frame_context.global_screen_world_rect,
             &frame_context.spatial_tree);
@@ -3103,7 +3101,7 @@ impl TileCacheInstance {
         }
 
         let pic_to_world_mapper = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             self.spatial_node_index,
             frame_context.global_screen_world_rect,
             frame_context.spatial_tree,
@@ -3122,7 +3120,7 @@ impl TileCacheInstance {
 
         let local_prim_to_device = get_relative_scale_offset(
             prim_spatial_node_index,
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             frame_context.spatial_tree,
         );
 
@@ -3708,7 +3706,7 @@ impl TileCacheInstance {
 
         let sub_slice = &mut self.sub_slices[sub_slice_index];
 
-        if let Some(backdrop_candidate) = backdrop_candidate {
+        if let Some(mut backdrop_candidate) = backdrop_candidate {
             let is_suitable_backdrop = match backdrop_candidate.kind {
                 Some(BackdropKind::Clear) => {
                     // Clear prims are special - they always end up in their own slice,
@@ -3727,10 +3725,10 @@ impl TileCacheInstance {
                     //  - Same coord system as picture cache (ensures rects are axis-aligned).
                     //  - No clip masks exist.
                     let same_coord_system = {
-                        let prim_spatial_node = &frame_context.spatial_tree
-                            .spatial_nodes[prim_spatial_node_index.0 as usize];
+                        let prim_spatial_node = frame_context.spatial_tree
+                            .get_spatial_node(prim_spatial_node_index);
                         let surface_spatial_node = &frame_context.spatial_tree
-                            .spatial_nodes[self.spatial_node_index.0 as usize];
+                            .get_spatial_node(self.spatial_node_index);
 
                         prim_spatial_node.coordinate_system_id == surface_spatial_node.coordinate_system_id
                     };
@@ -3741,8 +3739,19 @@ impl TileCacheInstance {
 
             if sub_slice_index == 0 &&
                is_suitable_backdrop &&
-               sub_slice.compositor_surfaces.is_empty() &&
-               !prim_clip_chain.needs_mask {
+               sub_slice.compositor_surfaces.is_empty() {
+
+                // If the backdrop candidate has a clip-mask, try to extract an opaque inner
+                // rect that is safe to use for subpixel rendering
+                if prim_clip_chain.needs_mask {
+                    backdrop_candidate.opaque_rect = clip_store
+                        .get_inner_rect_for_clip_chain(
+                            prim_clip_chain,
+                            &data_stores.clip,
+                            frame_context.spatial_tree,
+                        )
+                        .unwrap_or(PictureRect::zero());
+                }
 
                 if backdrop_candidate.opaque_rect.contains_box(&self.backdrop.opaque_rect) {
                     self.backdrop.opaque_rect = backdrop_candidate.opaque_rect;
@@ -3883,7 +3892,7 @@ impl TileCacheInstance {
         );
 
         let map_pic_to_world = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             self.spatial_node_index,
             frame_context.global_screen_world_rect,
             frame_context.spatial_tree,
@@ -3904,7 +3913,7 @@ impl TileCacheInstance {
         });
 
         let pic_to_world_mapper = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             self.spatial_node_index,
             frame_context.global_screen_world_rect,
             frame_context.spatial_tree,
@@ -4095,7 +4104,7 @@ impl SurfaceInfo {
         scale_factors: (f32, f32),
     ) -> Self {
         let map_surface_to_world = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            spatial_tree.root_reference_frame_index(),
             surface_spatial_node_index,
             world_rect,
             spatial_tree,
@@ -4349,8 +4358,11 @@ impl PrimitiveCluster {
         &self,
         spatial_node_index: SpatialNodeIndex,
         flags: ClusterFlags,
+        instance_index: usize,
     ) -> bool {
-        self.flags == flags && self.spatial_node_index == spatial_node_index
+        self.flags == flags &&
+        self.spatial_node_index == spatial_node_index &&
+        instance_index == self.prim_range.end
     }
 
     pub fn prim_range(&self) -> Range<usize> {
@@ -4377,7 +4389,6 @@ impl PrimitiveCluster {
 pub struct PrimitiveList {
     /// List of primitives grouped into clusters.
     pub clusters: Vec<PrimitiveCluster>,
-    pub prim_instances: Vec<PrimitiveInstance>,
     pub child_pictures: Vec<PictureIndex>,
     /// The number of preferred compositor surfaces that were found when
     /// adding prims to this list.
@@ -4392,7 +4403,6 @@ impl PrimitiveList {
     pub fn empty() -> Self {
         PrimitiveList {
             clusters: Vec::new(),
-            prim_instances: Vec::new(),
             child_pictures: Vec::new(),
             compositor_surface_count: 0,
         }
@@ -4405,6 +4415,7 @@ impl PrimitiveList {
         prim_rect: LayoutRect,
         spatial_node_index: SpatialNodeIndex,
         prim_flags: PrimitiveFlags,
+        prim_instances: &mut Vec<PrimitiveInstance>,
     ) {
         let mut flags = ClusterFlags::empty();
 
@@ -4432,34 +4443,11 @@ impl PrimitiveList {
             .intersection(&prim_rect)
             .unwrap_or_else(LayoutRect::zero);
 
-        // Primitive lengths aren't evenly distributed among primitive lists:
-        // We often have a large amount of single primitive lists, a
-        // few below 20~30 primitives, and even fewer lists (maybe a couple)
-        // in the multiple hundreds with nothing in between.
-        // We can see in profiles that reallocating vectors while pushing
-        // primitives is taking a large amount of the total scene build time,
-        // so we take advantage of what we know about the length distributions
-        // to go for an adapted vector growth pattern that avoids over-allocating
-        // for the many small allocations while avoiding a lot of reallocation by
-        // quickly converging to the common sizes.
-        // Rust's default vector growth strategy (when pushing elements one by one)
-        // is to double the capacity every time.
-        let prims_len = self.prim_instances.len();
-        if prims_len == self.prim_instances.capacity() {
-            let next_alloc = match prims_len {
-                1 ..= 31 => 32 - prims_len,
-                32 ..= 256 => 512 - prims_len,
-                _ => prims_len * 2,
-            };
-
-            self.prim_instances.reserve(next_alloc);
-        }
-
-        let instance_index = prims_len;
-        self.prim_instances.push(prim_instance);
+        let instance_index = prim_instances.len();
+        prim_instances.push(prim_instance);
 
         if let Some(cluster) = self.clusters.last_mut() {
-            if cluster.is_compatible(spatial_node_index, flags) {
+            if cluster.is_compatible(spatial_node_index, flags, instance_index) {
                 cluster.add_instance(&culling_rect, instance_index);
                 return;
             }
@@ -4724,7 +4712,7 @@ impl PicturePrimitive {
         };
 
         let map_pic_to_world = SpaceMapper::new_with_target(
-            ROOT_SPATIAL_NODE_INDEX,
+            frame_context.root_spatial_node_index,
             surface_spatial_node_index,
             frame_context.global_screen_world_rect,
             frame_context.spatial_tree,
@@ -4779,7 +4767,7 @@ impl PicturePrimitive {
                             match world_draw_rect {
                                 Some(world_draw_rect) => {
                                     // Only check for occlusion on visible tiles that are fixed position.
-                                    if tile_cache.spatial_node_index == ROOT_SPATIAL_NODE_INDEX &&
+                                    if tile_cache.spatial_node_index == frame_context.root_spatial_node_index &&
                                        frame_state.composite_state.occluders.is_tile_occluded(tile.z_id, world_draw_rect) {
                                         // If this tile has an allocated native surface, free it, since it's completely
                                         // occluded. We will need to re-allocate this surface if it becomes visible,
@@ -4816,11 +4804,9 @@ impl PicturePrimitive {
                         // This ensures that we retain valid tiles that are off-screen, but still in the
                         // display port of this tile cache instance.
                         if let Some(TileSurface::Texture { descriptor, .. }) = tile.surface.as_ref() {
-                            if let SurfaceTextureDescriptor::TextureCache { ref handle, .. } = descriptor {
-                                frame_state.resource_cache.texture_cache.request(
-                                    handle,
-                                    frame_state.gpu_cache,
-                                );
+                            if let SurfaceTextureDescriptor::TextureCache { handle: Some(handle), .. } = descriptor {
+                                frame_state.resource_cache
+                                    .picture_textures.request(handle, frame_state.gpu_cache);
                             }
                         }
 
@@ -4870,8 +4856,11 @@ impl PicturePrimitive {
                         if let TileSurface::Texture { descriptor, .. } = tile.surface.as_mut().unwrap() {
                             match descriptor {
                                 SurfaceTextureDescriptor::TextureCache { ref handle, .. } => {
+                                    let exists = handle.as_ref().map_or(false,
+                                        |handle| frame_state.resource_cache.picture_textures.entry_exists(handle)
+                                    );
                                     // Invalidate if the backing texture was evicted.
-                                    if frame_state.resource_cache.texture_cache.is_allocated(handle) {
+                                    if exists {
                                         // Request the backing texture so it won't get evicted this frame.
                                         // We specifically want to mark the tile texture as used, even
                                         // if it's detected not visible below and skipped. This is because
@@ -4880,7 +4869,9 @@ impl PicturePrimitive {
                                         // assuming that it's either visible or we want to retain it for
                                         // a while in case it gets scrolled back onto screen soon.
                                         // TODO(gw): Consider switching to manual eviction policy?
-                                        frame_state.resource_cache.texture_cache.request(handle, frame_state.gpu_cache);
+                                        frame_state.resource_cache
+                                            .picture_textures
+                                            .request(handle.as_ref().unwrap(), frame_state.gpu_cache);
                                     } else {
                                         // If the texture was evicted on a previous frame, we need to assume
                                         // that the entire tile rect is dirty.
@@ -4931,13 +4922,14 @@ impl PicturePrimitive {
                             if let TileSurface::Texture { ref mut descriptor } = tile.surface.as_mut().unwrap() {
                                 match descriptor {
                                     SurfaceTextureDescriptor::TextureCache { ref mut handle } => {
-                                        if !frame_state.resource_cache.texture_cache.is_allocated(handle) {
-                                            frame_state.resource_cache.texture_cache.update_picture_cache(
-                                                tile_cache.current_tile_size,
-                                                handle,
-                                                frame_state.gpu_cache,
-                                            );
-                                        }
+
+                                        frame_state.resource_cache.picture_textures.update(
+                                            tile_cache.current_tile_size,
+                                            handle,
+                                            frame_state.gpu_cache,
+                                            &mut frame_state.resource_cache.texture_cache.next_id,
+                                            &mut frame_state.resource_cache.texture_cache.pending_updates,
+                                        );
                                     }
                                     SurfaceTextureDescriptor::Native { id } => {
                                         if id.is_none() {
@@ -6132,13 +6124,13 @@ impl PicturePrimitive {
                     // frame to be drawn.
                     let update_raster_scale =
                         !frame_context.fb_config.low_quality_pinch_zoom ||
-                        !frame_context.spatial_tree.spatial_nodes[tile_cache.spatial_node_index.0 as usize].is_ancestor_or_self_zooming;
+                        !frame_context.spatial_tree.get_spatial_node(tile_cache.spatial_node_index).is_ancestor_or_self_zooming;
 
                     if update_raster_scale {
                         // Get the complete scale-offset from local space to device space
                         let local_to_device = get_relative_scale_offset(
                             tile_cache.spatial_node_index,
-                            ROOT_SPATIAL_NODE_INDEX,
+                            frame_context.root_spatial_node_index,
                             frame_context.spatial_tree,
                         );
 
@@ -6268,6 +6260,7 @@ impl PicturePrimitive {
         surfaces: &mut [SurfaceInfo],
         frame_context: &FrameBuildingContext,
         data_stores: &mut DataStores,
+        prim_instances: &mut Vec<PrimitiveInstance>,
     ) {
         let surface = &mut surfaces[surface_index.0];
 
@@ -6294,7 +6287,7 @@ impl PicturePrimitive {
             // No point including this cluster if it can't be transformed
             let spatial_node = &frame_context
                 .spatial_tree
-                .spatial_nodes[cluster.spatial_node_index.0 as usize];
+                .get_spatial_node(cluster.spatial_node_index);
             if !spatial_node.invertible {
                 continue;
             }
@@ -6303,13 +6296,13 @@ impl PicturePrimitive {
             // with information available during frame building.
             if cluster.flags.contains(ClusterFlags::IS_BACKDROP_FILTER) {
                 let backdrop_to_world_mapper = SpaceMapper::new_with_target(
-                    ROOT_SPATIAL_NODE_INDEX,
+                    frame_context.root_spatial_node_index,
                     cluster.spatial_node_index,
                     LayoutRect::max_rect(),
                     frame_context.spatial_tree,
                 );
 
-                for prim_instance in &mut self.prim_list.prim_instances[cluster.prim_range()] {
+                for prim_instance in &mut prim_instances[cluster.prim_range()] {
                     match prim_instance.kind {
                         PrimitiveInstanceKind::Backdrop { data_handle, .. } => {
                             // The actual size and clip rect of this primitive are determined by computing the bounding
@@ -6324,7 +6317,7 @@ impl PicturePrimitive {
                             // proper bounding box where the backdrop-filter needs to be processed.
 
                             let prim_to_world_mapper = SpaceMapper::new_with_target(
-                                ROOT_SPATIAL_NODE_INDEX,
+                                frame_context.root_spatial_node_index,
                                 spatial_node_index,
                                 LayoutRect::max_rect(),
                                 frame_context.spatial_tree,
@@ -6575,7 +6568,7 @@ fn create_raster_mappers(
     spatial_tree: &SpatialTree,
 ) -> (SpaceMapper<RasterPixel, WorldPixel>, SpaceMapper<PicturePixel, RasterPixel>) {
     let map_raster_to_world = SpaceMapper::new_with_target(
-        ROOT_SPATIAL_NODE_INDEX,
+        spatial_tree.root_reference_frame_index(),
         raster_spatial_node_index,
         world_rect,
         spatial_tree,
@@ -6600,22 +6593,10 @@ fn get_transform_key(
     cache_spatial_node_index: SpatialNodeIndex,
     spatial_tree: &SpatialTree,
 ) -> TransformKey {
-    // Note: this is the only place where we don't know beforehand if the tile-affecting
-    // spatial node is below or above the current picture.
-    let transform = if cache_spatial_node_index >= spatial_node_index {
-        spatial_tree
-            .get_relative_transform(
-                cache_spatial_node_index,
-                spatial_node_index,
-            )
-    } else {
-        spatial_tree
-            .get_relative_transform(
-                spatial_node_index,
-                cache_spatial_node_index,
-            )
-    };
-    transform.into()
+    spatial_tree.get_relative_transform(
+        spatial_node_index,
+        cache_spatial_node_index,
+    ).into()
 }
 
 /// A key for storing primitive comparison results during tile dependency tests.

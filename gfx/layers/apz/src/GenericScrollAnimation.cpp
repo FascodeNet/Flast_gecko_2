@@ -21,7 +21,11 @@ GenericScrollAnimation::GenericScrollAnimation(
     AsyncPanZoomController& aApzc, const nsPoint& aInitialPosition,
     const ScrollAnimationBezierPhysicsSettings& aSettings)
     : mApzc(aApzc), mFinalDestination(aInitialPosition) {
-  if (StaticPrefs::general_smoothScroll_msdPhysics_enabled()) {
+  // ScrollAnimationBezierPhysics (despite it's name) handles the case of
+  // general.smoothScroll being disabled whereas ScrollAnimationMSDPhysics does
+  // not (ie it scrolls smoothly).
+  if (StaticPrefs::general_smoothScroll() &&
+      StaticPrefs::general_smoothScroll_msdPhysics_enabled()) {
     mAnimationPhysics = MakeUnique<ScrollAnimationMSDPhysics>(aInitialPosition);
   } else {
     mAnimationPhysics =
@@ -58,8 +62,8 @@ void GenericScrollAnimation::Update(TimeStamp aTime,
 bool GenericScrollAnimation::DoSample(FrameMetrics& aFrameMetrics,
                                       const TimeDuration& aDelta) {
   TimeStamp now = mApzc.GetFrameTime().Time();
-  CSSToParentLayerScale2D zoom = aFrameMetrics.GetZoom();
-  if (zoom == CSSToParentLayerScale2D(0, 0)) {
+  CSSToParentLayerScale zoom(aFrameMetrics.GetZoom());
+  if (zoom == CSSToParentLayerScale(0)) {
     return false;
   }
 

@@ -100,11 +100,6 @@ class Simulator;
 namespace js {
 
 extern MOZ_COLD void ReportOutOfMemory(JSContext* cx);
-
-/* Different signature because the return type has [[nodiscard]]_TYPE. */
-extern MOZ_COLD mozilla::GenericErrorResult<OOM> ReportOutOfMemoryResult(
-    JSContext* cx);
-
 extern MOZ_COLD void ReportAllocationOverflow(JSContext* maybecx);
 
 class Activation;
@@ -437,9 +432,9 @@ struct JSRuntime {
   js::GeckoProfilerRuntime& geckoProfiler() { return geckoProfiler_.ref(); }
 
   // Heap GC roots for PersistentRooted pointers.
-  js::MainThreadData<mozilla::EnumeratedArray<
-      JS::RootKind, JS::RootKind::Limit,
-      mozilla::LinkedList<JS::PersistentRooted<JS::detail::RootListEntry*>>>>
+  js::MainThreadData<
+      mozilla::EnumeratedArray<JS::RootKind, JS::RootKind::Limit,
+                               mozilla::LinkedList<js::PersistentRootedBase>>>
       heapRoots;
 
   void tracePersistentRoots(JSTracer* trc);
@@ -868,7 +863,7 @@ struct JSRuntime {
   }
 
   bool initMainAtomsTables(JSContext* cx);
-  void tracePermanentAtomsDuringInit(JSTracer* trc);
+  void tracePermanentThingsDuringInit(JSTracer* trc);
 
   // Cached well-known symbols (ES6 rev 24 6.1.5.1). Like permanent atoms,
   // these are shared with the parentRuntime, if any.

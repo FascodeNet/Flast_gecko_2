@@ -256,6 +256,9 @@ class BrowserParent final : public PBrowserParent,
   void AddWindowListeners();
 
   mozilla::ipc::IPCResult RecvDidUnsuppressPainting();
+  mozilla::ipc::IPCResult RecvDidUnsuppressPaintingNormalPriority() {
+    return RecvDidUnsuppressPainting();
+  }
   mozilla::ipc::IPCResult RecvMoveFocus(const bool& aForward,
                                         const bool& aForDocumentNavigation);
 
@@ -539,7 +542,7 @@ class BrowserParent final : public PBrowserParent,
       const uint32_t& aPointerId, const TouchPointerState& aPointerState,
       const LayoutDeviceIntPoint& aPoint, const double& aPressure,
       const uint32_t& aRotation, const int32_t& aTiltX, const int32_t& aTiltY,
-      const uint64_t& aObserverId);
+      const int32_t& aButton, const uint64_t& aObserverId);
 
   mozilla::ipc::IPCResult RecvSynthesizeNativeTouchpadDoubleTap(
       const LayoutDeviceIntPoint& aPoint, const uint32_t& aModifierFlags);
@@ -720,8 +723,6 @@ class BrowserParent final : public PBrowserParent,
   bool ReceiveMessage(
       const nsString& aMessage, bool aSync, ipc::StructuredCloneData* aData,
       nsTArray<ipc::StructuredCloneData>* aJSONRetVal = nullptr);
-
-  virtual mozilla::ipc::IPCResult Recv__delete__() override;
 
   virtual void ActorDestroy(ActorDestroyReason why) override;
 

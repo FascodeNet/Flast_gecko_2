@@ -15,6 +15,8 @@
 #include "mozilla/Base64.h"
 #include "nsEscape.h"
 
+using namespace mozilla;
+
 // In nsStandardURL.cpp
 extern nsresult Test_NormalizeIPv4(const nsACString& host, nsCString& result);
 
@@ -246,7 +248,7 @@ TEST(TestStandardURL, From_test_standardurldotjs)
   }
 }
 
-#define COUNT 10000
+#define TEST_COUNT 10000
 
 MOZ_GTEST_BENCH(TestStandardURL, DISABLED_Perf, [] {
   nsCOMPtr<nsIURI> url;
@@ -255,7 +257,7 @@ MOZ_GTEST_BENCH(TestStandardURL, DISABLED_Perf, [] {
                        .Finalize(url));
 
   nsAutoCString out;
-  for (int i = COUNT; i; --i) {
+  for (int i = TEST_COUNT; i; --i) {
     ASSERT_EQ(NS_MutateURI(url).SetSpec("http://example.com"_ns).Finalize(url),
               NS_OK);
     ASSERT_EQ(url->GetSpec(out), NS_OK);

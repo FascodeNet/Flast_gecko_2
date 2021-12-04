@@ -8,7 +8,6 @@ job-defaults:
         tooltool-downloads: internal
     fetches:
         toolchain:
-            - win64-dump_syms
             - win64-pdbstr
 
 win32/debug:
@@ -60,9 +59,10 @@ win32/debug:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
+            - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win32/opt:
@@ -114,9 +114,10 @@ win32/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
+            - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64/debug:
@@ -168,10 +169,10 @@ win64/debug:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-hybrid/plain:
@@ -220,10 +221,10 @@ win64-hybrid/plain:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-fuzzing/debug:
@@ -275,10 +276,10 @@ win64-fuzzing/debug:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -320,6 +321,8 @@ win64-plain/debug:
             - win64-cbindgen
             - win64-winchecksec
             - win64-mozmake
+            - win64-dump_syms
+            - nsis
             - sysroot-wasm32-wasi
     optimization:
         skip-unless-expanded: null
@@ -377,10 +380,10 @@ win64/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-plain/opt:
@@ -420,6 +423,8 @@ win64-plain/opt:
             - win64-cbindgen
             - win64-winchecksec
             - win64-mozmake
+            - win64-dump_syms
+            - nsis
             - sysroot-wasm32-wasi
     optimization:
         skip-unless-expanded: null
@@ -487,9 +492,10 @@ win32-shippable/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
+            - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-shippable/opt:
@@ -544,10 +550,10 @@ win64-shippable/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win32-add-on-devel/opt:
@@ -596,9 +602,10 @@ win32-add-on-devel/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
+            - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-add-on-devel/opt:
@@ -647,10 +654,10 @@ win64-add-on-devel/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-noopt/debug:
@@ -699,10 +706,10 @@ win64-noopt/debug:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win32-noopt/debug:
@@ -751,9 +758,10 @@ win32-noopt/debug:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
+            - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win32-rusttests/opt:
@@ -797,6 +805,8 @@ win32-rusttests/opt:
             - win64-node
             - win64-winchecksec
             - win64-mozmake
+            - win64-dump_syms
+            - sysroot-wasm32-wasi
     optimization:
         test-inclusive: [rusttests]
 
@@ -841,6 +851,8 @@ win32-rusttests/debug:
             - win64-node
             - win64-winchecksec
             - win64-mozmake
+            - win64-dump_syms
+            - sysroot-wasm32-wasi
     optimization:
         test-inclusive: [rusttests]
 
@@ -882,6 +894,7 @@ win64-rusttests/opt:
             - win64-node
             - win64-winchecksec
             - win64-mozmake
+            - win64-dump_syms
             - sysroot-wasm32-wasi
     optimization:
         test-inclusive: [rusttests]
@@ -924,6 +937,7 @@ win64-rusttests/debug:
             - win64-node
             - win64-winchecksec
             - win64-mozmake
+            - win64-dump_syms
             - sysroot-wasm32-wasi
     optimization:
         test-inclusive: [rusttests]
@@ -961,7 +975,7 @@ win64-ccov/opt:
             - builds/taskcluster_sub_win64/ccov_opt.py
         mozconfig-variant: code-coverage
     run-on-projects: ['mozilla-central']
-    use-sccache: true
+    use-sccache: false
     fetches:
         toolchain:
             - win64-clang
@@ -974,6 +988,8 @@ win64-ccov/opt:
             - win64-node
             - win64-winchecksec
             - win64-mozmake
+            - win64-dump_syms
+            - nsis
             - sysroot-wasm32-wasi
 
 win64-asan/debug:
@@ -1022,11 +1038,11 @@ win64-asan/debug:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
             - win64-llvm-symbolizer
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -1078,11 +1094,11 @@ win64-asan/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
             - win64-llvm-symbolizer
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-asan-reporter-shippable/opt:
@@ -1143,11 +1159,11 @@ win64-asan-reporter-shippable/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
             - win64-llvm-symbolizer
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-asan-fuzzing/opt:
@@ -1195,11 +1211,11 @@ win64-asan-fuzzing/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
             - win64-llvm-symbolizer
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -1267,9 +1283,10 @@ win32-devedition/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
+            - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-devedition/opt:
@@ -1325,10 +1342,10 @@ win64-devedition/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-aarch64/debug:
@@ -1379,10 +1396,10 @@ win64-aarch64/debug:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -1441,10 +1458,10 @@ win64-aarch64/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -1486,8 +1503,8 @@ win64-aarch64-eme/opt:
         toolchain:
             - linux64-node
             - linux64-wine
+            - nsis
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -1585,8 +1602,8 @@ win64-aarch64-shippable/opt:
         toolchain:
             - linux64-node
             - linux64-wine
+            - nsis
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -1647,10 +1664,10 @@ win64-aarch64-shippable-no-eme/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
     optimization:
         skip-unless-expanded: null
@@ -1749,8 +1766,8 @@ win64-aarch64-devedition/opt:
         toolchain:
             - linux64-node
             - linux64-wine
+            - nsis
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win
 
 win64-aarch64-devedition-no-eme/opt:
@@ -1810,8 +1827,8 @@ win64-aarch64-devedition-no-eme/opt:
             - linux64-wine
             - linux64-liblowercase
             - linux64-winchecksec
+            - nsis
             - sysroot-x86_64-linux-gnu
             - sysroot-wasm32-wasi
         fetch:
-            - nsis-3.01-win
             - upx-3.95-win

@@ -9,7 +9,6 @@
 #include "mozilla/layers/AnimationHelper.h"
 #include "mozilla/layers/CompositorBridgeChild.h"
 #include "mozilla/layers/ImageClient.h"
-#include "mozilla/layers/LayerManager.h"
 #include "mozilla/layers/WebRenderBridgeChild.h"
 #include "mozilla/layers/RenderRootStateManager.h"
 #include "mozilla/layers/WebRenderMessages.h"
@@ -313,7 +312,7 @@ Maybe<wr::BlobImageKey> WebRenderBlobImageData::UpdateImageKey(
 
 WebRenderFallbackData::WebRenderFallbackData(RenderRootStateManager* aManager,
                                              nsDisplayItem* aItem)
-    : WebRenderUserData(aManager, aItem), mInvalid(false) {}
+    : WebRenderUserData(aManager, aItem), mOpacity(1.0f), mInvalid(false) {}
 
 WebRenderFallbackData::~WebRenderFallbackData() { ClearImageKey(); }
 
@@ -409,7 +408,7 @@ void WebRenderCanvasData::SetImageContainer(ImageContainer* aImageContainer) {
 
 ImageContainer* WebRenderCanvasData::GetImageContainer() {
   if (!mContainer) {
-    mContainer = LayerManager::CreateImageContainer();
+    mContainer = MakeAndAddRef<ImageContainer>();
   }
   return mContainer;
 }

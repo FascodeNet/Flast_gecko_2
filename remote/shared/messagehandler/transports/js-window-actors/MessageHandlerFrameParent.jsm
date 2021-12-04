@@ -11,8 +11,9 @@ const { XPCOMUtils } = ChromeUtils.import(
 );
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  MessageHandlerRegistry:
-    "chrome://remote/content/shared/messagehandler/MessageHandlerRegistry.jsm",
+  error: "chrome://remote/content/shared/messagehandler/Errors.jsm",
+  RootMessageHandlerRegistry:
+    "chrome://remote/content/shared/messagehandler/RootMessageHandlerRegistry.jsm",
 });
 
 /**
@@ -26,7 +27,7 @@ class MessageHandlerFrameParent extends JSWindowActorParent {
       case "MessageHandlerFrameChild:messageHandlerEvent":
         const { method, params, sessionId } = message.data;
 
-        const messageHandler = MessageHandlerRegistry.getRootMessageHandler(
+        const messageHandler = RootMessageHandlerRegistry.getExistingMessageHandler(
           sessionId
         );
 
@@ -51,10 +52,19 @@ class MessageHandlerFrameParent extends JSWindowActorParent {
    *     Promise that will resolve with the result of query sent to the
    *     MessageHandlerFrameChild actor.
    */
-  sendCommand(command, sessionId) {
-    return this.sendQuery("MessageHandlerFrameParent:sendCommand", {
-      command,
-      sessionId,
-    });
+  async sendCommand(command, sessionId) {
+    const result = await this.sendQuery(
+      "MessageHandlerFrameParent:sendCommand",
+      {
+        command,
+        sessionId,
+      }
+    );
+
+    if (result?.error) {
+      throw error.MessageHandlerError.fromJSON(result.error);
+    }
+
+    return result;
   }
 }

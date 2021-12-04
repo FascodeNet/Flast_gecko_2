@@ -20,6 +20,10 @@ async function testScript(tab) {
   await new Promise(resolve => setTimeout(resolve, 1000));
 
   await toolbox.destroy();
+
+  // Spin the event loop to ensure toolbox destroy is fully completed
+  // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+  await new Promise(resolve => setTimeout(resolve, 0));
 }
 
 add_task(async function() {
@@ -32,14 +36,14 @@ add_task(async function() {
   // shutdown of Firefox
   await testScript(tab);
 
-  const recordData = await startRecordingAllocations();
+  await startRecordingAllocations();
 
   // Now, run the test script. This time, we record this run.
   for (let i = 0; i < 3; i++) {
     await testScript(tab);
   }
 
-  await stopRecordingAllocations(recordData, "toolbox");
+  await stopRecordingAllocations("toolbox");
 
   gBrowser.removeTab(tab);
 });

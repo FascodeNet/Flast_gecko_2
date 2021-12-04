@@ -1182,7 +1182,7 @@ def x11_libs(webrtc):
         "xcb-shm",
         "x11-xcb",
         "xext",
-        "xrender",
+        "xrandr >= 1.4.0",
     ]
     if webrtc:
         # third_party/libwebrtc/webrtc/webrtc_gn/moz.build adds those
@@ -1194,10 +1194,11 @@ def x11_libs(webrtc):
             "xfixes",
             "xi",
         ]
-    return " ".join(libs)
+    return libs
 
 
 pkg_check_modules("MOZ_X11", x11_libs, when=toolkit_gtk)
+pkg_check_modules("MOZ_X11_SM", ["ice", "sm"], cflags_only=True, when=toolkit_gtk)
 
 
 # ASan Reporter Addon
@@ -1799,11 +1800,25 @@ with only_when(compile_environment):
         set_config("MOZ_JPEG_LIBS", jpeg_flags.ldflags)
 
     @depends("--with-system-jpeg", target)
+    def in_tree_jpeg_arm(system_jpeg, target):
+        if system_jpeg:
+            return
+
+        if target.cpu == "arm":
+            return ("-march=armv7-a", "-mfpu=neon")
+        elif target.cpu == "aarch64":
+            return ("-march=armv8-a",)
+
+    @depends("--with-system-jpeg", target)
     def in_tree_jpeg(system_jpeg, target):
         if system_jpeg:
             return
 
-        if target.kernel == "Darwin":
+        if target.cpu == "arm":
+            return ("-march=armv7-a", "-mfpu=neon")
+        elif target.cpu == "aarch64":
+            return ("-march=armv8-a",)
+        elif target.kernel == "Darwin":
             if target.cpu == "x86":
                 return ("-DPIC", "-DMACHO")
             elif target.cpu == "x86_64":
@@ -1813,12 +1828,10 @@ with only_when(compile_environment):
                 return ("-DPIC", "-DWIN32")
             elif target.cpu == "x86_64":
                 return ("-D__x86_64__", "-DPIC", "-DWIN64", "-DMSVC")
-        elif target.cpu == "arm":
-            return ("-march=armv7-a", "-mfpu=neon")
-        elif target.cpu == "aarch64":
-            return ("-march=armv8-a",)
         elif target.cpu == "mips32":
             return ("-mdspr2",)
+        elif target.cpu == "mips64":
+            return ("-Wa,-mloongson-mmi", "-mloongson-ext")
         elif target.cpu == "x86":
             return ("-DPIC", "-DELF")
         elif target.cpu == "x86_64":
@@ -1830,8 +1843,41 @@ with only_when(compile_environment):
             # libjpeg-turbo 2.0.6 requires nasm 2.10.
             return namespace(version="2.10", what="JPEG")
 
+    jpeg_arm_neon_vld1_s16_x3 = c_compiler.try_compile(
+        includes=["arm_neon.h"],
+        body="int16_t input[12] = {}; int16x4x3_t output = vld1_s16_x3(input);",
+        check_msg="for vld1_s16_x3 in arm_neon.h",
+        flags=in_tree_jpeg_arm,
+        when=in_tree_jpeg_arm,
+    )
+
+    jpeg_arm_neon_vld1_u16_x2 = c_compiler.try_compile(
+        includes=["arm_neon.h"],
+        body="uint16_t input[8] = {}; uint16x4x2_t output = vld1_u16_x2(input);",
+        check_msg="for vld1_u16_x2 in arm_neon.h",
+        flags=in_tree_jpeg_arm,
+        when=in_tree_jpeg_arm,
+    )
+
+    jpeg_arm_neon_vld1q_u8_x4 = c_compiler.try_compile(
+        includes=["arm_neon.h"],
+        body="uint8_t input[64] = {}; uint8x16x4_t output = vld1q_u8_x4(input);",
+        check_msg="for vld1q_u8_x4 in arm_neon.h",
+        flags=in_tree_jpeg_arm,
+        when=in_tree_jpeg_arm,
+    )
+
     set_config("LIBJPEG_TURBO_USE_NASM", True, when=jpeg_nasm)
-    set_config("LIBJPEG_TURBO_ASFLAGS", in_tree_jpeg)
+    set_config("LIBJPEG_TURBO_SIMD_FLAGS", in_tree_jpeg)
+    set_config("LIBJPEG_TURBO_HAVE_VLD1_S16_X3", jpeg_arm_neon_vld1_s16_x3)
+    set_config("LIBJPEG_TURBO_HAVE_VLD1_U16_X2", jpeg_arm_neon_vld1_u16_x2)
+    set_config("LIBJPEG_TURBO_HAVE_VLD1Q_U8_X4", jpeg_arm_neon_vld1q_u8_x4)
+    set_config(
+        "LIBJPEG_TURBO_NEON_INTRINSICS",
+        jpeg_arm_neon_vld1_s16_x3
+        & jpeg_arm_neon_vld1_u16_x2
+        & jpeg_arm_neon_vld1q_u8_x4,
+    )
 
 
 # FFmpeg's ffvpx configuration
@@ -2067,15 +2113,11 @@ def wasm_sandboxing_libraries():
     )
 
 
-@depends(dependable(wasm_sandboxing_libraries), target, "MOZ_AUTOMATION")
-def default_wasm_sandboxing_libraries(libraries, target, automation):
-    if automation and (
-        (target.kernel == "Linux" and target.os == "GNU" and target.cpu == "x86_64")
-        or (target.os == "Android" and target.bitness == 64)
-        or (target.kernel == "Darwin" and target.bitness == 64)
-        or (target.kernel == "WINNT" and target.bitness == 64)
-    ):
-        return libraries
+@depends(dependable(wasm_sandboxing_libraries))
+def default_wasm_sandboxing_libraries(libraries):
+    non_default_libs = set()
+
+    return tuple(l for l in libraries if l not in non_default_libs)
 
 
 option(
@@ -2112,14 +2154,20 @@ with only_when(requires_wasm_sandboxing & compile_environment):
     @depends(
         "--with-wasi-sysroot",
         bootstrap_path("sysroot-wasm32-wasi", when=bootstrap_wasi_sysroot),
+        "--with-wasm-sandboxed-libraries",
     )
     @imports("os")
-    def wasi_sysroot(wasi_sysroot, bootstrapped_sysroot):
+    def wasi_sysroot(wasi_sysroot, bootstrapped_sysroot, sandboxed_libs):
         if not wasi_sysroot:
             if not bootstrapped_sysroot:
+                suggest_disable = ""
+                if sandboxed_libs.origin == "default":
+                    suggest_disable = (
+                        " Or build with --without-wasm-sandboxed-libraries."
+                    )
                 die(
                     "Cannot find a wasi sysroot. Please give its location with "
-                    "--with-wasi-sysroot."
+                    "--with-wasi-sysroot." + suggest_disable
                 )
             return bootstrapped_sysroot
 
@@ -2192,13 +2240,10 @@ with only_when(requires_wasm_sandboxing & compile_environment):
     set_config("WASM_CXXFLAGS", wasm_cxxflags)
 
 
-@depends("--with-wasm-sandboxed-libraries", target)
-def wasm_sandboxing(libraries, target):
+@depends("--with-wasm-sandboxed-libraries")
+def wasm_sandboxing(libraries):
     if not libraries:
         return
-
-    if target.bitness != 64:
-        die("wasm sandboxing is only supported on 64-bits platforms")
 
     return namespace(**{name: True for name in libraries})
 
@@ -2476,3 +2521,28 @@ def oxidized_breakpad(target):
 
 set_config("MOZ_OXIDIZED_BREAKPAD", True, when=oxidized_breakpad)
 set_define("MOZ_OXIDIZED_BREAKPAD", True, when=oxidized_breakpad)
+
+
+# Wine
+# ==============================================================
+@depends(target, host)
+def want_wine(target, host):
+    return target.kernel == "WINNT" and host.kernel != "WINNT"
+
+
+wine = check_prog(
+    "WINE",
+    ["wine64", "wine"],
+    when=want_wine,
+    bootstrap="wine/bin",
+)
+
+# DOM Streams
+# ==============================================================
+option(
+    "--enable-dom-streams",
+    help="Enable the DOM Streams prototype",
+)
+
+set_config("MOZ_DOM_STREAMS", True, when="--enable-dom-streams")
+set_define("MOZ_DOM_STREAMS", True, when="--enable-dom-streams")

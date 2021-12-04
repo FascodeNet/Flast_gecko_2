@@ -229,6 +229,15 @@ nsStandardURL::nsStandardURL(bool aSupportsFileURL, bool aTrackURL)
 
 bool nsStandardURL::IsValid() {
   auto checkSegment = [&](const nsStandardURL::URLSegment& aSeg) {
+#ifdef EARLY_BETA_OR_EARLIER
+    // If the parity is not the same, we assume that this is caused by a memory
+    // error. In this case, we think this URLSegment is valid.
+    if ((aSeg.mPos.Parity() != aSeg.mPos.CalculateParity()) ||
+        (aSeg.mLen.Parity() != aSeg.mLen.CalculateParity())) {
+      MOZ_ASSERT(false);
+      return true;
+    }
+#endif
     // Bad value
     if (NS_WARN_IF(aSeg.mLen < -1)) {
       return false;
@@ -274,12 +283,17 @@ void nsStandardURL::SanityCheck() {
         "mPassword (%X,%X), mHost (%X,%X), mPath (%X,%X), mFilepath (%X,%X), "
         "mDirectory (%X,%X), mBasename (%X,%X), mExtension (%X,%X), mQuery "
         "(%X,%X), mRef (%X,%X)",
-        mSpec.Length(), mScheme.mPos, mScheme.mLen, mAuthority.mPos,
-        mAuthority.mLen, mUsername.mPos, mUsername.mLen, mPassword.mPos,
-        mPassword.mLen, mHost.mPos, mHost.mLen, mPath.mPos, mPath.mLen,
-        mFilepath.mPos, mFilepath.mLen, mDirectory.mPos, mDirectory.mLen,
-        mBasename.mPos, mBasename.mLen, mExtension.mPos, mExtension.mLen,
-        mQuery.mPos, mQuery.mLen, mRef.mPos, mRef.mLen);
+        mSpec.Length(), (uint32_t)mScheme.mPos, (int32_t)mScheme.mLen,
+        (uint32_t)mAuthority.mPos, (int32_t)mAuthority.mLen,
+        (uint32_t)mUsername.mPos, (int32_t)mUsername.mLen,
+        (uint32_t)mPassword.mPos, (int32_t)mPassword.mLen, (uint32_t)mHost.mPos,
+        (int32_t)mHost.mLen, (uint32_t)mPath.mPos, (int32_t)mPath.mLen,
+        (uint32_t)mFilepath.mPos, (int32_t)mFilepath.mLen,
+        (uint32_t)mDirectory.mPos, (int32_t)mDirectory.mLen,
+        (uint32_t)mBasename.mPos, (int32_t)mBasename.mLen,
+        (uint32_t)mExtension.mPos, (int32_t)mExtension.mLen,
+        (uint32_t)mQuery.mPos, (int32_t)mQuery.mLen, (uint32_t)mRef.mPos,
+        (int32_t)mRef.mLen);
     CrashReporter::AnnotateCrashReport(CrashReporter::Annotation::URLSegments,
                                        msg);
 
@@ -599,43 +613,51 @@ nsresult nsStandardURL::NormalizeIPv4(const nsACString& host,
   return NS_OK;
 }
 
-nsresult nsStandardURL::NormalizeIDN(const nsACString& host,
-                                     nsCString& result) {
-  // If host is ACE, then convert to UTF-8.  Else, if host is already UTF-8,
-  // then make sure it is normalized per IDN.
-
-  // this function returns true if normalization succeeds.
-
+nsresult nsStandardURL::NormalizeIDN(const nsCString& host, nsCString& result) {
   result.Truncate();
+  mDisplayHost.Truncate();
   nsresult rv;
 
   if (!gIDN) {
     return NS_ERROR_UNEXPECTED;
   }
 
-  bool isAscii;
-  nsAutoCString normalized;
-  rv = gIDN->ConvertToDisplayIDN(host, &isAscii, normalized);
+  // If the input is ASCII, and not ACE encoded, then there's no processing
+  // needed. This is needed because we want to allow ascii labels longer than
+  // 64 characters for some schemes.
+  bool isACE = false;
+  if (IsAscii(host) && NS_SUCCEEDED(gIDN->IsACE(host, &isACE)) && !isACE) {
+    mCheckedIfHostA = true;
+    result = host;
+    return NS_OK;
+  }
+
+  // Even if it's already ACE, we must still call ConvertUTF8toACE in order
+  // for the input normalization to take place.
+  rv = gIDN->ConvertUTF8toACE(host, result);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
-  // The result is ASCII. No need to convert to ACE.
-  if (isAscii) {
-    result = normalized;
+  // If the ASCII representation doesn't contain the xn-- token then we don't
+  // need to call ConvertToDisplayIDN as that would not change anything.
+  if (!StringBeginsWith(result, "xn--"_ns) &&
+      result.Find(".xn--"_ns) == kNotFound) {
     mCheckedIfHostA = true;
-    mDisplayHost.Truncate();
     return NS_OK;
   }
 
-  rv = gIDN->ConvertUTF8toACE(normalized, result);
+  bool isAscii = true;
+  nsAutoCString displayHost;
+  rv = gIDN->ConvertToDisplayIDN(result, &isAscii, displayHost);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
   mCheckedIfHostA = true;
-  mDisplayHost = normalized;
-
+  if (!isAscii) {
+    mDisplayHost = displayHost;
+  }
   return NS_OK;
 }
 
@@ -1125,12 +1147,23 @@ nsresult nsStandardURL::ParseURL(const char* spec, int32_t specLen) {
   //
   // parse given URL string
   //
-  rv = mParser->ParseURL(spec, specLen, &mScheme.mPos, &mScheme.mLen,
-                         &mAuthority.mPos, &mAuthority.mLen, &mPath.mPos,
-                         &mPath.mLen);
+  uint32_t schemePos = mScheme.mPos;
+  int32_t schemeLen = mScheme.mLen;
+  uint32_t authorityPos = mAuthority.mPos;
+  int32_t authorityLen = mAuthority.mLen;
+  uint32_t pathPos = mPath.mPos;
+  int32_t pathLen = mPath.mLen;
+  rv = mParser->ParseURL(spec, specLen, &schemePos, &schemeLen, &authorityPos,
+                         &authorityLen, &pathPos, &pathLen);
   if (NS_FAILED(rv)) {
     return rv;
   }
+  mScheme.mPos = schemePos;
+  mScheme.mLen = schemeLen;
+  mAuthority.mPos = authorityPos;
+  mAuthority.mLen = authorityLen;
+  mPath.mPos = pathPos;
+  mPath.mLen = pathLen;
 
 #ifdef DEBUG
   if (mScheme.mLen <= 0) {
@@ -1140,13 +1173,25 @@ nsresult nsStandardURL::ParseURL(const char* spec, int32_t specLen) {
 #endif
 
   if (mAuthority.mLen > 0) {
+    uint32_t usernamePos = mUsername.mPos;
+    int32_t usernameLen = mUsername.mLen;
+    uint32_t passwordPos = mPassword.mPos;
+    int32_t passwordLen = mPassword.mLen;
+    uint32_t hostPos = mHost.mPos;
+    int32_t hostLen = mHost.mLen;
     rv = mParser->ParseAuthority(spec + mAuthority.mPos, mAuthority.mLen,
-                                 &mUsername.mPos, &mUsername.mLen,
-                                 &mPassword.mPos, &mPassword.mLen, &mHost.mPos,
-                                 &mHost.mLen, &mPort);
+                                 &usernamePos, &usernameLen, &passwordPos,
+                                 &passwordLen, &hostPos, &hostLen, &mPort);
     if (NS_FAILED(rv)) {
       return rv;
     }
+
+    mUsername.mPos = usernamePos;
+    mUsername.mLen = usernameLen;
+    mPassword.mPos = passwordPos;
+    mPassword.mLen = passwordLen;
+    mHost.mPos = hostPos;
+    mHost.mLen = hostLen;
 
     // Don't allow mPort to be set to this URI's default port
     if (mPort == mDefaultPort) {
@@ -1173,25 +1218,50 @@ nsresult nsStandardURL::ParsePath(const char* spec, uint32_t pathPos,
     return NS_ERROR_MALFORMED_URI;
   }
 
-  nsresult rv = mParser->ParsePath(spec + pathPos, pathLen, &mFilepath.mPos,
-                                   &mFilepath.mLen, &mQuery.mPos, &mQuery.mLen,
-                                   &mRef.mPos, &mRef.mLen);
+  uint32_t filePathPos = mFilepath.mPos;
+  int32_t filePathLen = mFilepath.mLen;
+  uint32_t queryPos = mQuery.mPos;
+  int32_t queryLen = mQuery.mLen;
+  uint32_t refPos = mRef.mPos;
+  int32_t refLen = mRef.mLen;
+  nsresult rv =
+      mParser->ParsePath(spec + pathPos, pathLen, &filePathPos, &filePathLen,
+                         &queryPos, &queryLen, &refPos, &refLen);
   if (NS_FAILED(rv)) {
     return rv;
   }
+
+  mFilepath.mPos = filePathPos;
+  mFilepath.mLen = filePathLen;
+  mQuery.mPos = queryPos;
+  mQuery.mLen = queryLen;
+  mRef.mPos = refPos;
+  mRef.mLen = refLen;
 
   mFilepath.mPos += pathPos;
   mQuery.mPos += pathPos;
   mRef.mPos += pathPos;
 
   if (mFilepath.mLen > 0) {
+    uint32_t directoryPos = mDirectory.mPos;
+    int32_t directoryLen = mDirectory.mLen;
+    uint32_t basenamePos = mBasename.mPos;
+    int32_t basenameLen = mBasename.mLen;
+    uint32_t extensionPos = mExtension.mPos;
+    int32_t extensionLen = mExtension.mLen;
     rv = mParser->ParseFilePath(spec + mFilepath.mPos, mFilepath.mLen,
-                                &mDirectory.mPos, &mDirectory.mLen,
-                                &mBasename.mPos, &mBasename.mLen,
-                                &mExtension.mPos, &mExtension.mLen);
+                                &directoryPos, &directoryLen, &basenamePos,
+                                &basenameLen, &extensionPos, &extensionLen);
     if (NS_FAILED(rv)) {
       return rv;
     }
+
+    mDirectory.mPos = directoryPos;
+    mDirectory.mLen = directoryLen;
+    mBasename.mPos = basenamePos;
+    mBasename.mLen = basenameLen;
+    mExtension.mPos = extensionPos;
+    mExtension.mLen = extensionLen;
 
     mDirectory.mPos += mFilepath.mPos;
     mBasename.mPos += mFilepath.mPos;
@@ -1234,14 +1304,25 @@ nsresult nsStandardURL::ReadSegment(nsIBinaryInputStream* stream,
                                     URLSegment& seg) {
   nsresult rv;
 
-  rv = stream->Read32(&seg.mPos);
+  uint32_t pos = seg.mPos;
+  rv = stream->Read32(&pos);
   if (NS_FAILED(rv)) {
     return rv;
   }
 
-  rv = stream->Read32((uint32_t*)&seg.mLen);
+  seg.mPos = pos;
+
+  uint32_t len = seg.mLen;
+  rv = stream->Read32(&len);
   if (NS_FAILED(rv)) {
     return rv;
+  }
+
+  CheckedInt<int32_t> checkedLen(len);
+  if (!checkedLen.isValid()) {
+    seg.mLen = -1;
+  } else {
+    seg.mLen = len;
   }
 
   return NS_OK;
@@ -1264,16 +1345,16 @@ nsresult nsStandardURL::WriteSegment(nsIBinaryOutputStream* stream,
   return NS_OK;
 }
 
-#define SHIFT_FROM(name, what)               \
-  void nsStandardURL::name(int32_t diff) {   \
-    if (!diff) return;                       \
-    if ((what).mLen >= 0) {                  \
-      CheckedInt<int32_t> pos = (what).mPos; \
-      pos += diff;                           \
-      MOZ_ASSERT(pos.isValid());             \
-      (what).mPos = pos.value();             \
-    } else {                                 \
-      MOZ_RELEASE_ASSERT((what).mLen == -1); \
+#define SHIFT_FROM(name, what)                         \
+  void nsStandardURL::name(int32_t diff) {             \
+    if (!diff) return;                                 \
+    if ((what).mLen >= 0) {                            \
+      CheckedInt<int32_t> pos = (uint32_t)(what).mPos; \
+      pos += diff;                                     \
+      MOZ_ASSERT(pos.isValid());                       \
+      (what).mPos = pos.value();                       \
+    } else {                                           \
+      MOZ_RELEASE_ASSERT((what).mLen == -1);           \
     }
 
 #define SHIFT_FROM_NEXT(name, what, next) \
@@ -1628,18 +1709,27 @@ nsresult nsStandardURL::SetSpecWithEncoding(const nsACString& input,
   if (LOG_ENABLED()) {
     LOG((" spec      = %s\n", mSpec.get()));
     LOG((" port      = %d\n", mPort));
-    LOG((" scheme    = (%u,%d)\n", mScheme.mPos, mScheme.mLen));
-    LOG((" authority = (%u,%d)\n", mAuthority.mPos, mAuthority.mLen));
-    LOG((" username  = (%u,%d)\n", mUsername.mPos, mUsername.mLen));
-    LOG((" password  = (%u,%d)\n", mPassword.mPos, mPassword.mLen));
-    LOG((" hostname  = (%u,%d)\n", mHost.mPos, mHost.mLen));
-    LOG((" path      = (%u,%d)\n", mPath.mPos, mPath.mLen));
-    LOG((" filepath  = (%u,%d)\n", mFilepath.mPos, mFilepath.mLen));
-    LOG((" directory = (%u,%d)\n", mDirectory.mPos, mDirectory.mLen));
-    LOG((" basename  = (%u,%d)\n", mBasename.mPos, mBasename.mLen));
-    LOG((" extension = (%u,%d)\n", mExtension.mPos, mExtension.mLen));
-    LOG((" query     = (%u,%d)\n", mQuery.mPos, mQuery.mLen));
-    LOG((" ref       = (%u,%d)\n", mRef.mPos, mRef.mLen));
+    LOG((" scheme    = (%u,%d)\n", (uint32_t)mScheme.mPos,
+         (int32_t)mScheme.mLen));
+    LOG((" authority = (%u,%d)\n", (uint32_t)mAuthority.mPos,
+         (int32_t)mAuthority.mLen));
+    LOG((" username  = (%u,%d)\n", (uint32_t)mUsername.mPos,
+         (int32_t)mUsername.mLen));
+    LOG((" password  = (%u,%d)\n", (uint32_t)mPassword.mPos,
+         (int32_t)mPassword.mLen));
+    LOG((" hostname  = (%u,%d)\n", (uint32_t)mHost.mPos, (int32_t)mHost.mLen));
+    LOG((" path      = (%u,%d)\n", (uint32_t)mPath.mPos, (int32_t)mPath.mLen));
+    LOG((" filepath  = (%u,%d)\n", (uint32_t)mFilepath.mPos,
+         (int32_t)mFilepath.mLen));
+    LOG((" directory = (%u,%d)\n", (uint32_t)mDirectory.mPos,
+         (int32_t)mDirectory.mLen));
+    LOG((" basename  = (%u,%d)\n", (uint32_t)mBasename.mPos,
+         (int32_t)mBasename.mLen));
+    LOG((" extension = (%u,%d)\n", (uint32_t)mExtension.mPos,
+         (int32_t)mExtension.mLen));
+    LOG((" query     = (%u,%d)\n", (uint32_t)mQuery.mPos,
+         (int32_t)mQuery.mLen));
+    LOG((" ref       = (%u,%d)\n", (uint32_t)mRef.mPos, (int32_t)mRef.mLen));
   }
 
   SanityCheck();
@@ -2478,14 +2568,19 @@ nsStandardURL::Resolve(const nsACString& in, nsACString& out) {
   // relative urls should never contain a host, so we always want to use
   // the noauth url parser.
   // use it to extract a possible scheme
-  rv = mParser->ParseURL(relpath, relpathLen, &scheme.mPos, &scheme.mLen,
-                         nullptr, nullptr, nullptr, nullptr);
+  uint32_t schemePos = scheme.mPos;
+  int32_t schemeLen = scheme.mLen;
+  rv = mParser->ParseURL(relpath, relpathLen, &schemePos, &schemeLen, nullptr,
+                         nullptr, nullptr, nullptr);
 
   // if the parser fails (for example because there is no valid scheme)
   // reset the scheme and assume a relative url
   if (NS_FAILED(rv)) {
     scheme.Reset();
   }
+
+  scheme.mPos = schemePos;
+  scheme.mLen = schemeLen;
 
   protocol.Assign(Segment(scheme));
 
@@ -3083,15 +3178,19 @@ nsresult nsStandardURL::SetFileNameInternal(const nsACString& input) {
     }
   } else {
     nsresult rv;
-    URLSegment basename, extension;
-
+    uint32_t basenamePos = 0;
+    int32_t basenameLen = -1;
+    uint32_t extensionPos = 0;
+    int32_t extensionLen = -1;
     // let the parser locate the basename and extension
-    rv = mParser->ParseFileName(filename, flat.Length(), &basename.mPos,
-                                &basename.mLen, &extension.mPos,
-                                &extension.mLen);
+    rv = mParser->ParseFileName(filename, flat.Length(), &basenamePos,
+                                &basenameLen, &extensionPos, &extensionLen);
     if (NS_FAILED(rv)) {
       return rv;
     }
+
+    URLSegment basename(basenamePos, basenameLen);
+    URLSegment extension(extensionPos, extensionLen);
 
     if (basename.mLen < 0) {
       // remove existing filename

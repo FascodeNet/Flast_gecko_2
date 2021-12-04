@@ -59,8 +59,6 @@
 
 //-----------------------------------------------------------------------------
 
-static NS_DEFINE_CID(kMultiplexInputStream, NS_MULTIPLEXINPUTSTREAM_CID);
-
 // Place a limit on how much non-compliant HTTP can be skipped while
 // looking for a response header
 #define MAX_INVALID_RESPONSE_BODY_SIZE (1024 * 128)
@@ -1144,6 +1142,14 @@ nsHttpTransaction::PrepareFastFallbackConnInfo(bool aEchConfigUsed) {
   Unused << mHTTPSSVCRecord->GetServiceModeRecord(
       mCaps & NS_HTTP_DISALLOW_SPDY, true, getter_AddRefs(fastFallbackRecord));
 
+  if (fastFallbackRecord && aEchConfigUsed) {
+    nsAutoCString echConfig;
+    Unused << fastFallbackRecord->GetEchConfig(echConfig);
+    if (echConfig.IsEmpty()) {
+      fastFallbackRecord = nullptr;
+    }
+  }
+
   if (!fastFallbackRecord) {
     if (aEchConfigUsed) {
       LOG(
@@ -1172,8 +1178,9 @@ void nsHttpTransaction::PrepareConnInfoForRetry(nsresult aReason) {
        this, static_cast<uint32_t>(aReason)));
   RefPtr<nsHttpConnectionInfo> failedConnInfo = mConnInfo->Clone();
   mConnInfo = nullptr;
-  bool echConfigUsed = gHttpHandler->EchConfigEnabled() &&
-                       !failedConnInfo->GetEchConfig().IsEmpty();
+  bool echConfigUsed =
+      gHttpHandler->EchConfigEnabled(failedConnInfo->IsHttp3()) &&
+      !failedConnInfo->GetEchConfig().IsEmpty();
 
   if (mFastFallbackTriggered) {
     mFastFallbackTriggered = false;
@@ -1316,6 +1323,16 @@ void nsHttpTransaction::MaybeReportFailedSVCDomain(
   }
 }
 
+bool nsHttpTransaction::ShouldRestartOn0RttError(nsresult reason) {
+  LOG(
+      ("nsHttpTransaction::ShouldRestartOn0RttError [this=%p, "
+       "mEarlyDataWasAvailable=%d error=%" PRIx32 "]\n",
+       this, mEarlyDataWasAvailable, static_cast<uint32_t>(reason)));
+  return StaticPrefs::network_http_early_data_disable_on_error() &&
+         mEarlyDataWasAvailable &&
+         SecurityErrorToBeHandledByTransaction(reason);
+}
+
 void nsHttpTransaction::Close(nsresult reason) {
   LOG(("nsHttpTransaction::Close [this=%p reason=%" PRIx32 "]\n", this,
        static_cast<uint32_t>(reason)));
@@ -1399,6 +1416,13 @@ void nsHttpTransaction::Close(nsresult reason) {
   if (mConnection) {
     connReused = mConnection->IsReused();
     isHttp2or3 = mConnection->Version() >= HttpVersion::v2_0;
+    if (!mConnected) {
+      // Try to get SecurityInfo for this transaction.
+      nsCOMPtr<nsISupports> info;
+      mConnection->GetSecurityInfo(getter_AddRefs(info));
+      MutexAutoLock lock(mLock);
+      mSecurityInfo = info;
+    }
   }
   mConnected = false;
   mTunnelProvider = nullptr;
@@ -1437,6 +1461,7 @@ void nsHttpTransaction::Close(nsresult reason) {
   if ((reason == NS_ERROR_NET_RESET || reason == NS_OK ||
        reason ==
            psm::GetXPCOMFromNSSError(SSL_ERROR_DOWNGRADE_WITH_EARLY_DATA) ||
+       ShouldRestartOn0RttError(reason) ||
        shouldRestartTransactionForHTTPSRR) &&
       (!(mCaps & NS_HTTP_STICKY_CONNECTION) ||
        (mCaps & NS_HTTP_CONNECTION_RESTARTABLE) ||
@@ -1465,6 +1490,7 @@ void nsHttpTransaction::Close(nsresult reason) {
       }
     }
 
+    mDoNotTryEarlyData = true;
     // reallySentData is meant to separate the instances where data has
     // been sent by this transaction but buffered at a higher level while
     // a TLS session (perhaps via a tunnel) is setup.
@@ -1478,6 +1504,7 @@ void nsHttpTransaction::Close(nsresult reason) {
 
     if (reason ==
             psm::GetXPCOMFromNSSError(SSL_ERROR_DOWNGRADE_WITH_EARLY_DATA) ||
+        reason == psm::GetXPCOMFromNSSError(SSL_ERROR_PROTOCOL_VERSION_ALERT) ||
         (!mReceivedData && ((mRequestHead && mRequestHead->IsSafeMethod()) ||
                             !reallySentData || connReused)) ||
         shouldRestartTransactionForHTTPSRR) {
@@ -1518,6 +1545,9 @@ void nsHttpTransaction::Close(nsresult reason) {
       } else if (reason == psm::GetXPCOMFromNSSError(
                                SSL_ERROR_DOWNGRADE_WITH_EARLY_DATA)) {
         SetRestartReason(TRANSACTION_RESTART_DOWNGRADE_WITH_EARLY_DATA);
+      } else if (reason ==
+                 psm::GetXPCOMFromNSSError(SSL_ERROR_PROTOCOL_VERSION_ALERT)) {
+        SetRestartReason(TRANSACTION_RESTART_PROTOCOL_VERSION_ALERT);
       }
       // if restarting fails, then we must proceed to close the pipe,
       // which will notify the channel that the transaction failed.
@@ -1658,6 +1688,13 @@ void nsHttpTransaction::Close(nsresult reason) {
     mConnection = nullptr;
   }
 
+  if (isHttp2or3 &&
+      reason == psm::GetXPCOMFromNSSError(SSL_ERROR_PROTOCOL_VERSION_ALERT)) {
+    // Change reason to NS_ERROR_ABORT, so we avoid showing a missleading
+    // error page tthat TLS1.0 is disabled. H2 or H3 is used here so the
+    // TLS version is not a problem.
+    reason = NS_ERROR_ABORT;
+  }
   mStatus = reason;
   mTransactionDone = true;  // forcibly flag the transaction as complete
   mClosed = true;
@@ -1778,6 +1815,7 @@ nsresult nsHttpTransaction::Restart() {
 
   // Reset mDoNotRemoveAltSvc for the next try.
   mDoNotRemoveAltSvc = false;
+  mEarlyDataWasAvailable = false;
   mRestarted = true;
 
   // Use TRANSACTION_RESTART_OTHERS as a catch-all.
@@ -2777,7 +2815,7 @@ nsHttpTransaction::Release() {
 }
 
 NS_IMPL_QUERY_INTERFACE(nsHttpTransaction, nsIInputStreamCallback,
-                        nsIOutputStreamCallback, nsITimerCallback)
+                        nsIOutputStreamCallback, nsITimerCallback, nsINamed)
 
 //-----------------------------------------------------------------------------
 // nsHttpTransaction::nsIInputStreamCallback
@@ -2823,6 +2861,7 @@ void nsHttpTransaction::GetNetworkAddresses(NetAddr& self, NetAddr& peer,
 }
 
 bool nsHttpTransaction::Do0RTT() {
+  mEarlyDataWasAvailable = true;
   if (mRequestHead->IsSafeMethod() && !mDoNotTryEarlyData &&
       (!mConnection || !mConnection->IsProxyConnectInProgress())) {
     m0RTTInProgress = true;
@@ -3264,8 +3303,8 @@ void nsHttpTransaction::OnFastFallbackTimer() {
     return;
   }
 
-  bool echConfigUsed =
-      gHttpHandler->EchConfigEnabled() && !mConnInfo->GetEchConfig().IsEmpty();
+  bool echConfigUsed = gHttpHandler->EchConfigEnabled(mConnInfo->IsHttp3()) &&
+                       !mConnInfo->GetEchConfig().IsEmpty();
   mBackupConnInfo = PrepareFastFallbackConnInfo(echConfigUsed);
   if (!mBackupConnInfo) {
     return;
@@ -3336,6 +3375,12 @@ nsHttpTransaction::Notify(nsITimer* aTimer) {
     OnHttp3BackupTimer();
   }
 
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpTransaction::GetName(nsACString& aName) {
+  aName.AssignLiteral("nsHttpTransaction");
   return NS_OK;
 }
 

@@ -12,6 +12,9 @@
 template<class T> class nsCOMArray;
 namespace mozilla {
 class TimeStamp;
+namespace net {
+class WebSocketConnectionBase;
+}
 }
 %}
 [ptr] native StringArray(nsTArray<nsCString>);
@@ -40,6 +43,10 @@ interface nsIHttpUpgradeListener : nsISupports
                                          in nsIAsyncOutputStream aSocketOut);
 
     [must_use] void onUpgradeFailed(in nsresult aErrorCode);
+
+%{C++
+    virtual nsresult OnWebSocketConnectionAvailable(mozilla::net::WebSocketConnectionBase* aConnection) = 0;
+%}
 };
 
 /**
@@ -247,6 +254,13 @@ interface nsIHttpChannelInternal : nsISupports
      * default is false.
      */
     [must_use] attribute boolean beConservative;
+
+    /**
+     * If true, do not resolve any proxy for this request. Intended only for use with
+     * critical infra like the updater.
+     * default is false.
+     */
+    [must_use] attribute boolean bypassProxy;
 
     /**
      * True if channel is used by the internal trusted recursive resolver

@@ -21,7 +21,6 @@
 #include "nsTArray.h"
 #include "nsTHashtable.h"
 #include "prenv.h"
-#include "plstr.h"
 #include "prlink.h"
 #include "nsCRT.h"
 #include <math.h>
@@ -32,6 +31,7 @@
 
 #include "nsXULAppAPI.h"
 #ifdef XP_WIN
+#  include <io.h>
 #  include <process.h>
 #  define getpid _getpid
 #else
@@ -310,8 +310,8 @@ static BloatEntry* GetBloatEntry(const char* aTypeName,
   BloatEntry* entry = gBloatView->Get(aTypeName);
   if (!entry && aInstanceSize > 0) {
     entry = gBloatView
-                ->InsertOrUpdate(
-                    aTypeName, MakeUnique<BloatEntry>(aTypeName, aInstanceSize))
+                ->InsertOrUpdate(aTypeName, mozilla::MakeUnique<BloatEntry>(
+                                                aTypeName, aInstanceSize))
                 .get();
   } else {
     MOZ_ASSERT(
@@ -376,10 +376,10 @@ template <>
 class nsDefaultComparator<BloatEntry*, BloatEntry*> {
  public:
   bool Equals(BloatEntry* const& aEntry1, BloatEntry* const& aEntry2) const {
-    return PL_strcmp(aEntry1->GetClassName(), aEntry2->GetClassName()) == 0;
+    return strcmp(aEntry1->GetClassName(), aEntry2->GetClassName()) == 0;
   }
   bool LessThan(BloatEntry* const& aEntry1, BloatEntry* const& aEntry2) const {
-    return PL_strcmp(aEntry1->GetClassName(), aEntry2->GetClassName()) < 0;
+    return strcmp(aEntry1->GetClassName(), aEntry2->GetClassName()) < 0;
   }
 };
 
@@ -466,7 +466,7 @@ static intptr_t GetSerialNumber(void* aPtr, bool aCreate, void* aFirstFramePC) {
           "it.");
     }
 
-    auto& record = entry.Insert(MakeUnique<SerialNumberRecord>());
+    auto& record = entry.Insert(mozilla::MakeUnique<SerialNumberRecord>());
     WalkTheStackSavingLocations(record->allocationStack, aFirstFramePC);
     if (gLogJSStacks) {
       record->SaveJSStack();

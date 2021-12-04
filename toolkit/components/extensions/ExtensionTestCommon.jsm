@@ -66,13 +66,6 @@ const { ExtensionUtils } = ChromeUtils.import(
   "resource://gre/modules/ExtensionUtils.jsm"
 );
 
-XPCOMUtils.defineLazyServiceGetter(
-  this,
-  "uuidGen",
-  "@mozilla.org/uuid-generator;1",
-  "nsIUUIDGenerator"
-);
-
 const { flushJarCache } = ExtensionUtils;
 
 const { instanceOf } = ExtensionCommon;
@@ -292,7 +285,7 @@ ExtensionTestCommon = class ExtensionTestCommon {
     }
 
     if (data.background) {
-      let bgScript = uuidGen.generateUUID().number + ".js";
+      let bgScript = Services.uuid.generateUUID().number + ".js";
 
       provide(manifest, ["background", "scripts"], [bgScript], true);
       files[bgScript] = data.background;
@@ -438,7 +431,7 @@ ExtensionTestCommon = class ExtensionTestCommon {
     provide(
       data,
       ["manifest", "applications", "gecko", "id"],
-      uuidGen.generateUUID().number
+      Services.uuid.generateUUID().number
     );
   }
 
@@ -450,10 +443,29 @@ ExtensionTestCommon = class ExtensionTestCommon {
    * @returns {Extension}
    */
   static generate(data) {
-    // An android-browser shared test, needs addon manager on GeckoView.
-    if (data.androidBrowserTest && AppConstants.platform === "android") {
-      data.useAddonManager ??= "permanent";
-      this.setExtensionID(data);
+    if (data.useAddonManager === "android-only") {
+      // Some extension APIs are partially implemented in Java, and the
+      // interface between the JS and Java side (GeckoViewWebExtension)
+      // expects extensions to be registered with the AddonManager.
+      // This is at least necessary for tests that use the following APIs:
+      //   - browserAction/pageAction.
+      //   - tabs.create, tabs.update, tabs.remove (uses GeckoViewTabBridge).
+      //   - downloads API
+      //   - browsingData API (via ExtensionBrowsingData.jsm).
+      //
+      // In xpcshell tests, the AddonManager is optional, so the AddonManager
+      // cannot unconditionally be enabled.
+      // In mochitests, tests are run in an actual browser, so the AddonManager
+      // is always enabled and hence useAddonManager is always set by default.
+      if (AppConstants.platform === "android") {
+        data.useAddonManager = "permanent";
+        // MockExtension requires data.manifest.applications.gecko.id to be set.
+        // The AddonManager requires an ID in the manifest for unsigned XPIs.
+        this.setExtensionID(data);
+      } else {
+        // On non-Android, default to not using the AddonManager.
+        data.useAddonManager = null;
+      }
     }
 
     let file = this.generateXPI(data);
@@ -483,7 +495,7 @@ ExtensionTestCommon = class ExtensionTestCommon {
       }
     }
     if (!id) {
-      id = uuidGen.generateUUID().number;
+      id = Services.uuid.generateUUID().number;
     }
 
     let signedState = AddonManager.SIGNEDSTATE_SIGNED;

@@ -31,8 +31,15 @@
   --arrowpanel-field-background: rgba(12,12,13,.3);
 }
 
+#browser {
+  /* #browser and #navigator-toolbox must have relative positions so that the
+     latter can slide over the former in fullscreen mode. */
+  position: relative;
+}
+
 #navigator-toolbox {
   appearance: none;
+  position: relative;
 }
 
 #navigator-toolbox:not(:-moz-lwtheme) {
@@ -73,23 +80,35 @@
   display: none;
 }
 
-/* Making the toolbox position:relative (browser.inc.css) occludes titlebar indicators
- * if the toolbox has a background. Fix this by positioning the relevant elements, too: */
-#titlebar-secondary-buttonbox {
-  position: relative;
-  z-index: 1;
-  /* Centrally align indicators and full screen button vertically */
-  -moz-box-align: center;
-}
-
 .titlebar-buttonbox-container {
   -moz-box-align: center;
 }
 
-/* These would be margin-inline-start/end if it wasn't for the fact that OS X
- * doesn't reverse the order of the items in the titlebar in RTL mode. */
-.titlebar-buttonbox {
+/* Hide window controls in fullscreen */
+:root[inFullscreen] .titlebar-buttonbox-container {
+  display: none;
+}
+
+.titlebar-buttonbox:-moz-locale-dir(ltr) {
   margin-left: 12px;
+  margin-right: 0;
+}
+
+.titlebar-buttonbox:-moz-locale-dir(rtl) {
+  margin-left: 12px;
+  margin-right: 12px;
+}
+
+@media (-moz-mac-rtl) {
+  .titlebar-buttonbox:-moz-locale-dir(ltr) {
+    margin-left: 12px;
+    margin-right: 12px;
+  }
+
+  .titlebar-buttonbox:-moz-locale-dir(rtl) {
+    margin-left: 0;
+    margin-right: 12px;
+  }
 }
 
 /** End titlebar **/
@@ -178,23 +197,15 @@
   opacity: 0.5;
 }
 
-/* ----- FULLSCREEN WINDOW CONTROLS ----- */
-
-#minimize-button,
-#close-button,
-#fullscreen-button ~ #window-controls > #restore-button {
-  display: none;
-}
-
 /* Address bar */
 
 %include ../shared/urlbar-searchbar.inc.css
 
 @media not (prefers-contrast) {
-  :root:not(:-moz-lwtheme) #urlbar:not([focused="true"]) {
+  :root:not(:-moz-lwtheme) #urlbar {
     --urlbar-box-bgcolor: white;
   }
-  :root[lwt-default-theme-in-dark-mode] #urlbar:not([focused="true"]) {
+  :root[lwt-default-theme-in-dark-mode] #urlbar {
     --urlbar-box-bgcolor: var(--toolbar-field-focus-background-color);
   }
 }

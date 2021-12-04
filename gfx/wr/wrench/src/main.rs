@@ -21,6 +21,7 @@ mod premultiply;
 mod rawtest;
 mod reftest;
 mod test_invalidation;
+mod test_shaders;
 mod wrench;
 mod yaml_frame_reader;
 mod yaml_helper;
@@ -341,27 +342,27 @@ fn make_window(
                 .with_dimensions(LogicalSize::new(size.width as f64, size.height as f64));
 
             if angle {
-                let (_window, _context) = angle::Context::with_window(
+                angle::Context::with_window(
                     window_builder, context_builder, events_loop
-                ).unwrap();
+                ).map(|(_window, _context)| {
+                    unsafe {
+                        _context
+                            .make_current()
+                            .expect("unable to make context current!");
+                    }
 
-                unsafe {
-                    _context
-                        .make_current()
-                        .expect("unable to make context current!");
-                }
+                    let gl = match _context.get_api() {
+                        glutin::Api::OpenGl => unsafe {
+                            gl::GlFns::load_with(|symbol| _context.get_proc_address(symbol) as *const _)
+                        },
+                        glutin::Api::OpenGlEs => unsafe {
+                            gl::GlesFns::load_with(|symbol| _context.get_proc_address(symbol) as *const _)
+                        },
+                        glutin::Api::WebGl => unimplemented!(),
+                    };
 
-                let gl = match _context.get_api() {
-                    glutin::Api::OpenGl => unsafe {
-                        gl::GlFns::load_with(|symbol| _context.get_proc_address(symbol) as *const _)
-                    },
-                    glutin::Api::OpenGlEs => unsafe {
-                        gl::GlesFns::load_with(|symbol| _context.get_proc_address(symbol) as *const _)
-                    },
-                    glutin::Api::WebGl => unimplemented!(),
-                };
-
-                WindowWrapper::Angle(_window, _context, gl, sw_ctx)
+                    WindowWrapper::Angle(_window, _context, gl, sw_ctx)
+                }).unwrap()
             } else {
                 let windowed_context = context_builder
                     .build_windowed(window_builder, events_loop)
@@ -757,6 +758,8 @@ fn main() {
         // Wrench::new() unwraps the Renderer initialization, so if
         // we reach this point then we have initialized successfully.
         println!("Initialization successful");
+    } else if let Some(_) = args.subcommand_matches("test_shaders") {
+        test_shaders::test_shaders();
     } else {
         panic!("Should never have gotten here! {:?}", args);
     };
@@ -938,7 +941,6 @@ fn render<'a>(
                         VirtualKeyCode::X => {
                             let results = wrench.api.hit_test(
                                 wrench.document_id,
-                                None,
                                 cursor_position,
                             );
 

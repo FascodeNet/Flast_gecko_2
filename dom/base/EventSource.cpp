@@ -56,7 +56,9 @@
 
 namespace mozilla::dom {
 
+#ifdef DEBUG
 static LazyLogModule gEventSourceLog("EventSource");
+#endif
 
 #define SPACE_CHAR (char16_t)0x0020
 #define CR_CHAR (char16_t)0x000D
@@ -77,6 +79,7 @@ class EventSourceImpl final : public nsIObserver,
                               public nsSupportsWeakReference,
                               public nsIEventTarget,
                               public nsITimerCallback,
+                              public nsINamed,
                               public nsIThreadRetargetableStreamListener {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
@@ -87,6 +90,7 @@ class EventSourceImpl final : public nsIObserver,
   NS_DECL_NSIINTERFACEREQUESTOR
   NS_DECL_NSIEVENTTARGET_FULL
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
   NS_DECL_NSITHREADRETARGETABLESTREAMLISTENER
 
   EventSourceImpl(EventSource* aEventSource,
@@ -362,7 +366,7 @@ NS_IMPL_ISUPPORTS(EventSourceImpl, nsIObserver, nsIStreamListener,
                   nsIRequestObserver, nsIChannelEventSink,
                   nsIInterfaceRequestor, nsISupportsWeakReference,
                   nsIEventTarget, nsIThreadRetargetableStreamListener,
-                  nsITimerCallback)
+                  nsITimerCallback, nsINamed)
 
 EventSourceImpl::EventSourceImpl(EventSource* aEventSource,
                                  nsICookieJarSettings* aCookieJarSettings)
@@ -789,10 +793,8 @@ void EventSourceImpl::ParseSegment(const char* aBuffer, uint32_t aLength) {
     uint32_t result;
     size_t read;
     size_t written;
-    bool hadErrors;
-    Tie(result, read, written, hadErrors) =
+    Tie(result, read, written, Ignore) =
         mUnicodeDecoder->DecodeToUTF16(src, dst, false);
-    Unused << hadErrors;
     for (auto c : dst.To(written)) {
       nsresult rv = ParseCharacter(c);
       NS_ENSURE_SUCCESS_VOID(rv);
@@ -1401,6 +1403,11 @@ NS_IMETHODIMP EventSourceImpl::Notify(nsITimer* aTimer) {
       NS_WARNING("InitChannelAndRequestEventSource() failed");
     }
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP EventSourceImpl::GetName(nsACString& aName) {
+  aName.AssignLiteral("EventSourceImpl");
   return NS_OK;
 }
 

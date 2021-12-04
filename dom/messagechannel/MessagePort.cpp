@@ -35,10 +35,6 @@
 #include "nsGlobalWindow.h"
 #include "nsPresContext.h"
 
-#include "nsIBFCacheEntry.h"
-#include "mozilla/dom/Document.h"
-#include "nsServiceManagerUtils.h"
-
 #ifdef XP_WIN
 #  undef PostMessage
 #endif
@@ -412,7 +408,7 @@ void MessagePort::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
 }
 
 void MessagePort::PostMessage(JSContext* aCx, JS::Handle<JS::Value> aMessage,
-                              const PostMessageOptions& aOptions,
+                              const StructuredSerializeOptions& aOptions,
                               ErrorResult& aRv) {
   PostMessage(aCx, aMessage, aOptions.mTransfer, aRv);
 }

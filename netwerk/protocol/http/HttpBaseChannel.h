@@ -272,6 +272,8 @@ class HttpBaseChannel : public nsHashPropertyBag,
   NS_IMETHOD SetAllowAltSvc(bool aAllowAltSvc) override;
   NS_IMETHOD GetBeConservative(bool* aBeConservative) override;
   NS_IMETHOD SetBeConservative(bool aBeConservative) override;
+  NS_IMETHOD GetBypassProxy(bool* aBypassProxy) override;
+  NS_IMETHOD SetBypassProxy(bool aBypassProxy) override;
   NS_IMETHOD GetIsTRRServiceChannel(bool* aTRR) override;
   NS_IMETHOD SetIsTRRServiceChannel(bool aTRR) override;
   NS_IMETHOD GetIsResolvedByTRR(bool* aResolvedByTRR) override;
@@ -413,6 +415,8 @@ class HttpBaseChannel : public nsHashPropertyBag,
     return mResponseTrailers.get();
   }
 
+  void SetDummyChannelForImageCache();
+
   const NetAddr& GetSelfAddr() { return mSelfAddr; }
   const NetAddr& GetPeerAddr() { return mPeerAddr; }
 
@@ -493,7 +497,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
     Maybe<bool> privateBrowsing = Nothing();
     Maybe<nsCString> method;
     nsCOMPtr<nsIReferrerInfo> referrerInfo;
-    Maybe<dom::TimedChannelInfo> timedChannel;
+    Maybe<dom::TimedChannelInfo> timedChannelInfo;
     nsCOMPtr<nsIInputStream> uploadStream;
     uint64_t uploadStreamLength = 0;
     bool uploadStreamHasHeaders = false;
@@ -573,9 +577,6 @@ class HttpBaseChannel : public nsHashPropertyBag,
   // Checks whether or not aURI and mOriginalURI share the same domain.
   virtual bool SameOriginWithOriginalUri(nsIURI* aURI);
 
-  // GetPrincipal Returns the channel's URI principal.
-  nsIPrincipal* GetURIPrincipal();
-
   [[nodiscard]] bool BypassServiceWorker() const;
 
   // Returns true if this channel should intercept the network request and
@@ -608,6 +609,8 @@ class HttpBaseChannel : public nsHashPropertyBag,
   nsresult ProcessCrossOriginResourcePolicyHeader();
 
   nsresult ComputeCrossOriginOpenerPolicyMismatch();
+
+  nsresult ProcessCrossOriginSecurityHeaders();
 
   nsresult ValidateMIMEType();
 
@@ -815,6 +818,10 @@ class HttpBaseChannel : public nsHashPropertyBag,
     // Used to enforce that flag's behavior but not expose it externally.
     (uint32_t, AllowStaleCacheContent, 1),
 
+    // If true, we behave as if the VALIDATE_ALWAYS flag has been set.
+    // Used to force validate the cached content.
+    (uint32_t, ForceValidateCacheContent, 1),
+
     // If true, we prefer the LOAD_FROM_CACHE flag over LOAD_BYPASS_CACHE or
     // LOAD_BYPASS_LOCAL_CACHE.
     (uint32_t, PreferCacheLoadOverBypass, 1)
@@ -841,7 +848,11 @@ class HttpBaseChannel : public nsHashPropertyBag,
     (uint32_t, TaintedOriginFlag, 1),
 
     // If the channel is being used to check OCSP
-    (uint32_t, IsOCSP, 1)
+    (uint32_t, IsOCSP, 1),
+
+    // Used by system requests such as remote settings and updates to
+    // retry requests without proxies.
+    (uint32_t, BypassProxy, 1)
   ))
   // clang-format on
 
@@ -886,6 +897,7 @@ class HttpBaseChannel : public nsHashPropertyBag,
   const bool mCachedOpaqueResponseBlockingPref;
   bool mBlockOpaqueResponseAfterSniff;
   bool mCheckIsOpaqueResponseAllowedAfterSniff;
+  bool mDummyChannelForImageCache;
 
   // clang-format off
   MOZ_ATOMIC_BITFIELDS(mAtomicBitfields3, 8, (

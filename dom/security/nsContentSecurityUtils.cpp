@@ -54,6 +54,8 @@ using namespace mozilla::Telemetry;
 extern mozilla::LazyLogModule sCSMLog;
 extern Atomic<bool, mozilla::Relaxed> sJSHacksChecked;
 extern Atomic<bool, mozilla::Relaxed> sJSHacksPresent;
+extern Atomic<bool, mozilla::Relaxed> sCSSHacksChecked;
+extern Atomic<bool, mozilla::Relaxed> sCSSHacksPresent;
 extern Atomic<bool, mozilla::Relaxed> sTelemetryEventEnabled;
 
 // Helper function for IsConsideredSameOriginForUIR which makes
@@ -307,11 +309,13 @@ FilenameTypeAndDetails nsContentSecurityUtils::FilenameToFilenameType(
   static constexpr auto kResourceURI = "resourceuri"_ns;
   static constexpr auto kBlobUri = "bloburi"_ns;
   static constexpr auto kDataUri = "dataurl"_ns;
+  static constexpr auto kAboutUri = "abouturi"_ns;
   static constexpr auto kDataUriWebExtCStyle =
       "dataurl-extension-contentstyle"_ns;
   static constexpr auto kSingleString = "singlestring"_ns;
-  static constexpr auto kMozillaExtension = "mozillaextension"_ns;
-  static constexpr auto kOtherExtension = "otherextension"_ns;
+  static constexpr auto kMozillaExtensionFile = "mozillaextension_file"_ns;
+  static constexpr auto kOtherExtensionFile = "otherextension_file"_ns;
+  static constexpr auto kExtensionURI = "extension_uri"_ns;
   static constexpr auto kSuspectedUserChromeJS = "suspectedUserChromeJS"_ns;
 #if defined(XP_WIN)
   static constexpr auto kSanitizedWindowsURL = "sanitizedWindowsURL"_ns;
@@ -348,46 +352,112 @@ FilenameTypeAndDetails nsContentSecurityUtils::FilenameToFilenameType(
     return FilenameTypeAndDetails(kDataUri, Nothing());
   }
 
-  if (!NS_IsMainThread()) {
-    // We can't do Regex matching off the main thread; so just report.
-    return FilenameTypeAndDetails(kOtherWorker, Nothing());
+  // Can't do regex matching off-main-thread
+  if (NS_IsMainThread()) {
+    // Extension as loaded via a file://
+    bool regexMatch;
+    nsTArray<nsString> regexResults;
+    nsresult rv = RegexEval(kExtensionRegex, fileName, /* aOnlyMatch = */ false,
+                            regexMatch, &regexResults);
+    if (NS_FAILED(rv)) {
+      return FilenameTypeAndDetails(kRegexFailure, Nothing());
+    }
+    if (regexMatch) {
+      nsCString type = StringEndsWith(regexResults[2], u"mozilla.org.xpi"_ns)
+                           ? kMozillaExtensionFile
+                           : kOtherExtensionFile;
+      const auto& extensionNameAndPath =
+          Substring(regexResults[0], ArrayLength("extensions/") - 1);
+      return FilenameTypeAndDetails(
+          type, Some(OptimizeFileName(extensionNameAndPath)));
+    }
+
+    // Single File
+    rv = RegexEval(kSingleFileRegex, fileName, /* aOnlyMatch = */ true,
+                   regexMatch);
+    if (NS_FAILED(rv)) {
+      return FilenameTypeAndDetails(kRegexFailure, Nothing());
+    }
+    if (regexMatch) {
+      return FilenameTypeAndDetails(kSingleString, Some(fileName));
+    }
+
+    // Suspected userChromeJS script
+    rv = RegexEval(kUCJSRegex, fileName, /* aOnlyMatch = */ true, regexMatch);
+    if (NS_FAILED(rv)) {
+      return FilenameTypeAndDetails(kRegexFailure, Nothing());
+    }
+    if (regexMatch) {
+      return FilenameTypeAndDetails(kSuspectedUserChromeJS, Nothing());
+    }
   }
 
-  // Extension
-  bool regexMatch;
-  nsTArray<nsString> regexResults;
-  nsresult rv = RegexEval(kExtensionRegex, fileName, /* aOnlyMatch = */ false,
-                          regexMatch, &regexResults);
-  if (NS_FAILED(rv)) {
-    return FilenameTypeAndDetails(kRegexFailure, Nothing());
-  }
-  if (regexMatch) {
-    nsCString type = StringEndsWith(regexResults[2], u"mozilla.org.xpi"_ns)
-                         ? kMozillaExtension
-                         : kOtherExtension;
-    auto& extensionNameAndPath =
-        Substring(regexResults[0], ArrayLength("extensions/") - 1);
-    return FilenameTypeAndDetails(type,
-                                  Some(OptimizeFileName(extensionNameAndPath)));
+  // Something loaded via an about:// URI.
+  if (StringBeginsWith(fileName, u"about:"_ns)) {
+    // Remove any querystrings and such
+    long int desired_length = fileName.Length();
+    long int possible_new_length = 0;
+
+    possible_new_length = fileName.FindChar('?');
+    if (possible_new_length != -1 && possible_new_length < desired_length) {
+      desired_length = possible_new_length;
+    }
+
+    possible_new_length = fileName.FindChar('#');
+    if (possible_new_length != -1 && possible_new_length < desired_length) {
+      desired_length = possible_new_length;
+    }
+
+    auto subFileName = Substring(fileName, 0, desired_length);
+
+    return FilenameTypeAndDetails(kAboutUri, Some(subFileName));
   }
 
-  // Single File
-  rv = RegexEval(kSingleFileRegex, fileName, /* aOnlyMatch = */ true,
-                 regexMatch);
-  if (NS_FAILED(rv)) {
-    return FilenameTypeAndDetails(kRegexFailure, Nothing());
-  }
-  if (regexMatch) {
-    return FilenameTypeAndDetails(kSingleString, Some(fileName));
-  }
+  // Something loaded via a moz-extension:// URI.
+  if (StringBeginsWith(fileName, u"moz-extension://"_ns)) {
+    if (!collectAdditionalExtensionData) {
+      return FilenameTypeAndDetails(kExtensionURI, Nothing());
+    }
 
-  // Suspected userChromeJS script
-  rv = RegexEval(kUCJSRegex, fileName, /* aOnlyMatch = */ true, regexMatch);
-  if (NS_FAILED(rv)) {
-    return FilenameTypeAndDetails(kRegexFailure, Nothing());
-  }
-  if (regexMatch) {
-    return FilenameTypeAndDetails(kSuspectedUserChromeJS, Nothing());
+    nsAutoString sanitizedPathAndScheme;
+    sanitizedPathAndScheme.Append(u"moz-extension://["_ns);
+
+    nsCOMPtr<nsIURI> uri;
+    nsresult rv = NS_NewURI(getter_AddRefs(uri), fileName);
+    if (NS_FAILED(rv)) {
+      // Return after adding ://[ so we know we failed here.
+      return FilenameTypeAndDetails(kExtensionURI,
+                                    Some(sanitizedPathAndScheme));
+    }
+
+    mozilla::extensions::URLInfo url(uri);
+    if (NS_IsMainThread()) {
+      // EPS is only usable on main thread
+      auto* policy =
+          ExtensionPolicyService::GetSingleton().GetByHost(url.Host());
+      if (policy) {
+        nsString addOnId;
+        policy->GetId(addOnId);
+
+        sanitizedPathAndScheme.Append(addOnId);
+        sanitizedPathAndScheme.Append(u": "_ns);
+        sanitizedPathAndScheme.Append(policy->Name());
+        sanitizedPathAndScheme.Append(u"]"_ns);
+
+        if (policy->IsPrivileged()) {
+          sanitizedPathAndScheme.Append(u"P=1"_ns);
+        } else {
+          sanitizedPathAndScheme.Append(u"P=0"_ns);
+        }
+      } else {
+        sanitizedPathAndScheme.Append(u"failed finding addon by host]"_ns);
+      }
+    } else {
+      sanitizedPathAndScheme.Append(u"can't get addon off main thread]"_ns);
+    }
+
+    sanitizedPathAndScheme.Append(url.FilePath());
+    return FilenameTypeAndDetails(kExtensionURI, Some(sanitizedPathAndScheme));
   }
 
 #if defined(XP_WIN)
@@ -403,56 +473,9 @@ FilenameTypeAndDetails nsContentSecurityUtils::FilenameToFilenameType(
     if (hr == S_OK && cchDecodedUrl) {
       nsAutoString sanitizedPathAndScheme;
       sanitizedPathAndScheme.Append(szOut);
-      if (sanitizedPathAndScheme == u"about"_ns) {
-        int32_t desired_length = fileName.Length();
-        int32_t possible_new_length = 0;
-
-        possible_new_length = fileName.FindChar('?');
-        if (possible_new_length != -1 && possible_new_length < desired_length) {
-          desired_length = possible_new_length;
-        }
-
-        possible_new_length = fileName.FindChar('#');
-        if (possible_new_length != -1 && possible_new_length < desired_length) {
-          desired_length = possible_new_length;
-        }
-
-        sanitizedPathAndScheme = Substring(fileName, 0, desired_length);
-      } else if (sanitizedPathAndScheme == u"file"_ns) {
+      if (sanitizedPathAndScheme == u"file"_ns) {
         sanitizedPathAndScheme.Append(u"://.../"_ns);
         sanitizedPathAndScheme.Append(strSanitizedPath);
-      } else if (sanitizedPathAndScheme == u"moz-extension"_ns &&
-                 collectAdditionalExtensionData) {
-        sanitizedPathAndScheme.Append(u"://["_ns);
-
-        nsCOMPtr<nsIURI> uri;
-        nsresult rv = NS_NewURI(getter_AddRefs(uri), fileName);
-        if (NS_FAILED(rv)) {
-          // Return after adding ://[ so we know we failed here.
-          return FilenameTypeAndDetails(kSanitizedWindowsURL,
-                                        Some(sanitizedPathAndScheme));
-        }
-
-        mozilla::extensions::URLInfo url(uri);
-        if (NS_IsMainThread()) {
-          // EPS is only usable on main thread
-          auto* policy =
-              ExtensionPolicyService::GetSingleton().GetByHost(url.Host());
-          if (policy) {
-            nsString addOnId;
-            policy->GetId(addOnId);
-
-            sanitizedPathAndScheme.Append(addOnId);
-            sanitizedPathAndScheme.Append(u": "_ns);
-            sanitizedPathAndScheme.Append(policy->Name());
-          } else {
-            sanitizedPathAndScheme.Append(u"failed finding addon by host"_ns);
-          }
-        } else {
-          sanitizedPathAndScheme.Append(u"can't get addon off main thread"_ns);
-        }
-        sanitizedPathAndScheme.Append(u"]"_ns);
-        sanitizedPathAndScheme.Append(url.FilePath());
       }
       return FilenameTypeAndDetails(kSanitizedWindowsURL,
                                     Some(sanitizedPathAndScheme));
@@ -463,6 +486,9 @@ FilenameTypeAndDetails nsContentSecurityUtils::FilenameToFilenameType(
   }
 #endif
 
+  if (!NS_IsMainThread()) {
+    return FilenameTypeAndDetails(kOtherWorker, Nothing());
+  }
   return FilenameTypeAndDetails(kOther, Nothing());
 }
 
@@ -570,7 +596,7 @@ bool nsContentSecurityUtils::IsEvalAllowed(JSContext* cx,
       // Test-only third-party library
       "resource://testing-common/sinon-7.2.7.js"_ns,
       // Test-only third-party library
-      "resource://testing-common/ajv-4.1.1.js"_ns,
+      "resource://testing-common/ajv-6.12.6.js"_ns,
       // Test-only utility
       "resource://testing-common/content-task.js"_ns,
 
@@ -786,29 +812,57 @@ void nsContentSecurityUtils::DetectJsHacks() {
     return;
   }
   // No need to check again.
-  if (MOZ_LIKELY(sJSHacksChecked)) {
+  if (MOZ_LIKELY(sJSHacksChecked || sJSHacksPresent)) {
     return;
   }
+  // This preference is required by bootstrapLoader.xpi, which is an
+  // alternate way to load legacy-style extensions. It only works on
+  // DevEdition/Nightly.
+  bool xpinstallSignatures =
+      Preferences::GetBool("xpinstall.signatures.required", false);
+  if (!xpinstallSignatures) {
+    sJSHacksPresent = true;
+    sJSHacksChecked = true;
+    return;
+  }
+
   // This preference is a file used for autoconfiguration of Firefox
   // by administrators. It has also been (ab)used by the userChromeJS
   // project to run legacy-style 'extensions', some of which use eval,
   // all of which run in the System Principal context.
   nsAutoString jsConfigPref;
-  Preferences::GetString("general.config.filename", jsConfigPref);
+  nsresult rv = Preferences::GetString("general.config.filename", jsConfigPref);
+  if (NS_FAILED(rv)) {
+    return;
+  }
   if (!jsConfigPref.IsEmpty()) {
     sJSHacksPresent = true;
   }
 
-  // This preference is required by bootstrapLoader.xpi, which is an
-  // alternate way to load legacy-style extensions. It only works on
-  // DevEdition/Nightly.
-  bool xpinstallSignatures;
-  Preferences::GetBool("xpinstall.signatures.required", &xpinstallSignatures);
-  if (!xpinstallSignatures) {
-    sJSHacksPresent = true;
+  sJSHacksChecked = true;
+}
+
+/* static */
+void nsContentSecurityUtils::DetectCssHacks() {
+  // We can only perform the check of this preference on the Main Thread
+  // It's possible that this function may therefore race and we expect the
+  // caller to ensure that the checks have actually happened.
+  if (!NS_IsMainThread()) {
+    return;
+  }
+  // No need to check again.
+  if (MOZ_LIKELY(sCSSHacksChecked || sCSSHacksPresent)) {
+    return;
   }
 
-  sJSHacksChecked = true;
+  // This preference is a bool to see if userChrome css is loaded
+  bool customStylesPresent = Preferences::GetBool(
+      "toolkit.legacyUserProfileCustomizations.stylesheets", false);
+  if (customStylesPresent) {
+    sCSSHacksPresent = true;
+  }
+
+  sCSSHacksChecked = true;
 }
 
 /* static */
@@ -1162,6 +1216,15 @@ bool nsContentSecurityUtils::ValidateScriptFilename(const char* aFilename,
 
   DetectJsHacks();
 
+  if (MOZ_UNLIKELY(!sJSHacksChecked)) {
+    MOZ_LOG(
+        sCSMLog, LogLevel::Debug,
+        ("Allowing a javascript load of %s because "
+         "we have not yet been able to determine if JS hacks may be present",
+         aFilename));
+    return true;
+  }
+
   if (MOZ_UNLIKELY(sJSHacksPresent)) {
     MOZ_LOG(sCSMLog, LogLevel::Debug,
             ("Allowing a javascript load of %s because "
@@ -1201,23 +1264,59 @@ bool nsContentSecurityUtils::ValidateScriptFilename(const char* aFilename,
     return true;
   }
 
-  bool bergamont_disabled =
-      Preferences::GetBool("extensions.translations.disabled", true);
-  if (!bergamont_disabled &&
-      StringBeginsWith(filenameU, u"moz-extension://"_ns)) {
-    // Allow all moz-extensions through if bergamont is enabled; because there
-    // seem to be multiple bergamont extensions with different names.
-    return true;
+  auto kAllowedExtensionScriptFilenames = {
+      u"/experiment-apis/translateUi/TranslationBrowserChromeUi.js"_ns,
+      u"/experiment-apis/translateUi/TranslationBrowserChromeUiManager.js"_ns,
+      u"/experiment-apis/translateUi/content/translation-notification.js"_ns};
+
+  if (StringBeginsWith(filenameU, u"moz-extension://"_ns)) {
+    nsCOMPtr<nsIURI> uri;
+    nsresult rv = NS_NewURI(getter_AddRefs(uri), aFilename);
+    if (!NS_FAILED(rv) && NS_IsMainThread()) {
+      mozilla::extensions::URLInfo url(uri);
+      auto* policy =
+          ExtensionPolicyService::GetSingleton().GetByHost(url.Host());
+
+      if (policy && policy->IsPrivileged()) {
+        bool matchedAnAllowlist = false;
+        for (auto allowedFilename : kAllowedExtensionScriptFilenames) {
+          if (StringBeginsWith(url.FilePath(), allowedFilename)) {
+            matchedAnAllowlist = true;
+          }
+        }
+
+        if (matchedAnAllowlist) {
+          MOZ_LOG(sCSMLog, LogLevel::Debug,
+                  ("Allowing a javascript load of %s because the web extension "
+                   "it is "
+                   "associated with is privileged.",
+                   aFilename));
+          return true;
+        }
+      }
+    }
   }
 
-  auto kAllowedFilenames = {
+  auto kAllowedFilenamesExact = {
       // Allow through the injection provided by about:sync addon
       u"data:,new function() {\n  Components.utils.import(\"chrome://aboutsync/content/AboutSyncRedirector.js\");\n  AboutSyncRedirector.register();\n}"_ns,
+  };
+
+  for (auto allowedFilename : kAllowedFilenamesExact) {
+    if (filenameU == allowedFilename) {
+      return true;
+    }
+  }
+
+  auto kAllowedFilenamesPrefix = {
       // Until 371900 is fixed, we need to do something about about:downloads
       // and this is the most reasonable. See 1727770
-      u"about:downloads"_ns};
-  for (auto allowedFilename : kAllowedFilenames) {
-    if (filenameU == allowedFilename) {
+      u"about:downloads"_ns,
+      // We think this is the same problem as about:downloads
+      u"about:preferences"_ns};
+
+  for (auto allowedFilenamePrefix : kAllowedFilenamesPrefix) {
+    if (StringBeginsWith(filenameU, allowedFilenamePrefix)) {
       return true;
     }
   }

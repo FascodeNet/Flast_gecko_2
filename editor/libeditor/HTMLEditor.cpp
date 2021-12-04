@@ -52,6 +52,7 @@
 #include "nsGkAtoms.h"
 #include "nsHTMLDocument.h"
 #include "nsIContent.h"
+#include "nsIContentInlines.h"
 #include "nsIEditActionListener.h"
 #include "nsIFrame.h"
 #include "nsIPrincipal.h"
@@ -607,14 +608,12 @@ Element* HTMLEditor::FindSelectionRoot(nsINode* aNode) const {
   MOZ_ASSERT(aNode->IsDocument() || aNode->IsContent(),
              "aNode must be content or document node");
 
-  Document* document = aNode->GetComposedDoc();
-  if (NS_WARN_IF(!document)) {
+  if (MOZ_UNLIKELY(NS_WARN_IF(!aNode->IsInComposedDoc()))) {
     return nullptr;
   }
 
-  if (aNode->IsInUncomposedDoc() &&
-      (document->HasFlag(NODE_IS_EDITABLE) || !aNode->IsContent())) {
-    return document->GetRootElement();
+  if (aNode->IsInDesignMode()) {
+    return GetDocument()->GetRootElement();
   }
 
   // XXX If we have readonly flag, shouldn't return the element which has
@@ -639,6 +638,18 @@ Element* HTMLEditor::FindSelectionRoot(nsINode* aNode) const {
   // For non-readonly editors we want to find the root of the editable subtree
   // containing aContent.
   return content->GetEditingHost();
+}
+
+bool HTMLEditor::IsInDesignMode() const {
+  // TODO: If active editing host is in a shadow tree, it means that we should
+  //       behave exactly same as contenteditable mode because shadow tree
+  //       content is not editable even if composed document is in design mode,
+  //       but contenteditable elements in shoadow trees are focusable and
+  //       their content is editable.  Changing this affects to drop event
+  //       handler and blur event handler, so please add new tests for them
+  //       when you change here.
+  Document* document = GetDocument();
+  return document && document->IsInDesignMode();
 }
 
 void HTMLEditor::CreateEventListeners() {
@@ -815,7 +826,8 @@ nsresult HTMLEditor::MaybeCollapseSelectionAtFirstEditableNode(
       WSScanResult scanResultInTextNode =
           WSRunScanner::ScanNextVisibleNodeOrBlockBoundary(
               editingHost, EditorRawDOMPoint(text, 0));
-      if (scanResultInTextNode.InVisibleOrCollapsibleCharacters() &&
+      if ((scanResultInTextNode.InVisibleOrCollapsibleCharacters() ||
+           scanResultInTextNode.ReachedPreformattedLineBreak()) &&
           scanResultInTextNode.TextPtr() == text) {
         nsresult rv = CollapseSelectionTo(scanResultInTextNode.Point());
         NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
@@ -1168,14 +1180,9 @@ nsresult HTMLEditor::InsertLineBreakAsAction(nsIPrincipal* aPrincipal) {
     return NS_SUCCESS_DOM_NO_OPERATION;
   }
 
-  // XXX This method may be called by "insertLineBreak" command.  So, using
-  //     TypingTxnName here is odd in such case.
-  AutoPlaceholderBatch treatAsOneTransaction(*this, *nsGkAtoms::TypingTxnName,
-                                             ScrollSelectionIntoView::Yes);
-  rv = InsertBRElementAtSelectionWithTransaction();
-  NS_WARNING_ASSERTION(
-      NS_SUCCEEDED(rv),
-      "HTMLEditor::InsertBRElementAtSelectionWithTransaction() failed");
+  rv = InsertLineBreakAsSubAction();
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "HTMLEditor::InsertLineBreakAsSubAction() failed");
   // Don't return NS_SUCCESS_DOM_NO_OPERATION for compatibility of `execCommand`
   // result of Chrome.
   return NS_FAILED(rv) ? rv : NS_OK;
@@ -1315,50 +1322,6 @@ EditActionResult HTMLEditor::HandleTabKeyPressInTable(
   }
   return EditActionHandled(NS_WARN_IF(Destroyed()) ? NS_ERROR_EDITOR_DESTROYED
                                                    : NS_OK);
-}
-
-nsresult HTMLEditor::InsertBRElementAtSelectionWithTransaction() {
-  MOZ_ASSERT(IsEditActionDataAvailable());
-  MOZ_ASSERT(!IsSelectionRangeContainerNotContent());
-
-  // calling it text insertion to trigger moz br treatment by rules
-  // XXX Why do we use EditSubAction::eInsertText here?  Looks like
-  //     EditSubAction::eInsertLineBreak or EditSubAction::eInsertNode
-  //     is better.
-  IgnoredErrorResult ignoredError;
-  AutoEditSubActionNotifier startToHandleEditSubAction(
-      *this, EditSubAction::eInsertText, nsIEditor::eNext, ignoredError);
-  if (NS_WARN_IF(ignoredError.ErrorCodeIs(NS_ERROR_EDITOR_DESTROYED))) {
-    return ignoredError.StealNSResult();
-  }
-  NS_WARNING_ASSERTION(
-      !ignoredError.Failed(),
-      "HTMLEditor::OnStartToHandleTopLevelEditSubAction() failed, but ignored");
-
-  if (!SelectionRef().IsCollapsed()) {
-    nsresult rv = DeleteSelectionAsSubAction(eNone, eStrip);
-    if (NS_FAILED(rv)) {
-      NS_WARNING(
-          "EditorBase::DeleteSelectionAsSubAction(eNone, eStrip) failed");
-      return rv;
-    }
-  }
-
-  EditorDOMPoint atStartOfSelection(EditorBase::GetStartPoint(SelectionRef()));
-  if (NS_WARN_IF(!atStartOfSelection.IsSet())) {
-    return NS_ERROR_FAILURE;
-  }
-
-  // InsertBRElementWithTransaction() will set selection after the new <br>
-  // element.
-  Result<RefPtr<Element>, nsresult> resultOfInsertingBRElement =
-      InsertBRElementWithTransaction(atStartOfSelection, eNext);
-  if (resultOfInsertingBRElement.isErr()) {
-    NS_WARNING("HTMLEditor::InsertBRElementWithTransaction() failed");
-    return resultOfInsertingBRElement.unwrapErr();
-  }
-  MOZ_ASSERT(resultOfInsertingBRElement.inspect());
-  return NS_OK;
 }
 
 void HTMLEditor::CollapseSelectionToDeepestNonTableFirstChild(nsINode* aNode) {
@@ -4310,6 +4273,7 @@ SplitNodeResult HTMLEditor::SplitNodeDeepWithTransaction(
   nsCOMPtr<nsIContent> newLeftNodeOfMostAncestor;
   EditorDOMPoint atStartOfRightNode(aStartOfDeepestRightNode);
   SplitNodeResult lastSplitNodeResult(atStartOfRightNode);
+
   while (true) {
     // Need to insert rules code call here to do things like not split a list
     // if you are after the last <li> or before the first, etc.  For now we
@@ -4386,7 +4350,7 @@ SplitNodeResult HTMLEditor::SplitNodeDeepWithTransaction(
     }
   }
 
-  return SplitNodeResult(NS_ERROR_FAILURE);
+  // Not reached because while (true) loop never breaks.
 }
 
 void HTMLEditor::DoSplitNode(const EditorDOMPoint& aStartOfRightNode,
@@ -5793,7 +5757,7 @@ nsIContent* HTMLEditor::GetFocusedContent() const {
   if (NS_WARN_IF(!document)) {
     return nullptr;
   }
-  bool inDesignMode = document->HasFlag(NODE_IS_EDITABLE);
+  const bool inDesignMode = IsInDesignMode();
   if (!focusedContent) {
     // in designMode, nobody gets focus in most cases.
     if (inDesignMode && OurWindowHasFocus()) {
@@ -5821,19 +5785,6 @@ nsIContent* HTMLEditor::GetFocusedContent() const {
   return OurWindowHasFocus() ? focusedContent : nullptr;
 }
 
-nsIContent* HTMLEditor::GetFocusedContentForIME() const {
-  nsIContent* focusedContent = GetFocusedContent();
-  if (!focusedContent) {
-    return nullptr;
-  }
-
-  Document* document = GetDocument();
-  if (NS_WARN_IF(!document)) {
-    return nullptr;
-  }
-  return document->HasFlag(NODE_IS_EDITABLE) ? nullptr : focusedContent;
-}
-
 bool HTMLEditor::IsActiveInDOMWindow() const {
   nsFocusManager* focusManager = nsFocusManager::GetFocusManager();
   if (NS_WARN_IF(!focusManager)) {
@@ -5844,7 +5795,7 @@ bool HTMLEditor::IsActiveInDOMWindow() const {
   if (NS_WARN_IF(!document)) {
     return false;
   }
-  bool inDesignMode = document->HasFlag(NODE_IS_EDITABLE);
+  const bool inDesignMode = IsInDesignMode();
 
   // If we're in designMode, we're always active in the DOM window.
   if (inDesignMode) {
@@ -5877,7 +5828,7 @@ Element* HTMLEditor::GetActiveEditingHost(
   if (NS_WARN_IF(!document)) {
     return nullptr;
   }
-  if (document->HasFlag(NODE_IS_EDITABLE)) {
+  if (IsInDesignMode()) {
     return document->GetBodyElement();
   }
 
@@ -5893,12 +5844,14 @@ Element* HTMLEditor::GetActiveEditingHost(
   }
   nsIContent* content = focusNode->AsContent();
 
-  // If the active content isn't editable, or it has independent selection,
-  // we're not active.
-  if (!content->HasFlag(NODE_IS_EDITABLE) ||
-      content->HasIndependentSelection()) {
+  // If the active content isn't editable, we're not active.
+  if (!content->HasFlag(NODE_IS_EDITABLE)) {
     return nullptr;
   }
+  // Note that `Selection` shouldn't be in the native anonymous subtree of
+  // <input>/<textarea>, but can be in them (e.g., collapsed at {<input> - 0}).
+  // Even in such case, we need to look for an ancestor which does not have
+  // editable parent.
   Element* candidateEditingHost = content->GetEditingHost();
   if (!candidateEditingHost) {
     return nullptr;
@@ -5913,9 +5866,10 @@ Element* HTMLEditor::GetActiveEditingHost(
 }
 
 void HTMLEditor::NotifyEditingHostMaybeChanged() {
-  Document* document = GetDocument();
-  if (NS_WARN_IF(!document) ||
-      NS_WARN_IF(document->HasFlag(NODE_IS_EDITABLE))) {
+  // Note that even if the document is in design mode, a contenteditable element
+  // in a shadow tree is focusable.   Therefore, we may need to update editing
+  // host even when the document is in design mode.
+  if (MOZ_UNLIKELY(NS_WARN_IF(!GetDocument()))) {
     return;
   }
 
@@ -5941,7 +5895,11 @@ void HTMLEditor::NotifyEditingHostMaybeChanged() {
 
   // Update selection ancestor limit if current editing host includes the
   // previous editing host.
-  if (ancestorLimiter->IsInclusiveDescendantOf(editingHost)) {
+  // Additionally, the editing host may be an element in shadow DOM and the
+  // shadow host is in designMode.  In this case, we need to set the editing
+  // host as the new selection limiter.
+  if (ancestorLimiter->IsInclusiveDescendantOf(editingHost) ||
+      (ancestorLimiter->IsInDesignMode() != editingHost->IsInDesignMode())) {
     // Note that don't call HTMLEditor::InitializeSelectionAncestorLimit()
     // here because it may collapse selection to the first editable node.
     EditorBase::InitializeSelectionAncestorLimit(*editingHost);
@@ -6095,7 +6053,7 @@ bool HTMLEditor::IsAcceptableInputEvent(WidgetGUIEvent* aGUIEvent) const {
     return false;
   }
 
-  if (document->HasFlag(NODE_IS_EDITABLE)) {
+  if (IsInDesignMode()) {
     // If this editor is in designMode and the event target is the document,
     // the event is for this editor.
     if (eventTargetNode->IsDocument()) {
@@ -6105,7 +6063,15 @@ bool HTMLEditor::IsAcceptableInputEvent(WidgetGUIEvent* aGUIEvent) const {
     if (NS_WARN_IF(!eventTargetNode->IsContent())) {
       return false;
     }
-    return document == eventTargetNode->GetUncomposedDoc();
+    if (document == eventTargetNode->GetUncomposedDoc()) {
+      return true;
+    }
+    // If the event target is in a shadow tree, the content is not editable
+    // by default, but if the focused content is an editing host, we need to
+    // handle it as contenteditable mode.
+    if (!eventTargetNode->IsInShadowTree()) {
+      return false;
+    }
   }
 
   // This HTML editor is for contenteditable.  We need to check the validity

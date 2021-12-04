@@ -476,6 +476,9 @@ bool SVGImageFrame::CreateWebRenderCommands(
   }
 
   uint32_t flags = aDisplayListBuilder->GetImageDecodeFlags();
+  if (mForceSyncDecoding) {
+    flags |= imgIContainer::FLAG_SYNC_DECODE;
+  }
 
   // Compute bounds of the image
   nscoord appUnitsPerDevPx = PresContext()->AppUnitsPerDevPixel();
@@ -627,7 +630,6 @@ bool SVGImageFrame::CreateWebRenderCommands(
   // has a fully decoded surface, then we should prefer the previous image.
   switch (drawResult) {
     case ImgDrawResult::NOT_READY:
-    case ImgDrawResult::INCOMPLETE:
     case ImgDrawResult::TEMPORARY_ERROR:
       // nothing to draw (yet)
       return true;
@@ -783,7 +785,7 @@ void SVGImageFrame::ReflowCallbackCanceled() { mReflowCallbackPosted = false; }
 uint16_t SVGImageFrame::GetHitTestFlags() {
   uint16_t flags = 0;
 
-  switch (StyleUI()->mPointerEvents) {
+  switch (Style()->PointerEvents()) {
     case StylePointerEvents::None:
       break;
     case StylePointerEvents::Visiblepainted:

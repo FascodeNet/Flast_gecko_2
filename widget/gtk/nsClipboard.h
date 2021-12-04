@@ -18,9 +18,10 @@
 #  include "nsTArray.h"
 #  include "Units.h"
 extern mozilla::LazyLogModule gClipboardLog;
-#  define LOGCLIP(args) MOZ_LOG(gClipboardLog, mozilla::LogLevel::Debug, args)
+#  define LOGCLIP(...) \
+    MOZ_LOG(gClipboardLog, mozilla::LogLevel::Debug, (__VA_ARGS__))
 #else
-#  define LOGCLIP(args)
+#  define LOGCLIP(...)
 #endif /* MOZ_LOGGING */
 
 enum ClipboardDataType { CLIPBOARD_DATA, CLIPBOARD_TEXT, CLIPBOARD_TARGETS };
@@ -79,6 +80,9 @@ class nsClipboard : public nsIClipboard, public nsIObserver {
                            uint32_t aClipboardDataLength);
 
   void ClearTransferable(int32_t aWhichClipboard);
+
+  bool FilterImportedFlavors(int32_t aWhichClipboard,
+                             nsTArray<nsCString>& aFlavors);
 
   // Hang on to our owners and transferables so we can transfer data
   // when asked.

@@ -7,6 +7,7 @@
 #include "FuzzySecurityInfo.h"
 #include "mozilla/Logging.h"
 #include "mozilla/OriginAttributes.h"
+#include "nsITlsHandshakeListener.h"
 #include "nsThreadManager.h"
 
 namespace mozilla {
@@ -366,6 +367,14 @@ NS_IMETHODIMP FuzzySecurityInfo::GetIsBuiltCertChainRootBuiltInRoot(
 }
 
 NS_IMETHODIMP FuzzySecurityInfo::DisableEarlyData(void) {
+  return NS_OK;
+}
+
+NS_IMETHODIMP FuzzySecurityInfo::SetHandshakeCallbackListener(
+    nsITlsHandshakeCallbackListener* callback) {
+  if (callback) {
+    callback->HandshakeDone();
+  }
   return NS_OK;
 }
 

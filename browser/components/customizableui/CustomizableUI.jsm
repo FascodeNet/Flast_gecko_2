@@ -31,20 +31,6 @@ XPCOMUtils.defineLazyGetter(this, "gWidgetsBundle", function() {
   return Services.strings.createBundle(kUrl);
 });
 
-XPCOMUtils.defineLazyServiceGetter(
-  this,
-  "gELS",
-  "@mozilla.org/eventlistenerservice;1",
-  "nsIEventListenerService"
-);
-
-XPCOMUtils.defineLazyPreferenceGetter(
-  this,
-  "gBookmarksToolbar2h2020",
-  "browser.toolbars.bookmarks.2h2020",
-  false
-);
-
 const kDefaultThemeID = "default-theme@mozilla.org";
 
 const kSpecialWidgetPfx = "customizableui-special-";
@@ -52,7 +38,7 @@ const kSpecialWidgetPfx = "customizableui-special-";
 const kPrefCustomizationState = "browser.uiCustomization.state";
 const kPrefCustomizationAutoAdd = "browser.uiCustomization.autoAdd";
 const kPrefCustomizationDebug = "browser.uiCustomization.debug";
-const kPrefDrawInTitlebar = "browser.tabs.drawInTitlebar";
+const kPrefDrawInTitlebar = "browser.tabs.inTitlebar";
 const kPrefUIDensity = "browser.uidensity";
 const kPrefAutoTouchMode = "browser.touchmode.auto";
 const kPrefAutoHideDownloadsButton = "browser.download.autohideButton";
@@ -301,7 +287,7 @@ var CustomizableUIInternal = {
       {
         type: CustomizableUI.TYPE_TOOLBAR,
         defaultPlacements: ["personal-bookmarks"],
-        defaultCollapsed: gBookmarksToolbar2h2020 ? "newtab" : true,
+        defaultCollapsed: "newtab",
       },
       true
     );
@@ -1188,8 +1174,8 @@ var CustomizableUIInternal = {
   },
 
   addPanelCloseListeners(aPanel) {
-    gELS.addSystemEventListener(aPanel, "click", this, false);
-    gELS.addSystemEventListener(aPanel, "keypress", this, false);
+    Services.els.addSystemEventListener(aPanel, "click", this, false);
+    Services.els.addSystemEventListener(aPanel, "keypress", this, false);
     let win = aPanel.ownerGlobal;
     if (!gPanelsForWindow.has(win)) {
       gPanelsForWindow.set(win, new Set());
@@ -1198,8 +1184,8 @@ var CustomizableUIInternal = {
   },
 
   removePanelCloseListeners(aPanel) {
-    gELS.removeSystemEventListener(aPanel, "click", this, false);
-    gELS.removeSystemEventListener(aPanel, "keypress", this, false);
+    Services.els.removeSystemEventListener(aPanel, "click", this, false);
+    Services.els.removeSystemEventListener(aPanel, "keypress", this, false);
     let win = aPanel.ownerGlobal;
     let panels = gPanelsForWindow.get(win);
     if (panels) {
@@ -1846,6 +1832,12 @@ var CustomizableUIInternal = {
       if (aWidget.locationSpecific) {
         node.setAttribute("locationspecific", aWidget.locationSpecific);
       }
+      if (aWidget.keepBroadcastAttributesWhenCustomizing) {
+        node.setAttribute(
+          "keepbroadcastattributeswhencustomizing",
+          aWidget.keepBroadcastAttributesWhenCustomizing
+        );
+      }
 
       let shortcut;
       if (aWidget.shortcutId) {
@@ -1865,12 +1857,27 @@ var CustomizableUIInternal = {
 
       if (aWidget.l10nId) {
         node.setAttribute("data-l10n-id", aWidget.l10nId);
+        if (button != node) {
+          // This is probably a "button-and-view" widget, such as the Profiler
+          // button. In that case, "node" is the "toolbaritem" container, and
+          // "button" the main button (see above).
+          // In this case, the values on the "node" is used in the Customize
+          // view, as well as the tooltips over both buttons; the values on the
+          // "button" are used in the overflow menu.
+          button.setAttribute("data-l10n-id", aWidget.l10nId);
+        }
+
         if (shortcut) {
           node.setAttribute("data-l10n-args", JSON.stringify({ shortcut }));
+          if (button != node) {
+            // This is probably a "button-and-view" widget.
+            button.setAttribute("data-l10n-args", JSON.stringify({ shortcut }));
+          }
         }
       } else {
         node.setAttribute("label", this.getLocalizedProperty(aWidget, "label"));
         if (button != node) {
+          // This is probably a "button-and-view" widget.
           button.setAttribute("label", node.getAttribute("label"));
         }
 
@@ -1882,6 +1889,7 @@ var CustomizableUIInternal = {
         if (tooltip) {
           node.setAttribute("tooltiptext", tooltip);
           if (button != node) {
+            // This is probably a "button-and-view" widget.
             button.setAttribute("tooltiptext", tooltip);
           }
         }
@@ -2902,6 +2910,7 @@ var CustomizableUIInternal = {
       l10nId: null,
       showInPrivateBrowsing: true,
       _introducedInVersion: -1,
+      keepBroadcastAttributesWhenCustomizing: false,
     };
 
     if (typeof aData.id != "string" || !/^[a-z0-9-_]{1,}$/i.test(aData.id)) {
@@ -2943,6 +2952,7 @@ var CustomizableUIInternal = {
       "tabSpecific",
       "locationSpecific",
       "localized",
+      "keepBroadcastAttributesWhenCustomizing",
     ];
     for (let prop of kOptBoolProps) {
       if (typeof aData[prop] == "boolean") {
@@ -3157,12 +3167,8 @@ var CustomizableUIInternal = {
 
   _resetUIState() {
     try {
-      // kPrefDrawInTitlebar may not be defined on Linux/Gtk+ which throws an exception
-      // and leads to whole test failure. Let's set a fallback default value to avoid that,
-      // both titlebar states are tested anyway and it's not important which state is tested first.
-      gUIStateBeforeReset.drawInTitlebar = Services.prefs.getBoolPref(
-        kPrefDrawInTitlebar,
-        false
+      gUIStateBeforeReset.drawInTitlebar = Services.prefs.getIntPref(
+        kPrefDrawInTitlebar
       );
       gUIStateBeforeReset.uiCustomizationState = Services.prefs.getCharPref(
         kPrefCustomizationState
@@ -3252,7 +3258,7 @@ var CustomizableUIInternal = {
     this._clearPreviousUIState();
 
     Services.prefs.setCharPref(kPrefCustomizationState, uiCustomizationState);
-    Services.prefs.setBoolPref(kPrefDrawInTitlebar, drawInTitlebar);
+    Services.prefs.setIntPref(kPrefDrawInTitlebar, drawInTitlebar);
     Services.prefs.setIntPref(kPrefUIDensity, uiDensity);
     Services.prefs.setBoolPref(kPrefAutoTouchMode, autoTouchMode);
     Services.prefs.setBoolPref(
@@ -3450,10 +3456,7 @@ var CustomizableUIInternal = {
           let collapsed = null;
           let defaultCollapsed = props.get("defaultCollapsed");
           let nondefaultState = false;
-          if (
-            areaId == CustomizableUI.AREA_BOOKMARKS &&
-            gBookmarksToolbar2h2020
-          ) {
+          if (areaId == CustomizableUI.AREA_BOOKMARKS) {
             collapsed = Services.prefs.getCharPref(
               "browser.toolbars.bookmarks.visibility"
             );
@@ -5090,7 +5093,7 @@ OverflowableToolbar.prototype = {
       let mainViewId = multiview.getAttribute("mainViewId");
       let mainView = doc.getElementById(mainViewId);
       let contextMenu = doc.getElementById(mainView.getAttribute("context"));
-      gELS.addSystemEventListener(contextMenu, "command", this, true);
+      Services.els.addSystemEventListener(contextMenu, "command", this, true);
       let anchor = this._chevron.icon;
 
       let popupshown = false;
@@ -5170,7 +5173,12 @@ OverflowableToolbar.prototype = {
     let contextMenuId = this._panel.getAttribute("context");
     if (contextMenuId) {
       let contextMenu = doc.getElementById(contextMenuId);
-      gELS.removeSystemEventListener(contextMenu, "command", this, true);
+      Services.els.removeSystemEventListener(
+        contextMenu,
+        "command",
+        this,
+        true
+      );
     }
   },
 

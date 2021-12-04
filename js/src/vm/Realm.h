@@ -265,7 +265,7 @@ class ObjectRealm {
 
   void finishRoots();
   void trace(JSTracer* trc);
-  void sweepAfterMinorGC();
+  void sweepAfterMinorGC(JSTracer* trc);
   void traceWeakNativeIterators(JSTracer* trc);
 
   void addSizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf,
@@ -337,12 +337,6 @@ class JS::Realm : public JS::shadow::Realm {
   const js::AllocationMetadataBuilder* allocationMetadataBuilder_ = nullptr;
   void* realmPrivate_ = nullptr;
 
-  js::WeakHeapPtr<js::ArgumentsObject*> mappedArgumentsTemplate_{nullptr};
-  js::WeakHeapPtr<js::ArgumentsObject*> unmappedArgumentsTemplate_{nullptr};
-  js::WeakHeapPtr<js::PlainObject*> iterResultTemplate_{nullptr};
-  js::WeakHeapPtr<js::PlainObject*> iterResultWithoutPrototypeTemplate_{
-      nullptr};
-
   // There are two ways to enter a realm:
   //
   // (1) AutoRealm (and JSAutoRealm, JS::EnterRealm)
@@ -412,12 +406,6 @@ class JS::Realm : public JS::shadow::Realm {
   js::ArraySpeciesLookup arraySpeciesLookup;
   js::PromiseLookup promiseLookup;
 
-  /*
-   * Lazily initialized script source object to use for scripts cloned
-   * from the self-hosting global.
-   */
-  js::WeakHeapPtrScriptSourceObject selfHostingScriptSource{nullptr};
-
   // Last time at which an animation was played for this realm.
   js::MainThreadData<mozilla::TimeStamp> lastAnimationTime;
 
@@ -429,6 +417,9 @@ class JS::Realm : public JS::shadow::Realm {
    * written to a property of the global.
    */
   uint32_t globalWriteBarriered = 0;
+
+  // Counter for shouldCaptureStackForThrow.
+  uint16_t numStacksCapturedForThrow_ = 0;
 
 #ifdef DEBUG
   bool firedOnNewGlobalObject = false;
@@ -503,9 +494,6 @@ class JS::Realm : public JS::shadow::Realm {
     return global_.unbarrieredGet();
   }
 
-  /* True if a global object exists, but it's being collected. */
-  inline bool globalIsAboutToBeFinalized();
-
   /* True if a global exists and it's not being collected. */
   inline bool hasLiveGlobal() const;
 
@@ -515,10 +503,9 @@ class JS::Realm : public JS::shadow::Realm {
    * This method traces data that is live iff we know that this realm's
    * global is still live.
    */
-  void traceGlobal(JSTracer* trc);
+  void traceGlobalData(JSTracer* trc);
 
-  void traceWeakObjects(JSTracer* trc);
-  void fixupGlobal();
+  void traceWeakGlobalEdge(JSTracer* trc);
 
   /*
    * This method traces Realm-owned GC roots that are considered live
@@ -531,12 +518,10 @@ class JS::Realm : public JS::shadow::Realm {
    */
   void finishRoots();
 
-  void sweepAfterMinorGC();
-  void sweepDebugEnvironments();
+  void sweepAfterMinorGC(JSTracer* trc);
+  void traceWeakDebugEnvironmentEdges(JSTracer* trc);
   void traceWeakObjectRealm(JSTracer* trc);
   void traceWeakRegExps(JSTracer* trc);
-  void traceWeakSelfHostingScriptSource(JSTracer* trc);
-  void traceWeakTemplateObjects(JSTracer* trc);
 
   void clearScriptCounts();
   void clearScriptLCov();
@@ -617,23 +602,6 @@ class JS::Realm : public JS::shadow::Realm {
   void setPrincipals(JSPrincipals* principals) { principals_ = principals; }
 
   bool isSystem() const { return isSystem_; }
-
-  static const size_t IterResultObjectValueSlot = 0;
-  static const size_t IterResultObjectDoneSlot = 1;
-  js::PlainObject* getOrCreateIterResultTemplateObject(JSContext* cx);
-  js::PlainObject* getOrCreateIterResultWithoutPrototypeTemplateObject(
-      JSContext* cx);
-
- private:
-  enum class WithObjectPrototype { No, Yes };
-  js::PlainObject* createIterResultTemplateObject(
-      JSContext* cx, WithObjectPrototype withProto);
-
- public:
-  js::ArgumentsObject* getOrCreateArgumentsTemplateObject(JSContext* cx,
-                                                          bool mapped);
-  js::ArgumentsObject* maybeArgumentsTemplateObject(bool mapped) const;
-
   //
   // The Debugger observes execution on a frame-by-frame basis. The
   // invariants of Realm's debug mode bits, JSScript::isDebuggee,
@@ -718,6 +686,8 @@ class JS::Realm : public JS::shadow::Realm {
 
   // Get or allocate the associated LCovRealm.
   js::coverage::LCovRealm* lcovRealm();
+
+  bool shouldCaptureStackForThrow();
 
   // Initializes randomNumberGenerator if needed.
   mozilla::non_crypto::XorShift128PlusRNG& getOrCreateRandomNumberGenerator();

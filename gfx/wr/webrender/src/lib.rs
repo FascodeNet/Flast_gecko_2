@@ -57,8 +57,6 @@ macro_rules! matches {
 #[macro_use]
 extern crate bitflags;
 #[macro_use]
-extern crate cstr;
-#[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
@@ -73,6 +71,8 @@ extern crate tracy_rs;
 extern crate derive_more;
 extern crate malloc_size_of;
 extern crate svg_fmt;
+#[cfg(target_os = "macos")]
+extern crate foreign_types;
 
 #[macro_use]
 mod profiler;
@@ -131,13 +131,14 @@ mod api_resources;
 mod image_tiling;
 mod image_source;
 mod rectangle_occlusion;
+mod picture_textures;
 
 ///
 pub mod intern;
 ///
 pub mod render_api;
 
-mod shader_source {
+pub mod shader_source {
     include!(concat!(env!("OUT_DIR"), "/shaders.rs"));
 }
 

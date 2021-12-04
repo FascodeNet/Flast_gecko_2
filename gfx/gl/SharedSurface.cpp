@@ -100,7 +100,7 @@ UniquePtr<SurfaceFactory> SurfaceFactory::Create(
     case layers::TextureType::DMABUF:
 #ifdef MOZ_WAYLAND
       if (gl.GetContextType() == GLContextType::EGL &&
-          gfxPlatformGtk::GetPlatform()->UseDMABufWebGL()) {
+          widget::GetDMABufDevice()->IsDMABufWebGLEnabled()) {
         return SurfaceFactory_DMABUF::Create(gl);
       }
 #endif
@@ -129,7 +129,6 @@ UniquePtr<SurfaceFactory> SurfaceFactory::Create(
       return nullptr;
 
     case layers::TextureType::Unknown:
-    case layers::TextureType::DIB:
     case layers::TextureType::Last:
       break;
   }

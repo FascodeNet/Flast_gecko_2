@@ -343,7 +343,12 @@ var gEditItemOverlay = {
       PlacesUtils.bookmarks.addObserver(this);
       this.handlePlacesEvents = this.handlePlacesEvents.bind(this);
       PlacesUtils.observers.addListener(
-        ["bookmark-moved"],
+        [
+          "bookmark-moved",
+          "bookmark-tags-changed",
+          "bookmark-title-changed",
+          "bookmark-url-changed",
+        ],
         this.handlePlacesEvents
       );
       window.addEventListener("unload", this);
@@ -561,7 +566,12 @@ var gEditItemOverlay = {
     if (this._observersAdded) {
       PlacesUtils.bookmarks.removeObserver(this);
       PlacesUtils.observers.removeListener(
-        ["bookmark-moved"],
+        [
+          "bookmark-moved",
+          "bookmark-tags-changed",
+          "bookmark-title-changed",
+          "bookmark-url-changed",
+        ],
         this.handlePlacesEvents
       );
       window.removeEventListener("unload", this);
@@ -933,8 +943,13 @@ var gEditItemOverlay = {
   },
 
   _autoshowBookmarksToolbar() {
+    let neverShowToolbar =
+      Services.prefs.getCharPref(
+        "browser.toolbars.bookmarks.visibility",
+        "newtab"
+      ) == "never";
     let toolbar = document.getElementById("PersonalToolbar");
-    if (!toolbar.collapsed) {
+    if (!toolbar.collapsed || neverShowToolbar) {
       return;
     }
 
@@ -1149,6 +1164,35 @@ var gEditItemOverlay = {
             bm.title
           );
           break;
+        case "bookmark-tags-changed":
+          if (this._paneInfo.visibleRows.has("tagsRow")) {
+            this._onTagsChange(event.guid).catch(Cu.reportError);
+          }
+          break;
+        case "bookmark-title-changed":
+          if (this._paneInfo.isItem || this._paneInfo.isTag) {
+            // This also updates titles of folders in the folder menu list.
+            this._onItemTitleChange(event.id, event.title, event.guid);
+          }
+          break;
+        case "bookmark-url-changed":
+          if (!this._paneInfo.isItem || this._paneInfo.itemId != event.id) {
+            return;
+          }
+
+          const newURI = Services.io.newURI(event.url);
+          if (!newURI.equals(this._paneInfo.uri)) {
+            this._paneInfo.uri = newURI;
+            if (this._paneInfo.visibleRows.has("locationRow")) {
+              this._initLocationField();
+            }
+
+            if (this._paneInfo.visibleRows.has("tagsRow")) {
+              delete this._paneInfo._cachedCommonTags;
+              this._onTagsChange(event.guid, newURI).catch(Cu.reportError);
+            }
+          }
+          break;
       }
     }
   },
@@ -1262,38 +1306,11 @@ var gEditItemOverlay = {
     aParentId,
     aGuid
   ) {
-    if (aProperty == "tags" && this._paneInfo.visibleRows.has("tagsRow")) {
-      this._onTagsChange(aGuid).catch(Cu.reportError);
-      return;
-    }
-    if (
-      aProperty == "title" &&
-      (this._paneInfo.isItem || this._paneInfo.isTag)
-    ) {
-      // This also updates titles of folders in the folder menu list.
-      this._onItemTitleChange(aItemId, aValue, aGuid);
-      return;
-    }
-
     if (!this._paneInfo.isItem || this._paneInfo.itemId != aItemId) {
       return;
     }
 
     switch (aProperty) {
-      case "uri":
-        let newURI = Services.io.newURI(aValue);
-        if (!newURI.equals(this._paneInfo.uri)) {
-          this._paneInfo.uri = newURI;
-          if (this._paneInfo.visibleRows.has("locationRow")) {
-            this._initLocationField();
-          }
-
-          if (this._paneInfo.visibleRows.has("tagsRow")) {
-            delete this._paneInfo._cachedCommonTags;
-            this._onTagsChange(aGuid, newURI).catch(Cu.reportError);
-          }
-        }
-        break;
       case "keyword":
         if (this._paneInfo.visibleRows.has("keywordRow")) {
           this._initKeywordField(aValue).catch(Cu.reportError);

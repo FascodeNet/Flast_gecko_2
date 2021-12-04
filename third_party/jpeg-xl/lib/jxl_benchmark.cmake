@@ -9,6 +9,7 @@ set(JPEGXL_INTERNAL_SOURCES_GBENCH
   extras/tone_mapping_gbench.cc
   jxl/dec_external_image_gbench.cc
   jxl/enc_external_image_gbench.cc
+  jxl/gauss_blur_gbench.cc
   jxl/splines_gbench.cc
   jxl/tf_gbench.cc
 )
@@ -21,6 +22,13 @@ if(NOT MINGW)
 find_package(benchmark QUIET)
 
 if(benchmark_FOUND)
+  if(JPEGXL_STATIC AND NOT MINGW)
+    # benchmark::benchmark hardcodes the librt.so which obviously doesn't
+    # compile in static mode.
+    set_target_properties(benchmark::benchmark PROPERTIES
+      INTERFACE_LINK_LIBRARIES "Threads::Threads;-lrt")
+  endif()
+
   # Compiles all the benchmark files into a single binary. Individual benchmarks
   # can be run with --benchmark_filter.
   add_executable(jxl_gbench "${JPEGXL_INTERNAL_SOURCES_GBENCH}")

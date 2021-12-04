@@ -13,9 +13,8 @@ const { XPCOMUtils } = ChromeUtils.import(
 XPCOMUtils.defineLazyModuleGetters(this, {
   EventEmitter: "resource://gre/modules/EventEmitter.jsm",
 
+  error: "chrome://remote/content/shared/messagehandler/Errors.jsm",
   Log: "chrome://remote/content/shared/Log.jsm",
-  MessageHandlerInfo:
-    "chrome://remote/content/shared/messagehandler/MessageHandlerInfo.jsm",
   ModuleCache: "chrome://remote/content/shared/messagehandler/ModuleCache.jsm",
 });
 
@@ -40,7 +39,7 @@ XPCOMUtils.defineLazyGetter(this, "logger", () => Log.get());
  * emit all the relevant events captured by the network.
  *
  * However, even to create this ROOT MessageHandler, consumers should use the
- * MessageHandlerRegistry. This singleton will ensure that MessageHandler
+ * RootMessageHandlerRegistry. This singleton will ensure that MessageHandler
  * instances are properly registered and can be retrieved based on a given
  * session id as well as some other context information.
  */
@@ -56,25 +55,49 @@ class MessageHandler extends EventEmitter {
   constructor(sessionId, context) {
     super();
 
-    this._messageHandlerInfo = new MessageHandlerInfo(
-      sessionId,
-      this.constructor.type,
-      this.constructor.getIdFromContext(context)
-    );
-
     this._moduleCache = new ModuleCache(this);
+
+    this._sessionId = sessionId;
+    this._context = context;
+    this._contextId = this.constructor.getIdFromContext(context);
   }
 
   get contextId() {
-    return this._messageHandlerInfo.contextId;
+    return this._contextId;
   }
 
-  get key() {
-    return this._messageHandlerInfo.key;
+  get name() {
+    return [this.sessionId, this.constructor.type, this.contextId].join("-");
   }
 
   get sessionId() {
-    return this._messageHandlerInfo.sessionId;
+    return this._sessionId;
+  }
+
+  /**
+   * Check if the command can be handled from this MessageHandler node.
+   *
+   * @param {Command} command
+   *     The command to check. See type definition in MessageHandler.js
+   * @throws {Error}
+   *     Throws if there is no module supporting the provided command on the
+   *     path to the command's destination
+   */
+  checkCommand(command) {
+    const { commandName, destination, moduleName } = command;
+
+    // Retrieve all the modules classes which can be used to reach the
+    // command's destination.
+    const moduleClasses = this._moduleCache.getAllModuleClasses(
+      moduleName,
+      destination
+    );
+
+    if (!moduleClasses.some(cls => cls.supportsMethod(commandName))) {
+      throw new error.UnsupportedCommandError(
+        `${moduleName}.${commandName} not supported for destination ${destination?.type}`
+      );
+    }
   }
 
   destroy() {
@@ -100,13 +123,9 @@ class MessageHandler extends EventEmitter {
    */
   emitMessageHandlerEvent(method, params) {
     this.emit("message-handler-event", {
-      // TODO: The messageHandlerInfo needs to be wrapped in the event so
-      // that consumers can check the type/context. Once MessageHandlerRegistry
-      // becomes context-specific (Bug 1722659), only the sessionId will be
-      // required.
-      messageHandlerInfo: this._messageHandlerInfo,
       method,
       params,
+      sessionId: this.sessionId,
     });
   }
 
@@ -147,8 +166,10 @@ class MessageHandler extends EventEmitter {
       `Received command ${moduleName}.${commandName} for destination ${destination.type}`
     );
 
+    this.checkCommand(command);
+
     const module = this._moduleCache.getModuleInstance(moduleName, destination);
-    if (this._isCommandSupportedByModule(commandName, module)) {
+    if (module && module.supportsMethod(commandName)) {
       return module[commandName](params, destination);
     }
 
@@ -156,15 +177,7 @@ class MessageHandler extends EventEmitter {
   }
 
   toString() {
-    return `[object ${this.constructor.name} ${this.key}]`;
-  }
-
-  _isCommandSupportedByModule(commandName, module) {
-    // TODO: With the current implementation, all functions of a given module
-    // are considered as valid commands.
-    // This should probably be replaced by a more explicit declaration, via a
-    // manifest for instance.
-    return module && typeof module[commandName] === "function";
+    return `[object ${this.constructor.name} ${this.name}]`;
   }
 
   /**

@@ -151,12 +151,8 @@ class ImageBundle {
   Status TransformTo(const ColorEncoding& c_desired,
                      ThreadPool* pool = nullptr);
   // Copies this:rect, converts to c_desired, and allocates+fills out.
-  Status CopyTo(const Rect& rect, const ColorEncoding& c_desired, Image3B* out,
-                ThreadPool* pool = nullptr) const;
   Status CopyTo(const Rect& rect, const ColorEncoding& c_desired, Image3F* out,
                 ThreadPool* pool = nullptr) const;
-  Status CopyToSRGB(const Rect& rect, Image3B* out,
-                    ThreadPool* pool = nullptr) const;
 
   // Detect 'real' bit depth, which can be lower than nominal bit depth
   // (this is common in PNG), returns 'real' bit depth
@@ -172,14 +168,12 @@ class ImageBundle {
     const ExtraChannelInfo* eci = metadata_->Find(ExtraChannel::kAlpha);
     return (eci == nullptr) ? false : eci->alpha_associated;
   }
+  // Premultiply alpha (if it isn't already premultiplied)
+  void PremultiplyAlpha();
+  // Unpremultiply alpha (if it isn't already non-premultiplied)
+  void UnpremultiplyAlpha();
   const ImageF& alpha() const;
   ImageF* alpha();
-
-  // -- DEPTH
-  bool HasDepth() const {
-    return metadata_->Find(ExtraChannel::kDepth) != nullptr;
-  }
-  const ImageF& depth() const;
 
   // -- EXTRA CHANNELS
 
@@ -201,7 +195,13 @@ class ImageBundle {
 
   // Returns true if image does or will represent quantized DCT-8 coefficients,
   // stored in 8x8 pixel regions.
-  bool IsJPEG() const { return jpeg_data != nullptr; }
+  bool IsJPEG() const {
+#if JPEGXL_ENABLE_TRANSCODE_JPEG
+    return jpeg_data != nullptr;
+#else   // JPEGXL_ENABLE_TRANSCODE_JPEG
+    return false;
+#endif  // JPEGXL_ENABLE_TRANSCODE_JPEG
+  }
 
   std::unique_ptr<jpeg::JPEGData> jpeg_data;
   // these fields are used to signal the input JPEG color space
@@ -237,16 +237,6 @@ class ImageBundle {
   // How many bytes of the input were actually read.
   size_t decoded_bytes_ = 0;
 };
-
-// Does color transformation from in.c_current() to c_desired if the color
-// encodings are different, or nothing if they are already the same.
-// If color transformation is done, stores the transformed values into store and
-// sets the out pointer to store, else leaves store untouched and sets the out
-// pointer to &in.
-// Returns false if color transform fails.
-Status TransformIfNeeded(const ImageBundle& in, const ColorEncoding& c_desired,
-                         ThreadPool* pool, ImageBundle* store,
-                         const ImageBundle** out);
 
 }  // namespace jxl
 

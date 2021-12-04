@@ -38,6 +38,7 @@
 #include "ProfilerCodeAddressService.h"
 #include "ProfilerIOInterposeObserver.h"
 #include "ProfilerParent.h"
+#include "ProfilerRustBindings.h"
 #include "shared-libraries.h"
 #include "VTuneProfiler.h"
 
@@ -2474,6 +2475,12 @@ static void StreamMarkerSchema(SpliceableJSONWriter& aWriter) {
       markerTypeFunctions.mMarkerSchemaFunction().Stream(aWriter, name);
     }
   }
+
+  // Now stream the Rust marker schemas. Passing the names set as a void pointer
+  // as well, so we can continue checking if the schemes are added already in
+  // the Rust side.
+  profiler::ffi::gecko_profiler_stream_marker_schemas(
+      &aWriter, static_cast<void*>(&names));
 }
 
 // Some meta information that is better recorded before streaming the profile.
@@ -2801,6 +2808,8 @@ struct JavaMarkerWithDetails {
   }
   static void StreamJSONMarkerData(baseprofiler::SpliceableJSONWriter& aWriter,
                                    const ProfilerString8View& aText) {
+    // This (currently) needs to be called "name" to be searchable on the
+    // front-end.
     aWriter.StringProperty("name", aText);
   }
   static MarkerSchema MarkerTypeDisplay() {
@@ -2808,9 +2817,9 @@ struct JavaMarkerWithDetails {
     MS schema{MS::Location::TimelineOverview, MS::Location::MarkerChart,
               MS::Location::MarkerTable};
     schema.SetTooltipLabel("{marker.name}");
-    schema.SetChartLabel("{marker.data.details}");
-    schema.SetTableLabel("{marker.name} - {marker.data.details}");
-    schema.AddKeyLabelFormat("details", "Details", MS::Format::String);
+    schema.SetChartLabel("{marker.data.name}");
+    schema.SetTableLabel("{marker.name} - {marker.data.name}");
+    schema.AddKeyLabelFormat("name", "Details", MS::Format::String);
     return schema;
   }
 };
@@ -2976,11 +2985,29 @@ static void locked_profiler_stream_json_for_this_process(
     ThreadRegistry::LockedRegistry lockedRegistry;
     ActivePS::ProfiledThreadList threads =
         ActivePS::ProfiledThreads(lockedRegistry, aLock);
+
+    // Prepare the streaming context for each thread.
+    ProcessStreamingContext processStreamingContext(
+        threads.length(), CorePS::ProcessStartTime(), aSinceTime);
     for (ActivePS::ProfiledThreadListElement& thread : threads) {
-      thread.mProfiledThreadData->StreamJSON(
-          buffer, thread.mJSContext, aWriter, CorePS::ProcessName(aLock),
-          CorePS::ETLDplus1(aLock), CorePS::ProcessStartTime(), aSinceTime,
-          ActivePS::FeatureJSTracer(aLock), aService);
+      MOZ_RELEASE_ASSERT(thread.mProfiledThreadData);
+      processStreamingContext.AddThreadStreamingContext(
+          *thread.mProfiledThreadData, buffer, thread.mJSContext, aService);
+    }
+
+    // Read the buffer once, and extract all samples and markers that the
+    // context expects.
+    buffer.StreamSamplesAndMarkersToJSON(processStreamingContext);
+
+    // Stream each thread from the pre-filled context.
+    for (ThreadStreamingContext& threadStreamingContext :
+         std::move(processStreamingContext)) {
+      threadStreamingContext.FinalizeWriter();
+      threadStreamingContext.mProfiledThreadData.StreamJSON(
+          std::move(threadStreamingContext), aWriter,
+          CorePS::ProcessName(aLock), CorePS::ETLDplus1(aLock),
+          CorePS::ProcessStartTime(), ActivePS::FeatureJSTracer(aLock),
+          aService);
     }
 
 #if defined(GP_OS_android)
@@ -3319,15 +3346,35 @@ RunningTimes GetRunningTimesWithTightTimestamp(
   TimeStamp before = TimeStamp::Now();
   aGetCPURunningTimesFunction(runningTimes);
   TimeStamp after = TimeStamp::Now();
-  // In most cases, the above should be quick enough. But if not, repeat:
-  while (MOZ_UNLIKELY(after - before > scMaxRunningTimesReadDuration)) {
+  const TimeDuration duration = after - before;
+
+  // In most cases, the above should be quick enough. But if not (e.g., because
+  // of an OS context switch), repeat once:
+  if (MOZ_UNLIKELY(duration > scMaxRunningTimesReadDuration)) {
     AUTO_PROFILER_STATS(GetRunningTimes_REDO);
-    before = after;
-    aGetCPURunningTimesFunction(runningTimes);
-    after = TimeStamp::Now();
+    RunningTimes runningTimes2;
+    aGetCPURunningTimesFunction(runningTimes2);
+    TimeStamp after2 = TimeStamp::Now();
+    const TimeDuration duration2 = after2 - after;
+    if (duration2 < duration) {
+      // We did it faster, use the new results. (But it could still be slower
+      // than expected, see note below for why it's acceptable.)
+      // This must stay *after* the CPU measurements.
+      runningTimes2.SetPostMeasurementTimeStamp(after2);
+      return runningTimes2;
+    }
+    // Otherwise use the initial results, they were slow, but faster than the
+    // second attempt.
+    // This means that something bad happened twice in a row on the same thread!
+    // So trying more times would be unlikely to get much better, and would be
+    // more expensive than the precision is worth.
+    // At worst, it means that a spike of activity may be reported in the next
+    // time slice. But in the end, the cumulative work is conserved, so it
+    // should still be visible at about the correct time in the graph.
+    AUTO_PROFILER_STATS(GetRunningTimes_RedoWasWorse);
   }
-  // Finally, record the closest timestamp just after the final measurement was
-  // done. This must stay *after* the CPU measurements.
+
+  // This must stay *after* the CPU measurements.
   runningTimes.SetPostMeasurementTimeStamp(after);
 
   return runningTimes;
@@ -4438,7 +4485,7 @@ void profiler_shutdown(IsFastShutdown aIsFastShutdown) {
     // Save the profile on shutdown if requested.
     if (ActivePS::Exists(lock)) {
       const char* filename = getenv("MOZ_PROFILER_SHUTDOWN");
-      if (filename) {
+      if (filename && filename[0] != '\0') {
         locked_profiler_save_profile_to_file(lock, filename,
                                              preRecordedMetaInformation,
                                              /* aIsShuttingDown */ true);
@@ -4593,6 +4640,12 @@ void GetProfilerEnvVarsForChildProcess(
   }
 
   aSetEnv("MOZ_PROFILER_STARTUP", "1");
+
+  // If MOZ_PROFILER_SHUTDOWN is defined, make sure it's empty in children, so
+  // that they don't attempt to write over that file.
+  if (getenv("MOZ_PROFILER_SHUTDOWN")) {
+    aSetEnv("MOZ_PROFILER_SHUTDOWN", "");
+  }
 
   // Hidden option to stop Base Profiler, mostly due to Talos intermittents,
   // see https://bugzilla.mozilla.org/show_bug.cgi?id=1638851#c3
@@ -4888,7 +4941,7 @@ static void locked_profiler_start(PSLockRef aLock, PowerOfTwo32 aCapacity,
       }
 #endif
       lockedThreadData->ReinitializeOnResume();
-      if (lockedThreadData->GetJSContext()) {
+      if (ActivePS::FeatureJS(aLock) && lockedThreadData->GetJSContext()) {
         profiledThreadData->NotifyReceivedJSContext(0);
       }
     }
@@ -5614,6 +5667,8 @@ bool profiler_is_locked_on_current_thread() {
   // - The ProfilerParent or ProfilerChild mutex, used to store and process
   //   buffer chunk updates.
   return PSAutoLock::IsLockedOnCurrentThread() ||
+         ThreadRegistry::IsRegistryMutexLockedOnCurrentThread() ||
+         ThreadRegistration::IsDataMutexLockedOnCurrentThread() ||
          CorePS::CoreBuffer().IsThreadSafeAndLockedOnCurrentThread() ||
          ProfilerParent::IsLockedOnCurrentThread() ||
          ProfilerChild::IsLockedOnCurrentThread();
@@ -5628,6 +5683,10 @@ void profiler_set_js_context(JSContext* aCx) {
         aOnThreadRef.WithLockedRWOnThread(
             [&](ThreadRegistration::LockedRWOnThread& aThreadData) {
               aThreadData.SetJSContext(aCx);
+
+              if (!ActivePS::Exists(lock) || !ActivePS::FeatureJS(lock)) {
+                return;
+              }
 
               // This call is on-thread, so we can call PollJSSampling() to
               // start JS sampling immediately.

@@ -2035,6 +2035,29 @@ bool CacheIRCompiler::emitGuardDynamicSlotIsSpecificObject(
   return true;
 }
 
+bool CacheIRCompiler::emitGuardDynamicSlotIsNotObject(ObjOperandId objId,
+                                                      uint32_t slotOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+  Register obj = allocator.useRegister(masm, objId);
+
+  AutoScratchRegister scratch1(allocator, masm);
+  AutoScratchRegister scratch2(allocator, masm);
+
+  FailurePath* failure;
+  if (!addFailurePath(&failure)) {
+    return false;
+  }
+
+  // Guard that the slot isn't an object.
+  StubFieldOffset slot(slotOffset, StubField::Type::RawInt32);
+  masm.loadPtr(Address(obj, NativeObject::offsetOfSlots()), scratch1);
+  emitLoadStubField(slot, scratch2);
+  BaseObjectSlotIndex expectedSlot(scratch1, scratch2);
+  masm.branchTestObject(Assembler::Equal, expectedSlot, failure->label());
+
+  return true;
+}
+
 bool CacheIRCompiler::emitGuardFixedSlotValue(ObjOperandId objId,
                                               uint32_t offsetOffset,
                                               uint32_t valOffset) {
@@ -4216,6 +4239,22 @@ bool CacheIRCompiler::emitFinishBoundFunctionInitResult(
   return true;
 }
 
+bool CacheIRCompiler::emitValueToIteratorResult(ValOperandId valId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoCallVM callvm(masm, this, allocator);
+
+  ValueOperand val = allocator.useValueRegister(masm, valId);
+
+  callvm.prepare();
+
+  masm.Push(val);
+
+  using Fn = JSObject* (*)(JSContext*, HandleValue);
+  callvm.call<Fn, ValueToIterator>();
+  return true;
+}
+
 bool CacheIRCompiler::emitNewArrayIteratorResult(
     uint32_t templateObjectOffset) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
@@ -5887,7 +5926,7 @@ bool CacheIRCompiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
     masm.passABIArg(obj);
     masm.movePtr(ImmPtr(cx_->runtime()), scratch);
     masm.passABIArg(scratch);
-    masm.callWithABI<Fn, TypeOfObject>();
+    masm.callWithABI<Fn, TypeOfNameObject>();
     masm.mov(ReturnReg, scratch);
 
     LiveRegisterSet ignore;
@@ -6702,9 +6741,6 @@ bool CacheIRCompiler::emitMegamorphicLoadSlotByValueResult(ObjOperandId objId,
   masm.jump(failure->label());
 
   masm.bind(&ok);
-  if (JitOptions.spectreJitToCxxCalls) {
-    masm.speculationBarrier();
-  }
   masm.setFramePushed(framePushed);
   masm.loadTypedOrValue(Address(masm.getStackPointer(), 0), output);
   masm.adjustStack(sizeof(Value));
@@ -6992,9 +7028,6 @@ bool CacheIRCompiler::emitMegamorphicLoadSlotResult(ObjOperandId objId,
   masm.adjustStack(sizeof(Value));
 
   masm.branchIfFalseBool(scratch2, failure->label());
-  if (JitOptions.spectreJitToCxxCalls) {
-    masm.speculationBarrier();
-  }
 
   return true;
 }

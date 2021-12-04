@@ -271,7 +271,7 @@ p {
 .info {
   margin-top: 64px;
   background-color: rgba(0, 0, 0, 0.2);
-  background-image: url("chrome://browser/skin/indicator-private-browsing.svg");
+  background-image: url("chrome://global/skin/icons/indicator-private-browsing.svg");
   background-position: left 32px top 20px;
   background-repeat: no-repeat;
   background-size: 32px;
@@ -352,6 +352,11 @@ p {
   color: var(--in-content-primary-button-text-color);
   border-radius: 4px;
   font-weight: 600;
+}
+
+.promo-cta .button:hover {
+  background-color: var(--in-content-primary-button-background-hover);
+  color: var(--in-content-primary-button-text-color-hover);
 }
 
 .promo.bottom .promo-cta {

@@ -26,6 +26,16 @@ FX_URLBAR_MERINO_LATENCY_MS
   response. It is an exponential histogram with values between 0 and 30000 (0s
   and 30s).
 
+FX_URLBAR_MERINO_RESPONSE
+  This probe is related to the Firefox Suggest (quick suggest) feature. It is a
+  categorical histogram that records whether each Merino fetch was successful or
+  not. It has the following categories. ``success`` (0): The fetch completed
+  without any error before the timeout elapsed. ``timeout`` (1): The timeout
+  elapsed before the fetch completed or otherwise failed. ``network_error`` (2):
+  The fetch failed due to a network error before the timeout elapsed. e.g., the
+  user's network or the Merino server was down. ``http_error`` (3): The fetch
+  completed before the timeout elapsed but the server returned an error.
+
 FX_URLBAR_SELECTED_RESULT_METHOD
   This probe tracks how a result was picked by the user from the list.
   It is a categorical histogram with these values:
@@ -434,9 +444,9 @@ QuickSuggest Impression
   - ``context_id``
     A UUID representing this user. Note that it's not client_id, nor can it be used to link to a client_id.
   - ``search_query``
-    The exact search query typed in by the user.
+    The exact search query typed in by the user. This is only sent for the "online" scenario when the suggestion is provided by RemoteSettings.
   - ``matched_keywords``
-    The matched keywords that leads to the QuickSuggest link.
+    The matched keywords that leads to the QuickSuggest link. This is only sent for the "online" scenario when the suggestion is provided by RemoteSettings.
   - ``is_clicked``
     Whether or not the use has clicked on the QuickSuggest link.
   - ``block_id``
@@ -449,6 +459,8 @@ QuickSuggest Impression
     The reporting URL of the QuickSuggest link, normally pointing to the ad partner's reporting endpoint.
   - ``scenario``
     The scenario of the QuickSuggest, could be one of "history", "offline", and "online".
+  - ``request_id``
+    A request identifier for each API request to Merino. This is only sent for suggestions provided by Merino.
 
 QuickSuggest Click
   This records a click ping when a QuickSuggest link is clicked by the user.
@@ -466,6 +478,8 @@ QuickSuggest Click
     The reporting URL of the QuickSuggest link, normally pointing to the ad partner's reporting endpoint.
   - ``scenario``
     The scenario of the QuickSuggest, could be one of "history", "offline", and "online".
+  - ``request_id``
+    A request identifier for each API request to Merino. This is only sent for suggestions provided by Merino.
 
 
 Other telemetry relevant to the Address Bar
@@ -510,7 +524,18 @@ contextservices.quicksuggest
   true.
 
   The following event is recorded when the
-  ``browser.urlbar.suggest.quicksuggest`` pref is toggled:
+  ``browser.urlbar.quicksuggest.dataCollection.enabled`` pref is toggled:
+
+    - Category: ``contextservices.quicksuggest``
+    - Method: ``data_collect_toggled``
+    - Objects: ``enabled``, ``disabled`` -- ``enabled`` is recorded when the
+      pref is flipped from false to true, and ``disabled`` is recorded when the
+      pref is flipped from true to false.
+    - Value: Not used
+    - Extra: Not used
+
+  The following event is recorded when the
+  ``browser.urlbar.suggest.quicksuggest.nonsponsored`` pref is toggled:
 
     - Category: ``contextservices.quicksuggest``
     - Method: ``enable_toggled``
@@ -536,14 +561,101 @@ contextservices.quicksuggest
 
     - Category: ``contextservices.quicksuggest``
     - Method: ``opt_in_dialog``
-    - Objects: ``accept``, ``settings``, ``learn_more``, ``not_now`` --
+    - Objects: ``accept``, ``dismissed_escape_key``, ``dismissed_other``,
+      ``learn_more``, ``not_now_link``, ``settings`` --
       ``accept`` is recorded when the user accepts the dialog and opts in,
       ``settings`` is recorded when the user clicks in the "Customize" button
-      (the user remains opted out in this case), ``learn_more`` is recorded when
-      the user clicks "Learn more" (the user remains opted out), ``not_now`` is
-      recorded when the user clicks "Not now" (the user remains opted out)
+      (the user remains opted out in this case),
+      ``learn_more`` is recorded when the user clicks "Learn more" (the user
+      remains opted out),
+      ``not_now_link`` is recorded when the user clicks "Not now" (the user
+      remains opted out),
+      ``dismissed_escape_key`` is recorded when the user dismisses the dialog by
+      pressing the Escape key (the user remains opted out),
+      ``dismissed_other`` is recorded when the dialog is dismissed in some other
+      unknown way, for example when the dialog is replaced with another higher
+      priority dialog like the one shown when quitting the app (the user remains
+      opted out).
+      Note: In older versions of Firefox, ``not_now_link``,
+      ``dismissed_escape_key``, ``dismissed_other`` did not exist; instead, all
+      three of these cases were represented by a single ``not_now`` object.
     - Value: Not used
     - Extra: Not used
+
+Telemetry Environment
+  The following preferences relevant to the address bar are recorded in
+  :doc:`telemetry environment data </toolkit/components/telemetry/data/environment>`:
+
+    - ``browser.search.suggest.enabled``: The global toggle for search
+      suggestions everywhere in Firefox (search bar, urlbar, etc.). Defaults to
+      true.
+    - ``browser.urlbar.quicksuggest.onboardingDialogChoice``: The user's choice
+      in the Firefox Suggest onboarding dialog. If the dialog was shown multiple
+      times, this records the user's most recent choice. Values are the
+      following.
+      Empty string: The user has not made a choice (e.g., because the
+      dialog hasn't been shown).
+      ``accept``: The user accepted the dialog and opted in.
+      ``settings``: The user clicked in the "Customize" button (the user remains
+      opted out in this case).
+      ``learn_more``: The user clicked "Learn more" (the user remains opted
+      out).
+      ``not_now_link``: The user clicked "Not now" (the user remains opted
+      out).
+      ``dismissed_escape_key``: The user dismissed the dialog by pressing the
+      Escape key (the user remains opted out).
+      ``dismissed_other``: The dialog was dismissed in some other unknown way,
+      for example when the dialog is replaced with another higher priority
+      dialog like the one shown when quitting the app (the user remains opted
+      out).
+    - ``browser.urlbar.quicksuggest.dataCollection.enabled``: Whether the user
+      has opted in to data collection for Firefox Suggest. This pref is set to
+      true when the user opts in to the Firefox Suggest onboarding dialog
+      modal. The user can also toggle the pref using a toggle switch in the
+      Firefox Suggest preferences UI.
+    - ``browser.urlbar.suggest.quicksuggest.nonsponsored``: True if
+      non-sponsored Firefox Suggest suggestions are enabled in the urlbar.
+    - ``browser.urlbar.suggest.quicksuggest.sponsored``: True if sponsored
+      Firefox Suggest suggestions are enabled in the urlbar.
+    - ``browser.urlbar.suggest.searches``: True if search suggestions are
+      enabled in the urlbar. Defaults to false.
+
+Merino search queries
+---------------------
+
+Overview
+~~~~~~~~
+
+  Merino is a Mozilla backend service that powers Firefox Suggest.
+  When the user opts in Firefox Suggest, Firefox would send their search queries
+  typed in the URL bar to Merino in realtime. When Merino finds relevant search
+  results (i.e. suggestions) from its search providers, it sends the results back
+  to the browser, and those suggestions will be displayed in the URL bar.
+
+Merino API
+~~~~~~~~~~
+
+  Firefox sends HTTP requests to Merino for suggestions, all the parameters are
+  listed as follows. See `here`_ for the more detailed Merino API document.
+
+.. _here: https://mozilla-services.github.io/merino/api.html#suggest
+
+Search Query
+  ``q``: When the user types in the URL bar, each keystroke will be sent to Merino in
+  realtime except for the following cases:
+
+    - Firefox Suggest is not enabled.
+    - The search query is detected as a URL.
+
+Client Variants
+  ``client_variants``: [Optional] This is a comma-separated
+  list of any experiments or rollouts that are affecting the user experience of Firefox
+  Suggest. If Merino recognizes any of them, it will modify its behavior accordingly.
+
+Providers
+  ``providers``:  [Optional]. A comma-separated list of providers to use for
+  this request. If provided, only suggestions from the listed providers will
+  be returned. If not provided, Merino will use a built-in default set of providers.
 
 Obsolete probes
 ---------------
@@ -553,11 +665,11 @@ Obsolete histograms
 
 FX_URLBAR_SELECTED_RESULT_INDEX (OBSOLETE)
   This probe tracked the indexes of picked results in the results list.
-  It was an enumerated histogram with 17 buckets.
+  It was an enumerated histogram with 17 groups.
 
 FX_URLBAR_SELECTED_RESULT_TYPE and FX_URLBAR_SELECTED_RESULT_TYPE_2 (from Firefox 78 on) (OBSOLETE)
   This probe tracked the types of picked results.
-  It was an enumerated histogram with 17 buckets:
+  It was an enumerated histogram with 17 groups:
 
     0. autofill
     1. bookmark

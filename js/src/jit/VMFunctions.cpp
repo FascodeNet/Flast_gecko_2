@@ -1492,11 +1492,6 @@ bool PushLexicalEnv(JSContext* cx, BaselineFrame* frame,
   return frame->pushLexicalEnvironment(cx, scope);
 }
 
-bool PopLexicalEnv(JSContext* cx, BaselineFrame* frame) {
-  frame->popOffEnvironmentChain<ScopedLexicalEnvironmentObject>();
-  return true;
-}
-
 bool DebugLeaveThenPopLexicalEnv(JSContext* cx, BaselineFrame* frame,
                                  jsbytecode* pc) {
   MOZ_ALWAYS_TRUE(DebugLeaveLexicalEnv(cx, frame, pc));
@@ -2161,7 +2156,7 @@ void HandleCodeCoverageAtPrologue(BaselineFrame* frame) {
   }
 }
 
-JSString* TypeOfObject(JSObject* obj, JSRuntime* rt) {
+JSString* TypeOfNameObject(JSObject* obj, JSRuntime* rt) {
   AutoUnsafeCallWithABI unsafe;
   JSType type = js::TypeOfObject(obj);
   return TypeName(type, *rt->commonNames);

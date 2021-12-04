@@ -32,7 +32,6 @@ CompositableHost::CompositableHost(const TextureInfo& aTextureInfo)
     : mTextureInfo(aTextureInfo),
       mCompositorBridgeID(0),
       mLayer(nullptr),
-      mFlashCounter(0),
       mAttached(false),
       mKeepAttached(false) {
   MOZ_COUNT_CTOR(CompositableHost);
@@ -63,43 +62,6 @@ void CompositableHost::SetTextureSourceProvider(
     TextureSourceProvider* aProvider) {
   MOZ_ASSERT(aProvider);
   mTextureSourceProvider = aProvider;
-}
-
-bool CompositableHost::AddMaskEffect(EffectChain& aEffects,
-                                     const gfx::Matrix4x4& aTransform) {
-  CompositableTextureSourceRef source;
-  RefPtr<TextureHost> host = GetAsTextureHost();
-
-  if (!host) {
-    NS_WARNING("Using compositable with no valid TextureHost as mask");
-    return false;
-  }
-
-  if (!host->Lock()) {
-    NS_WARNING("Failed to lock the mask texture");
-    return false;
-  }
-
-  if (!host->BindTextureSource(source)) {
-    NS_WARNING(
-        "The TextureHost was successfully locked but can't provide a "
-        "TextureSource");
-    host->Unlock();
-    return false;
-  }
-  MOZ_ASSERT(source);
-
-  RefPtr<EffectMask> effect =
-      new EffectMask(source, source->GetSize(), aTransform);
-  aEffects.mSecondaryEffects[EffectTypes::MASK] = effect;
-  return true;
-}
-
-void CompositableHost::RemoveMaskEffect() {
-  RefPtr<TextureHost> host = GetAsTextureHost();
-  if (host) {
-    host->Unlock();
-  }
 }
 
 /* static */

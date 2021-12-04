@@ -25,6 +25,7 @@
 #include "mozilla/Unused.h"
 #include "HttpBackgroundChannelParent.h"
 #include "ParentChannelListener.h"
+#include "nsICacheInfoChannel.h"
 #include "nsHttpHandler.h"
 #include "nsNetCID.h"
 #include "nsNetUtil.h"
@@ -129,16 +130,17 @@ bool HttpChannelParent::Init(const HttpChannelCreationArgs& aArgs) {
           a.priority(), a.classOfService(), a.redirectionLimit(), a.allowSTS(),
           a.thirdPartyFlags(), a.resumeAt(), a.startPos(), a.entityID(),
           a.allowSpdy(), a.allowHttp3(), a.allowAltSvc(), a.beConservative(),
-          a.tlsFlags(), a.loadInfo(), a.cacheKey(), a.requestContextID(),
-          a.preflightArgs(), a.initialRwin(), a.blockAuthPrompt(),
-          a.allowStaleCacheContent(), a.preferCacheLoadOverBypass(),
-          a.contentTypeHint(), a.corsMode(), a.redirectMode(), a.channelId(),
-          a.integrityMetadata(), a.contentWindowId(),
-          a.preferredAlternativeTypes(), a.topBrowsingContextId(),
-          a.launchServiceWorkerStart(), a.launchServiceWorkerEnd(),
-          a.dispatchFetchEventStart(), a.dispatchFetchEventEnd(),
-          a.handleFetchEventStart(), a.handleFetchEventEnd(),
-          a.forceMainDocumentChannel(), a.navigationStartTimeStamp());
+          a.bypassProxy(), a.tlsFlags(), a.loadInfo(), a.cacheKey(),
+          a.requestContextID(), a.preflightArgs(), a.initialRwin(),
+          a.blockAuthPrompt(), a.allowStaleCacheContent(),
+          a.preferCacheLoadOverBypass(), a.contentTypeHint(), a.corsMode(),
+          a.redirectMode(), a.channelId(), a.integrityMetadata(),
+          a.contentWindowId(), a.preferredAlternativeTypes(),
+          a.topBrowsingContextId(), a.launchServiceWorkerStart(),
+          a.launchServiceWorkerEnd(), a.dispatchFetchEventStart(),
+          a.dispatchFetchEventEnd(), a.handleFetchEventStart(),
+          a.handleFetchEventEnd(), a.forceMainDocumentChannel(),
+          a.navigationStartTimeStamp());
     }
     case HttpChannelCreationArgs::THttpChannelConnectArgs: {
       const HttpChannelConnectArgs& cArgs = aArgs.get_HttpChannelConnectArgs();
@@ -363,8 +365,9 @@ bool HttpChannelParent::DoAsyncOpen(
     const uint32_t& thirdPartyFlags, const bool& doResumeAt,
     const uint64_t& startPos, const nsCString& entityID, const bool& allowSpdy,
     const bool& allowHttp3, const bool& allowAltSvc, const bool& beConservative,
-    const uint32_t& tlsFlags, const Maybe<LoadInfoArgs>& aLoadInfoArgs,
-    const uint32_t& aCacheKey, const uint64_t& aRequestContextID,
+    const bool& bypassProxy, const uint32_t& tlsFlags,
+    const Maybe<LoadInfoArgs>& aLoadInfoArgs, const uint32_t& aCacheKey,
+    const uint64_t& aRequestContextID,
     const Maybe<CorsPreflightArgs>& aCorsPreflightArgs,
     const uint32_t& aInitialRwin, const bool& aBlockAuthPrompt,
     const bool& aAllowStaleCacheContent, const bool& aPreferCacheLoadOverBypass,
@@ -1199,11 +1202,26 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
 
   rv = NS_OK;
 
+  nsCOMPtr<nsICacheEntry> altDataSource;
+  nsCOMPtr<nsICacheInfoChannel> cacheChannel =
+      do_QueryInterface(static_cast<nsIChannel*>(mChannel.get()));
+  if (cacheChannel) {
+    for (const auto& pref : cacheChannel->PreferredAlternativeDataTypes()) {
+      if (pref.type() == args.altDataType() &&
+          pref.deliverAltData() ==
+              nsICacheInfoChannel::PreferredAlternativeDataDeliveryType::
+                  SERIALIZE) {
+        altDataSource = mCacheEntry;
+        break;
+      }
+    }
+  }
+
   if (mIPCClosed ||
       !mBgParent->OnStartRequest(
           *responseHead, useResponseHead,
           cleanedUpRequest ? cleanedUpRequestHeaders : requestHead->Headers(),
-          args)) {
+          args, altDataSource)) {
     rv = NS_ERROR_UNEXPECTED;
   }
   requestHead->Exit();
@@ -1462,28 +1480,6 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvOpenOriginalCacheInputStream() {
   }
 
   Unused << SendOriginalCacheInputStreamAvailable(
-      autoStream.TakeOptionalValue());
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult HttpChannelParent::RecvOpenAltDataCacheInputStream(
-    const nsCString& aType) {
-  if (mIPCClosed) {
-    return IPC_OK();
-  }
-  AutoIPCStream autoStream;
-  if (mCacheEntry) {
-    nsCOMPtr<nsIInputStream> inputStream;
-    nsresult rv = mCacheEntry->OpenAlternativeInputStream(
-        aType, getter_AddRefs(inputStream));
-    if (NS_SUCCEEDED(rv)) {
-      PContentParent* pcp = Manager()->Manager();
-      Unused << autoStream.Serialize(inputStream,
-                                     static_cast<ContentParent*>(pcp));
-    }
-  }
-
-  Unused << SendAltDataCacheInputStreamAvailable(
       autoStream.TakeOptionalValue());
   return IPC_OK();
 }

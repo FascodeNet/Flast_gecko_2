@@ -132,8 +132,18 @@ wr::WrSpatialId ClipManager::SpatialIdAfterOverride(
   return it->second.top();
 }
 
-wr::WrSpaceAndClipChain ClipManager::SwitchItem(nsDisplayItem* aItem) {
+wr::WrSpaceAndClipChain ClipManager::SwitchItem(nsDisplayListBuilder* aBuilder,
+                                                nsDisplayItem* aItem) {
   const DisplayItemClipChain* clip = aItem->GetClipChain();
+  if (mBuilder->GetInheritedClipChain() &&
+      mBuilder->GetInheritedClipChain() != clip) {
+    if (!clip) {
+      clip = mBuilder->GetInheritedClipChain();
+    } else {
+      clip = aBuilder->CreateClipChainIntersection(
+          mBuilder->GetInheritedClipChain(), clip);
+    }
+  }
   const ActiveScrolledRoot* asr = aItem->GetActiveScrolledRoot();
   CLIP_LOG("processing item %p (%s) asr %p\n", aItem,
            DisplayItemTypeName(aItem->GetType()), asr);
@@ -274,8 +284,8 @@ Maybe<wr::WrSpatialId> ClipManager::DefineScrollLayers(
       DefineScrollLayers(aASR->mParent, aItem);
 
   Maybe<ScrollMetadata> metadata =
-      aASR->mScrollableFrame->ComputeScrollMetadata(
-          mManager, aItem->ReferenceFrame(), nullptr);
+      aASR->mScrollableFrame->ComputeScrollMetadata(mManager, aItem->Frame(),
+                                                    aItem->ToReferenceFrame());
   if (!metadata) {
     MOZ_ASSERT_UNREACHABLE("Expected scroll metadata to be available!");
     return ancestorSpace;
@@ -289,7 +299,8 @@ Maybe<wr::WrSpatialId> ClipManager::DefineScrollLayers(
 
   nsIScrollableFrame* scrollableFrame = aASR->mScrollableFrame;
   nsIFrame* scrollFrame = do_QueryFrame(scrollableFrame);
-  nsPoint offset = scrollFrame->GetOffsetToCrossDoc(aItem->ReferenceFrame());
+  nsPoint offset = scrollFrame->GetOffsetToCrossDoc(aItem->Frame()) +
+                   aItem->ToReferenceFrame();
   float auPerDevPixel = aItem->Frame()->PresContext()->AppUnitsPerDevPixel();
   nsRect scrollPort = scrollableFrame->GetScrollPortRect() + offset;
   LayoutDeviceRect clipBounds =

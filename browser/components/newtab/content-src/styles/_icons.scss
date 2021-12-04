@@ -4,7 +4,7 @@
   background-size: $icon-size;
   -moz-context-properties: fill;
   display: inline-block;
-  color: var(--newtab-icon-primary-color);
+  color: var(--newtab-text-primary-color);
   fill: currentColor;
   height: $icon-size;
   vertical-align: middle;
@@ -20,7 +20,7 @@
   }
 
   &.icon-button-style {
-    fill: var(--newtab-icon-secondary-color);
+    fill: var(--newtab-text-secondary-color);
     border: 0;
 
     &:focus,
@@ -102,7 +102,7 @@
   }
 
   &.icon-pocket-save {
-    background-image: url('chrome://browser/skin/pocket-outline.svg');
+    background-image: url('chrome://global/skin/icons/pocket-outline.svg');
   }
 
   &.icon-pocket-delete {
@@ -147,7 +147,7 @@
   }
 
   &.icon-copy {
-    background-image: url('chrome://browser/skin/edit-copy.svg');
+    background-image: url('chrome://global/skin/icons/edit-copy.svg');
   }
 
   &.icon-open-file {

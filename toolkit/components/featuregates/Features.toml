@@ -9,6 +9,17 @@ bug-numbers = [1607954]
 is-public = true
 default-value = {default = false, nightly = true}
 
+[css-cascade-layers]
+title = "experimental-features-css-cascade-layers"
+description = "experimental-features-css-cascade-layers-description"
+description-links = {spec = "https://drafts.csswg.org/css-cascade-5/#layering", bugzilla = "https://bugzilla.mozilla.org/show_bug.cgi?id=1699215"}
+restart-required = false
+preference = "layout.css.cascade-layers.enabled"
+type = "boolean"
+bug-numbers = [1699215]
+is-public = true
+default-value = {default = false, nightly = true}
+
 [web-api-webgpu]
 title = "experimental-features-web-gpu2"
 description = "experimental-features-web-gpu-description2"
@@ -30,17 +41,6 @@ type = "boolean"
 bug-numbers = [1539075]
 is-public = {default = false, nightly = true}
 default-value = false
-
-[web-api-inputmode]
-title = "experimental-features-web-api-inputmode"
-description = "experimental-features-web-api-inputmode-description"
-description-links = {mdn-inputmode = "https://developer.mozilla.org/docs/Web/HTML/Global_attributes/inputmode", whatwg = "https://bugzilla.mozilla.org/show_bug.cgi?id=1509527", bugzilla = "https://bugzilla.mozilla.org/show_bug.cgi?id=1205133"}
-restart-required = false
-preference = "dom.forms.inputmode"
-type = "boolean"
-bug-numbers = [1205133]
-is-public = {default = false, nightly = true}
-default-value = {default = false, nightly = true, android = true}
 
 [css-constructable-stylesheets]
 title = "experimental-features-css-constructable-stylesheets"

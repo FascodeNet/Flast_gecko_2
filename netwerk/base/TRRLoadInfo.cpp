@@ -147,12 +147,14 @@ TRRLoadInfo::SetCookieJarSettings(nsICookieJarSettings* aCookieJarSettings) {
 }
 
 NS_IMETHODIMP
-TRRLoadInfo::GetHasStoragePermission(bool* aHasStoragePermission) {
+TRRLoadInfo::GetStoragePermission(
+    nsILoadInfo::StoragePermissionState* aHasStoragePermission) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
 NS_IMETHODIMP
-TRRLoadInfo::SetHasStoragePermission(bool aHasStoragePermission) {
+TRRLoadInfo::SetStoragePermission(
+    nsILoadInfo::StoragePermissionState aHasStoragePermission) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }
 
@@ -389,7 +391,7 @@ TRRLoadInfo::GetInitialSecurityCheckDone(bool* aResult) {
 }
 
 NS_IMETHODIMP
-TRRLoadInfo::AppendRedirectHistoryEntry(nsIRedirectHistoryEntry* aEntry,
+TRRLoadInfo::AppendRedirectHistoryEntry(nsIChannel* aChannelToDeriveFrom,
                                         bool aIsInternalRedirect) {
   return NS_ERROR_NOT_IMPLEMENTED;
 }

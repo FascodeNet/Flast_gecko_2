@@ -581,6 +581,15 @@
     expected: ObjId
     slot: RawInt32Field
 
+# Guard obj[slot] is not an object.
+- name: GuardDynamicSlotIsNotObject
+  shared: true
+  transpile: true
+  cost_estimate: 1
+  args:
+    obj: ObjId
+    slot: RawInt32Field
+
 - name: GuardFixedSlotValue
   shared: true
   transpile: true
@@ -767,6 +776,13 @@
     obj: ObjId
     id: ValId
     hasOwn: BoolImm
+
+- name: ValueToIteratorResult
+  shared: true
+  transpile: true
+  cost_estimate: 5
+  args:
+    val: ValId
 
 # See CacheIR.cpp 'DOM proxies' comment.
 - name: LoadDOMExpandoValue

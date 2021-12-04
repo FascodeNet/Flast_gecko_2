@@ -27,6 +27,7 @@
 #include "mozilla/StaticPrefs_layers.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/StaticPrefs_webgl.h"
+#include "mozilla/StaticPrefs_widget.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/Unused.h"
@@ -65,6 +66,7 @@
 
 #if defined(XP_WIN)
 #  include "gfxWindowsPlatform.h"
+#  include "mozilla/widget/WinWindowOcclusionTracker.h"
 #elif defined(XP_MACOSX)
 #  include "gfxPlatformMac.h"
 #  include "gfxQuartzSurface.h"
@@ -80,6 +82,7 @@
 
 #ifdef XP_WIN
 #  include "mozilla/WindowsVersion.h"
+#  include "WinUtils.h"
 #endif
 
 #include "nsGkAtoms.h"
@@ -435,7 +438,6 @@ gfxPlatform::gfxPlatform()
     : mHasVariationFontSupport(false),
       mAzureCanvasBackendCollector(this, &gfxPlatform::GetAzureBackendInfo),
       mApzSupportCollector(this, &gfxPlatform::GetApzSupportInfo),
-      mTilesInfoCollector(this, &gfxPlatform::GetTilesSupportInfo),
       mFrameStatsCollector(this, &gfxPlatform::GetFrameStats),
       mCMSInfoCollector(this, &gfxPlatform::GetCMSSupportInfo),
       mDisplayInfoCollector(this, &gfxPlatform::GetDisplayInfo),
@@ -480,12 +482,57 @@ void gfxPlatform::InitChild(const ContentDeviceData& aData) {
 
 #define WR_DEBUG_PREF "gfx.webrender.debug"
 
+static void SwapIntervalPrefChangeCallback(const char* aPrefName, void*) {
+  bool egl = Preferences::GetBool("gfx.swap-interval.egl", false);
+  bool glx = Preferences::GetBool("gfx.swap-interval.glx", false);
+  gfxVars::SetSwapIntervalEGL(egl);
+  gfxVars::SetSwapIntervalGLX(glx);
+}
+
 static void WebRendeProfilerUIPrefChangeCallback(const char* aPrefName, void*) {
   nsCString uiString;
   if (NS_SUCCEEDED(Preferences::GetCString("gfx.webrender.debug.profiler-ui",
                                            uiString))) {
     gfxVars::SetWebRenderProfilerUI(uiString);
   }
+}
+
+// List of boolean dynamic parameter for WebRender.
+//
+// The parameters in this list are:
+//  - The pref name.
+//  - The BoolParameter enum variant (see webrender_api/src/lib.rs)
+//  - A default value.
+#define WR_BOOL_PARAMETER_LIST(_)                                     \
+  _("gfx.webrender.batched-texture-uploads",                          \
+    wr::BoolParameter::BatchedUploads, true)                          \
+  _("gfx.webrender.draw-calls-for-texture-copy",                      \
+    wr::BoolParameter::DrawCallsForTextureCopy, true)                 \
+  _("gfx.webrender.pbo-uploads", wr::BoolParameter::PboUploads, true) \
+  _("gfx.webrender.multithreading", wr::BoolParameter::Multithreading, true)
+
+static void WebRenderBoolParameterChangeCallback(const char*, void*) {
+  uint32_t bits = 0;
+
+#define WR_BOOL_PARAMETER(name, key, default_val) \
+  if (Preferences::GetBool(name, default_val)) {  \
+    bits |= 1 << (uint32_t)key;                   \
+  }
+
+  WR_BOOL_PARAMETER_LIST(WR_BOOL_PARAMETER)
+#undef WR_BOOL_PARAMETER
+
+  gfx::gfxVars::SetWebRenderBoolParameters(bits);
+}
+
+static void RegisterWebRenderBoolParamCallback() {
+#define WR_BOOL_PARAMETER(name, _key, _default_val) \
+  Preferences::RegisterCallback(WebRenderBoolParameterChangeCallback, name);
+
+  WR_BOOL_PARAMETER_LIST(WR_BOOL_PARAMETER)
+#undef WR_BOOL_PARAMETER
+
+  WebRenderBoolParameterChangeCallback(nullptr, nullptr);
 }
 
 static void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
@@ -528,10 +575,6 @@ static void WebRenderDebugPrefChangeCallback(const char* aPrefName, void*) {
   GFX_WEBRENDER_DEBUG(".obscure-images", wr::DebugFlags::OBSCURE_IMAGES)
   GFX_WEBRENDER_DEBUG(".glyph-flashing", wr::DebugFlags::GLYPH_FLASHING)
   GFX_WEBRENDER_DEBUG(".capture-profiler", wr::DebugFlags::PROFILER_CAPTURE)
-  GFX_WEBRENDER_DEBUG(".batched-texture-uploads",
-                      wr::DebugFlags::USE_BATCHED_TEXTURE_UPLOADS)
-  GFX_WEBRENDER_DEBUG(".draw-calls-for-texture-copy",
-                      wr::DebugFlags::USE_DRAW_CALLS_FOR_TEXTURE_COPY)
 #undef GFX_WEBRENDER_DEBUG
 
   gfx::gfxVars::SetWebRenderDebugFlags(flags.bits);
@@ -541,19 +584,18 @@ static void WebRenderQualityPrefChangeCallback(const char* aPref, void*) {
   gfxPlatform::GetPlatform()->UpdateForceSubpixelAAWherePossible();
 }
 
-static void WebRenderMultithreadingPrefChangeCallback(const char* aPrefName,
-                                                      void*) {
-  bool enable = Preferences::GetBool(
-      StaticPrefs::GetPrefName_gfx_webrender_enable_multithreading(), true);
-
-  gfx::gfxVars::SetUseWebRenderMultithreading(enable);
-}
-
 static void WebRenderBatchingPrefChangeCallback(const char* aPrefName, void*) {
   uint32_t count = Preferences::GetUint(
       StaticPrefs::GetPrefName_gfx_webrender_batching_lookback(), 10);
 
   gfx::gfxVars::SetWebRenderBatchingLookback(count);
+}
+
+static void WebRenderBlobTileSizePrefChangeCallback(const char* aPrefName,
+                                                    void*) {
+  uint32_t tileSize = Preferences::GetUint(
+      StaticPrefs::GetPrefName_gfx_webrender_blob_tile_size(), 256);
+  gfx::gfxVars::SetWebRenderBlobTileSize(tileSize);
 }
 
 static uint32_t GetSkiaGlyphCacheSize() {
@@ -865,6 +907,7 @@ void gfxPlatform::Init() {
 
   gPlatform->InitWebGLConfig();
   gPlatform->InitWebGPUConfig();
+  gPlatform->InitWindowOcclusionConfig();
 
   // When using WebRender, we defer initialization of the D3D11 devices until
   // the (rare) cases where they're used. Note that the GPU process where
@@ -903,8 +946,6 @@ void gfxPlatform::Init() {
 #endif
 
   InitLayersIPC();
-
-  gPlatform->ComputeTileSize();
 
   gPlatform->mHasVariationFontSupport = gPlatform->CheckVariationFontSupport();
 
@@ -1232,6 +1273,11 @@ void gfxPlatform::InitLayersIPC() {
   sLayersIPCIsUp = true;
 
   if (XRE_IsParentProcess()) {
+#if defined(XP_WIN)
+    if (gfxConfig::IsEnabled(gfx::Feature::WINDOW_OCCLUSION)) {
+      widget::WinWindowOcclusionTracker::Ensure();
+    }
+#endif
     if (!gfxConfig::IsEnabled(Feature::GPU_PROCESS) && UseWebRender()) {
       wr::RenderThread::Start();
       image::ImageMemoryReporter::InitForWebRender();
@@ -1272,8 +1318,14 @@ void gfxPlatform::ShutdownLayersIPC() {
                                       WR_DEBUG_PREF);
       Preferences::UnregisterCallback(WebRendeProfilerUIPrefChangeCallback,
                                       "gfx.webrender.debug.profiler-ui");
+      Preferences::UnregisterCallback(
+          WebRenderBlobTileSizePrefChangeCallback,
+          nsDependentCString(
+              StaticPrefs::GetPrefName_gfx_webrender_blob_tile_size()));
     }
-
+#if defined(XP_WIN)
+    widget::WinWindowOcclusionTracker::ShutDown();
+#endif
   } else {
     // TODO: There are other kind of processes and we should make sure gfx
     // stuff is either not created there or shut down properly.
@@ -1496,34 +1548,6 @@ already_AddRefed<DataSourceSurface> gfxPlatform::GetWrappedDataSourceSurface(
   result->AddUserData(&kThebesSurface, srcSurfUD, SourceSurfaceDestroyed);
 
   return result.forget();
-}
-
-void gfxPlatform::ComputeTileSize() {
-  // The tile size should be picked in the parent processes
-  // and sent to the child processes over IPDL GetTileSize.
-  if (!XRE_IsParentProcess()) {
-    return;
-  }
-
-  int32_t w = StaticPrefs::layers_tile_width_AtStartup();
-  int32_t h = StaticPrefs::layers_tile_height_AtStartup();
-
-  if (StaticPrefs::layers_tiles_adjust_AtStartup()) {
-    gfx::IntSize screenSize = GetScreenSize();
-    if (screenSize.width > 0) {
-      // Choose a size so that there are between 2 and 4 tiles per screen width.
-      // FIXME: we should probably make sure this is within the max texture
-      // size, but I think everything should at least support 1024
-      w = h = clamped(int32_t(RoundUpPow2(screenSize.width)) / 4, 256, 1024);
-    }
-  }
-
-  // Don't allow changing the tile size after we've set it.
-  // Right now the code assumes that the tile size doesn't change.
-  MOZ_ASSERT(gfxVars::TileSize().width == -1 &&
-             gfxVars::TileSize().height == -1);
-
-  gfxVars::SetTileSize(IntSize(w, h));
 }
 
 void gfxPlatform::PopulateScreenInfo() {
@@ -1780,19 +1804,23 @@ bool gfxPlatform::IsFontFormatSupported(uint32_t aFormatFlags) {
 }
 
 gfxFontGroup* gfxPlatform::CreateFontGroup(
-    const StyleFontFamilyList& aFontFamilyList, const gfxFontStyle* aStyle,
-    nsAtom* aLanguage, bool aExplicitLanguage, gfxTextPerfMetrics* aTextPerf,
-    gfxUserFontSet* aUserFontSet, gfxFloat aDevToCssSize) const {
-  return new gfxFontGroup(aFontFamilyList, aStyle, aLanguage, aExplicitLanguage,
-                          aTextPerf, aUserFontSet, aDevToCssSize);
+    nsPresContext* aPresContext, const StyleFontFamilyList& aFontFamilyList,
+    const gfxFontStyle* aStyle, nsAtom* aLanguage, bool aExplicitLanguage,
+    gfxTextPerfMetrics* aTextPerf, gfxUserFontSet* aUserFontSet,
+    gfxFloat aDevToCssSize) const {
+  return new gfxFontGroup(aPresContext, aFontFamilyList, aStyle, aLanguage,
+                          aExplicitLanguage, aTextPerf, aUserFontSet,
+                          aDevToCssSize);
 }
 
-gfxFontEntry* gfxPlatform::LookupLocalFont(const nsACString& aFontName,
+gfxFontEntry* gfxPlatform::LookupLocalFont(nsPresContext* aPresContext,
+                                           const nsACString& aFontName,
                                            WeightRange aWeightForEntry,
                                            StretchRange aStretchForEntry,
                                            SlantStyleRange aStyleForEntry) {
   return gfxPlatformFontList::PlatformFontList()->LookupLocalFont(
-      aFontName, aWeightForEntry, aStretchForEntry, aStyleForEntry);
+      aPresContext, aFontName, aWeightForEntry, aStretchForEntry,
+      aStyleForEntry);
 }
 
 gfxFontEntry* gfxPlatform::MakePlatformFont(const nsACString& aFontName,
@@ -1804,23 +1832,6 @@ gfxFontEntry* gfxPlatform::MakePlatformFont(const nsACString& aFontName,
   return gfxPlatformFontList::PlatformFontList()->MakePlatformFont(
       aFontName, aWeightForEntry, aStretchForEntry, aStyleForEntry, aFontData,
       aLength);
-}
-
-mozilla::layers::DiagnosticTypes gfxPlatform::GetLayerDiagnosticTypes() {
-  mozilla::layers::DiagnosticTypes type = DiagnosticTypes::NO_DIAGNOSTIC;
-  if (StaticPrefs::layers_draw_borders()) {
-    type |= mozilla::layers::DiagnosticTypes::LAYER_BORDERS;
-  }
-  if (StaticPrefs::layers_draw_tile_borders()) {
-    type |= mozilla::layers::DiagnosticTypes::TILE_BORDERS;
-  }
-  if (StaticPrefs::layers_draw_bigimage_borders()) {
-    type |= mozilla::layers::DiagnosticTypes::BIGIMAGE_BORDERS;
-  }
-  if (StaticPrefs::layers_flash_borders()) {
-    type |= mozilla::layers::DiagnosticTypes::FLASH_BORDERS;
-  }
-  return type;
 }
 
 BackendPrefsData gfxPlatform::GetBackendPrefs() const {
@@ -2191,7 +2202,8 @@ void gfxPlatform::FlushFontAndWordCaches() {
 }
 
 /* static */
-void gfxPlatform::ForceGlobalReflow(NeedsReframe aNeedsReframe) {
+void gfxPlatform::ForceGlobalReflow(NeedsReframe aNeedsReframe,
+                                    BroadcastToChildren aBroadcastToChildren) {
   MOZ_ASSERT(NS_IsMainThread());
   const bool reframe = aNeedsReframe == NeedsReframe::Yes;
   // Send a notification that will be observed by PresShells in this process
@@ -2200,7 +2212,8 @@ void gfxPlatform::ForceGlobalReflow(NeedsReframe aNeedsReframe) {
     char16_t needsReframe[] = {char16_t(reframe), 0};
     obs->NotifyObservers(nullptr, "font-info-updated", needsReframe);
   }
-  if (XRE_IsParentProcess()) {
+  if (XRE_IsParentProcess() &&
+      aBroadcastToChildren == BroadcastToChildren::Yes) {
     // Propagate the change to child processes.
     for (auto* process :
          dom::ContentParent::AllProcesses(dom::ContentParent::eLive)) {
@@ -2324,7 +2337,6 @@ gfxImageFormat gfxPlatform::OptimalFormatForContent(gfxContentType aContent) {
  */
 static mozilla::Atomic<bool> sLayersSupportsHardwareVideoDecoding(false);
 static bool sLayersHardwareVideoDecodingFailed = false;
-static bool sBufferRotationCheckPref = true;
 
 static mozilla::Atomic<bool> sLayersAccelerationPrefsInitialized(false);
 
@@ -2448,12 +2460,6 @@ void gfxPlatform::InitGPUProcessPrefs() {
                          "FEATURE_FAILURE_SAFE_MODE"_ns);
     return;
   }
-  if (StaticPrefs::gfx_layerscope_enabled()) {
-    gpuProc.ForceDisable(FeatureStatus::Blocked,
-                         "LayerScope does not work in the GPU process",
-                         "FEATURE_FAILURE_LAYERSCOPE"_ns);
-    return;
-  }
 
   InitPlatformGPUProcessPrefs();
 }
@@ -2521,11 +2527,6 @@ void gfxPlatform::InitWebRenderConfig() {
   bool prefEnabled = WebRenderPrefEnabled();
   bool envvarEnabled = WebRenderEnvvarEnabled();
 
-  // This would ideally be in the nsCSSProps code
-  // but nsCSSProps is initialized before gfxPlatform
-  // so it has to be done here.
-  gfxVars::AddReceiver(&nsCSSProps::GfxVarReceiver());
-
   // WR? WR+   => means WR was enabled via gfx.webrender.all.qualified on
   //              qualified hardware
   // WR! WR+   => means WR was enabled via gfx.webrender.{all,enabled} or
@@ -2540,9 +2541,6 @@ void gfxPlatform::InitWebRenderConfig() {
     // later in this function. For other processes we still want to report
     // the state of the feature for crash reports.
     if (gfxVars::UseWebRender()) {
-      // gfxVars doesn't notify receivers when initialized on content processes
-      // we need to explicitly recompute backdrop-filter's enabled state here.
-      nsCSSProps::RecomputeEnabledState("layout.css.backdrop-filter.enabled");
       reporter.SetSuccessful();
     }
     return;
@@ -2581,6 +2579,9 @@ void gfxPlatform::InitWebRenderConfig() {
 
   gfxVars::SetUseSoftwareWebRender(!hasHardware && hasSoftware);
 
+  Preferences::RegisterPrefixCallbackAndCall(SwapIntervalPrefChangeCallback,
+                                             "gfx.swap-interval");
+
   // gfxFeature is not usable in the GPU process, so we use gfxVars to transmit
   // this feature
   if (hasWebRender) {
@@ -2589,6 +2590,9 @@ void gfxPlatform::InitWebRenderConfig() {
 
     Preferences::RegisterPrefixCallbackAndCall(WebRenderDebugPrefChangeCallback,
                                                WR_DEBUG_PREF);
+
+    RegisterWebRenderBoolParamCallback();
+
     Preferences::RegisterPrefixCallbackAndCall(
         WebRendeProfilerUIPrefChangeCallback,
         "gfx.webrender.debug.profiler-ui");
@@ -2597,15 +2601,16 @@ void gfxPlatform::InitWebRenderConfig() {
         nsDependentCString(
             StaticPrefs::
                 GetPrefName_gfx_webrender_quality_force_subpixel_aa_where_possible()));
-    Preferences::RegisterCallback(
-        WebRenderMultithreadingPrefChangeCallback,
-        nsDependentCString(
-            StaticPrefs::GetPrefName_gfx_webrender_enable_multithreading()));
 
     Preferences::RegisterCallback(
         WebRenderBatchingPrefChangeCallback,
         nsDependentCString(
             StaticPrefs::GetPrefName_gfx_webrender_batching_lookback()));
+
+    Preferences::RegisterCallbackAndCall(
+        WebRenderBlobTileSizePrefChangeCallback,
+        nsDependentCString(
+            StaticPrefs::GetPrefName_gfx_webrender_blob_tile_size()));
 
     if (WebRenderResourcePathOverride()) {
       CrashReporter::AnnotateCrashReport(
@@ -2737,6 +2742,62 @@ void gfxPlatform::InitWebGPUConfig() {
   }
 }
 
+#ifdef XP_WIN
+static void WindowOcclusionPrefChangeCallback(const char* aPref, void*) {
+  const char* env = PR_GetEnv("MOZ_WINDOW_OCCLUSION");
+  if (env) {
+    // env has a higher priority than pref.
+    return;
+  }
+
+  FeatureState& feature = gfxConfig::GetFeature(Feature::WINDOW_OCCLUSION);
+  bool enabled =
+      StaticPrefs::widget_windows_window_occlusion_tracking_enabled();
+
+  printf_stderr("Dynamically enable window occlusion %d\n", enabled);
+
+  // Update feature before calling WinUtils::EnableWindowOcclusion()
+  if (enabled) {
+    feature.UserEnable("User enabled by pref");
+  } else {
+    feature.UserDisable("User disabled via pref",
+                        "FEATURE_FAILURE_PREF_DISABLED"_ns);
+  }
+  widget::WinUtils::EnableWindowOcclusion(enabled);
+}
+#endif
+
+void gfxPlatform::InitWindowOcclusionConfig() {
+  if (!XRE_IsParentProcess()) {
+    return;
+  }
+#ifdef XP_WIN
+  FeatureState& feature = gfxConfig::GetFeature(Feature::WINDOW_OCCLUSION);
+  feature.SetDefaultFromPref(
+      StaticPrefs::
+          GetPrefName_widget_windows_window_occlusion_tracking_enabled(),
+      true,
+      StaticPrefs::
+          GetPrefDefault_widget_windows_window_occlusion_tracking_enabled());
+
+  const char* env = PR_GetEnv("MOZ_WINDOW_OCCLUSION");
+  if (env) {
+    if (*env == '1') {
+      feature.UserForceEnable("Force enabled by envvar");
+    } else {
+      feature.UserDisable("Force disabled by envvar",
+                          "FEATURE_FAILURE_OCCL_ENV"_ns);
+    }
+  }
+
+  Preferences::RegisterCallback(
+      WindowOcclusionPrefChangeCallback,
+      nsDependentCString(
+          StaticPrefs::
+              GetPrefName_widget_windows_window_occlusion_tracking_enabled()));
+#endif
+}
+
 bool gfxPlatform::CanUseHardwareVideoDecoding() {
   // this function is called from the compositor thread, so it is not
   // safe to init the prefs etc. from here.
@@ -2751,19 +2812,6 @@ bool gfxPlatform::AccelerateLayersByDefault() {
 #else
   return false;
 #endif
-}
-
-bool gfxPlatform::BufferRotationEnabled() {
-  MutexAutoLock autoLock(*gGfxPlatformPrefsLock);
-
-  return sBufferRotationCheckPref &&
-         StaticPrefs::layers_bufferrotation_enabled_AtStartup();
-}
-
-void gfxPlatform::DisableBufferRotation() {
-  MutexAutoLock autoLock(*gGfxPlatformPrefsLock);
-
-  sBufferRotationCheckPref = false;
 }
 
 /* static */
@@ -2790,10 +2838,6 @@ bool gfxPlatform::UsesOffMainThreadCompositing() {
   }
 
   return result;
-}
-
-bool gfxPlatform::UsesTiling() const {
-  return StaticPrefs::layers_enable_tiles_AtStartup();
 }
 
 /***
@@ -2937,16 +2981,6 @@ void gfxPlatform::GetApzSupportInfo(mozilla::widget::InfoObject& aObj) {
   if (SupportsApzZooming()) {
     aObj.DefineProperty("ApzZoomingInput", 1);
   }
-}
-
-void gfxPlatform::GetTilesSupportInfo(mozilla::widget::InfoObject& aObj) {
-  if (!StaticPrefs::layers_enable_tiles_AtStartup()) {
-    return;
-  }
-
-  IntSize tileSize = gfxVars::TileSize();
-  aObj.DefineProperty("TileHeight", tileSize.height);
-  aObj.DefineProperty("TileWidth", tileSize.width);
 }
 
 void gfxPlatform::GetFrameStats(mozilla::widget::InfoObject& aObj) {
@@ -3097,32 +3131,6 @@ bool gfxPlatform::AsyncPanZoomEnabled() {
 /*static*/
 bool gfxPlatform::PerfWarnings() {
   return StaticPrefs::gfx_perf_warnings_enabled();
-}
-
-void gfxPlatform::GetAcceleratedCompositorBackends(
-    nsTArray<LayersBackend>& aBackends) {
-  if (gfxConfig::IsEnabled(Feature::OPENGL_COMPOSITING)) {
-    aBackends.AppendElement(LayersBackend::LAYERS_OPENGL);
-  } else {
-    static int tell_me_once = 0;
-    if (!tell_me_once) {
-      NS_WARNING("OpenGL-accelerated layers are not supported on this system");
-      tell_me_once = 1;
-    }
-#ifdef MOZ_WIDGET_ANDROID
-    MOZ_CRASH(
-        "OpenGL-accelerated layers are a hard requirement on this platform. "
-        "Cannot continue without support for them");
-#endif
-  }
-}
-
-void gfxPlatform::GetCompositorBackends(
-    bool useAcceleration, nsTArray<mozilla::layers::LayersBackend>& aBackends) {
-  if (useAcceleration) {
-    GetAcceleratedCompositorBackends(aBackends);
-  }
-  aBackends.AppendElement(LayersBackend::LAYERS_BASIC);
 }
 
 void gfxPlatform::NotifyCompositorCreated(LayersBackend aBackend) {

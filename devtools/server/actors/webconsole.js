@@ -198,11 +198,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
         "last-pb-context-exited"
       );
     }
-
-    this.traits = {
-      // Supports retrieving blocked urls
-      blockedUrls: true,
-    };
   },
   /**
    * Debugger instance.
@@ -238,12 +233,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
    * @type object
    */
   conn: null,
-
-  /**
-   * List of supported features by the console actor.
-   * @type object
-   */
-  traits: null,
 
   /**
    * The global we work with (this can be a Window, a Worker global or even a Sandbox
@@ -626,7 +615,10 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
           if (!this.consoleServiceListener) {
             this.consoleServiceListener = new ConsoleServiceListener(
               global,
-              this.onConsoleServiceMessage
+              this.onConsoleServiceMessage,
+              {
+                matchExactWindow: this.parentActor.ignoreSubFrames,
+              }
             );
             this.consoleServiceListener.init();
           }
@@ -639,7 +631,10 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
             this.consoleAPIListener = new ConsoleAPIListener(
               global,
               this.onConsoleAPICall,
-              this.parentActor.consoleAPIListenerOptions
+              {
+                matchExactWindow: this.parentActor.ignoreSubFrames,
+                ...(this.parentActor.consoleAPIListenerOptions || {}),
+              }
             );
             this.consoleAPIListener.init();
           }
@@ -696,7 +691,10 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
             // service workers requests)
             new NetworkMonitorActor(
               this.conn,
-              { window: global },
+              {
+                window: global,
+                matchExactWindow: this.parentActor.ignoreSubFrames,
+              },
               this.actorID,
               mmMockParent
             );
@@ -711,7 +709,10 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
             // requests, as well with the NetworkMonitorActor running in the parent
             // process. It will communicate via message manager for this one.
             this.stackTraceCollector = new StackTraceCollector(
-              { window: global },
+              {
+                window: global,
+                matchExactWindow: this.parentActor.ignoreSubFrames,
+              },
               this.netmonitors
             );
             this.stackTraceCollector.init();
@@ -782,7 +783,6 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
     return {
       startedListeners: startedListeners,
       nativeConsoleAPI: this.hasNativeConsoleAPI(this.global),
-      traits: this.traits,
     };
   },
 
@@ -1503,6 +1503,8 @@ const WebConsoleActor = ActorClassWithSpec(webconsoleSpec, {
       // If were dealing with the root actor (e.g. the browser console), we want
       // to remove all cached messages, not only the ones specific to a window.
       Services.console.reset();
+    } else if (this.parentActor.ignoreSubFrames) {
+      Services.console.resetWindow(windowId);
     } else {
       WebConsoleUtils.getInnerWindowIDsForFrames(this.global).forEach(id =>
         Services.console.resetWindow(id)

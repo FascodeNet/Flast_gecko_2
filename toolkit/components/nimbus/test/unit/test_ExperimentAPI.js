@@ -1,17 +1,13 @@
 "use strict";
 
-const {
-  ExperimentAPI,
-  _ExperimentFeature: ExperimentFeature,
-} = ChromeUtils.import("resource://nimbus/ExperimentAPI.jsm");
+const { ExperimentAPI } = ChromeUtils.import(
+  "resource://nimbus/ExperimentAPI.jsm"
+);
 const { ExperimentFakes } = ChromeUtils.import(
   "resource://testing-common/NimbusTestUtils.jsm"
 );
 const { TestUtils } = ChromeUtils.import(
   "resource://testing-common/TestUtils.jsm"
-);
-const { TelemetryTestUtils } = ChromeUtils.import(
-  "resource://testing-common/TelemetryTestUtils.jsm"
 );
 const COLLECTION_ID_PREF = "messaging-system.rsexperimentloader.collection_id";
 
@@ -140,7 +136,7 @@ add_task(async function test_getExperiment_feature() {
     branch: {
       slug: "treatment",
       value: { title: "hi" },
-      feature: { featureId: "cfr", enabled: true, value: null },
+      features: [{ featureId: "cfr", enabled: true, value: null }],
     },
   });
 
@@ -189,6 +185,51 @@ add_task(async function test_getExperiment_safe() {
   }
 
   sandbox.restore();
+});
+
+add_task(async function test_getExperiment_featureAccess() {
+  const sandbox = sinon.createSandbox();
+  const expected = ExperimentFakes.experiment("foo", {
+    branch: {
+      slug: "treatment",
+      value: { title: "hi" },
+      features: [{ featureId: "cfr", value: { message: "content" } }],
+    },
+  });
+  const stub = sandbox
+    .stub(ExperimentAPI._store, "getExperimentForFeature")
+    .returns(expected);
+
+  let { branch } = ExperimentAPI.getExperiment({ featureId: "cfr" });
+
+  Assert.equal(branch.slug, "treatment");
+  let feature = branch.cfr;
+  Assert.ok(feature, "Should allow to access by featureId");
+  Assert.equal(feature.value.message, "content");
+
+  stub.restore();
+});
+
+add_task(async function test_getExperiment_featureAccess_backwardsCompat() {
+  const sandbox = sinon.createSandbox();
+  const expected = ExperimentFakes.experiment("foo", {
+    branch: {
+      slug: "treatment",
+      feature: { featureId: "cfr", value: { message: "content" } },
+    },
+  });
+  const stub = sandbox
+    .stub(ExperimentAPI._store, "getExperimentForFeature")
+    .returns(expected);
+
+  let { branch } = ExperimentAPI.getExperiment({ featureId: "cfr" });
+
+  Assert.equal(branch.slug, "treatment");
+  let feature = branch.cfr;
+  Assert.ok(feature, "Should allow to access by featureId");
+  Assert.equal(feature.value.message, "content");
+
+  stub.restore();
 });
 
 /**
@@ -243,6 +284,62 @@ add_task(async function test_getAllBranches() {
   sandbox.restore();
 });
 
+// API used by Messaging System
+add_task(async function test_getAllBranches_featureIdAccessor() {
+  const sandbox = sinon.createSandbox();
+  const RECIPE = ExperimentFakes.recipe("foo");
+  sandbox.stub(ExperimentAPI._remoteSettingsClient, "get").resolves([RECIPE]);
+
+  const branches = await ExperimentAPI.getAllBranches("foo");
+  Assert.deepEqual(
+    branches,
+    RECIPE.branches,
+    "should return all branches if found a recipe"
+  );
+  branches.forEach(branch => {
+    Assert.equal(
+      branch["test-feature"].featureId,
+      "test-feature",
+      "Should use the experimentBranchAccessor proxy getter"
+    );
+  });
+
+  sandbox.restore();
+});
+
+// For schema version before 1.6.2 branch.feature was accessed
+// instead of branch.features
+add_task(async function test_getAllBranches_backwardsCompat() {
+  const sandbox = sinon.createSandbox();
+  const RECIPE = ExperimentFakes.recipe("foo");
+  delete RECIPE.branches[0].features;
+  delete RECIPE.branches[1].features;
+  let feature = {
+    featureId: "backwardsCompat",
+    enabled: true,
+    value: null,
+  };
+  RECIPE.branches[0].feature = feature;
+  RECIPE.branches[1].feature = feature;
+  sandbox.stub(ExperimentAPI._remoteSettingsClient, "get").resolves([RECIPE]);
+
+  const branches = await ExperimentAPI.getAllBranches("foo");
+  Assert.deepEqual(
+    branches,
+    RECIPE.branches,
+    "should return all branches if found a recipe"
+  );
+  branches.forEach(branch => {
+    Assert.equal(
+      branch.backwardsCompat.featureId,
+      "backwardsCompat",
+      "Should use the experimentBranchAccessor proxy getter"
+    );
+  });
+
+  sandbox.restore();
+});
+
 add_task(async function test_getAllBranches_Failure() {
   const sandbox = sinon.createSandbox();
   sandbox.stub(ExperimentAPI._remoteSettingsClient, "get").throws();
@@ -264,7 +361,7 @@ add_task(async function test_addExperiment_eventEmit_add() {
   const experiment = ExperimentFakes.experiment("foo", {
     branch: {
       slug: "variant",
-      feature: { featureId: "purple", enabled: true, value: null },
+      features: [{ featureId: "purple", enabled: true, value: null }],
     },
   });
   const store = ExperimentFakes.store();
@@ -299,7 +396,7 @@ add_task(async function test_updateExperiment_eventEmit_add_and_update() {
   const experiment = ExperimentFakes.experiment("foo", {
     branch: {
       slug: "variant",
-      feature: { featureId: "purple", enabled: true, value: null },
+      features: [{ featureId: "purple", enabled: true, value: null }],
     },
   });
   const store = ExperimentFakes.store();
@@ -333,7 +430,7 @@ add_task(async function test_updateExperiment_eventEmit_off() {
   const experiment = ExperimentFakes.experiment("foo", {
     branch: {
       slug: "variant",
-      feature: { featureId: "purple", enabled: true, value: null },
+      features: [{ featureId: "purple", enabled: true, value: null }],
     },
   });
   const store = ExperimentFakes.store();
@@ -363,7 +460,7 @@ add_task(async function test_activateBranch() {
   const experiment = ExperimentFakes.experiment("foo", {
     branch: {
       slug: "variant",
-      feature: { featureId: "green", enabled: true, value: null },
+      features: [{ featureId: "green", enabled: true, value: null }],
     },
   });
 
@@ -403,7 +500,7 @@ add_task(async function test_activateBranch_storeFailure() {
   const experiment = ExperimentFakes.experiment("foo", {
     branch: {
       slug: "variant",
-      feature: { featureId: "green", enabled: true },
+      features: [{ featureId: "green", enabled: true }],
     },
   });
 
@@ -430,7 +527,7 @@ add_task(async function test_activateBranch_noActivationEvent() {
   const experiment = ExperimentFakes.experiment("foo", {
     branch: {
       slug: "variant",
-      feature: { featureId: "green", enabled: true },
+      features: [{ featureId: "green", enabled: true }],
     },
   });
 

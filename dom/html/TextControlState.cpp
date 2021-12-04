@@ -62,15 +62,15 @@ using ValueSetterOptions = TextControlState::ValueSetterOptions;
 NS_IMPL_CYCLE_COLLECTION_CLASS(TextControlElement)
 
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(
-    TextControlElement, nsGenericHTMLFormElementWithState)
+    TextControlElement, nsGenericHTMLFormControlElementWithState)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(
-    TextControlElement, nsGenericHTMLFormElementWithState)
+    TextControlElement, nsGenericHTMLFormControlElementWithState)
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
 NS_IMPL_ISUPPORTS_CYCLE_COLLECTION_INHERITED_0(
-    TextControlElement, nsGenericHTMLFormElementWithState)
+    TextControlElement, nsGenericHTMLFormControlElementWithState)
 
 /*static*/
 bool TextControlElement::GetWrapPropertyEnum(
@@ -110,6 +110,22 @@ TextControlElement::GetTextControlElementFromEditingHost(nsIContent* aHost) {
   RefPtr<TextControlElement> parent =
       TextControlElement::FromNodeOrNull(aHost->GetParent());
   return parent.forget();
+}
+
+TextControlElement::FocusTristate TextControlElement::FocusState() {
+  // We can't be focused if we aren't in a (composed) document
+  Document* doc = GetComposedDoc();
+  if (!doc) {
+    return FocusTristate::eUnfocusable;
+  }
+
+  // first see if we are disabled or not. If disabled then do nothing.
+  if (IsDisabled()) {
+    return FocusTristate::eUnfocusable;
+  }
+
+  return IsInActiveTab(doc) ? FocusTristate::eActiveWindow
+                            : FocusTristate::eInactiveWindow;
 }
 
 using ValueChangeKind = TextControlElement::ValueChangeKind;

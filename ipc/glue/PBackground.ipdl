@@ -36,6 +36,7 @@ include protocol PTemporaryIPCBlob;
 include protocol PFileCreator;
 include protocol PMessagePort;
 include protocol PCameras;
+include protocol PLockManager;
 include protocol PMIDIManager;
 include protocol PMIDIPort;
 include protocol PQuota;
@@ -50,6 +51,7 @@ include protocol PUDPSocket;
 include protocol PVerifySSLServerCert;
 include protocol PVsync;
 include protocol PRemoteDecoderManager;
+include protocol PWebSocketConnection;
 
 include DOMTypes;
 include IPCBlob;
@@ -104,6 +106,7 @@ namespace ipc {
   manages PHttpBackgroundChannel;
   manages PIdleScheduler;
   manages PRemoteLazyInputStream;
+  manages PLockManager;
   manages PMediaTransport;
   manages PRemoteWorker;
   manages PRemoteWorkerController;
@@ -123,6 +126,7 @@ namespace ipc {
   manages PServiceWorkerManager;
   manages PServiceWorkerRegistration;
   manages PWebAuthnTransaction;
+  manages PWebSocketConnection;
   manages PUDPSocket;
   manages PVerifySSLServerCert;
   manages PVsync;
@@ -277,6 +281,10 @@ parent:
 
   async EnsureRDDProcessAndCreateBridge()
       returns (nsresult rv, Endpoint<PRemoteDecoderManagerChild> aEndpoint);
+
+  async PWebSocketConnection(uint32_t aListenerId);
+
+  async PLockManager(ContentPrincipalInfo aPrincipalInfo, nsID aClientId);
 
 child:
   async PCache();

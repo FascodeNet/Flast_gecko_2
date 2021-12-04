@@ -25,7 +25,7 @@ def getAppVersionWithoutMilestone() {
 // This gives us 3 digits for the major number, and 2 digits
 // each for the minor and build number. Beta and Release
 //
-// This must be synchronized with _compute_gecko_version(...) in /taskcluster/taskgraph/transforms/task.py
+// This must be synchronized with _compute_gecko_version(...) in /taskcluster/gecko_taskgraph/transforms/task.py
 def computeVersionCode() {
     String appVersion = getAppVersionWithoutMilestone()
 
@@ -287,7 +287,7 @@ dependencies {
     androidTestImplementation 'androidx.test.ext:junit:1.1.0'
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.1.0'
 
-    androidTestImplementation 'com.koushikdutta.async:androidasync:2.+'
+    androidTestImplementation 'com.koushikdutta.async:androidasync:3.1.0'
 
     androidTestImplementation 'androidx.multidex:multidex:2.0.0'
 }

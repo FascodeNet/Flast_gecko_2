@@ -8,9 +8,13 @@
 // TODO:
 // * find out how the Chrome implementation deals with conflicts
 
-/* exported extensionIdToCollectionId */
+// TODO bug 1637465: Remove the Kinto-based storage implementation.
 
-var EXPORTED_SYMBOLS = ["ExtensionStorageSync", "extensionStorageSync"];
+var EXPORTED_SYMBOLS = [
+  "ExtensionStorageSync",
+  "KintoStorageTestUtils",
+  "extensionStorageSync",
+];
 
 const global = this;
 
@@ -55,6 +59,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   Kinto: "resource://services-common/kinto-offline-client.js",
   FirefoxAdapter: "resource://services-common/kinto-storage-adapter.js",
   Observers: "resource://services-common/observers.js",
+  Services: "resource://gre/modules/Services.jsm",
   Utils: "resource://services-sync/util.js",
 });
 
@@ -497,10 +502,7 @@ class CryptoCollection {
       // This is a new keyring. Invent an ID for this record. If this
       // changes, it means a client replaced the keyring, so we need to
       // reupload everything.
-      const uuidgen = Cc["@mozilla.org/uuid-generator;1"].getService(
-        Ci.nsIUUIDGenerator
-      );
-      const uuid = uuidgen.generateUUID().toString();
+      const uuid = Services.uuid.generateUUID().toString();
       data = { uuid, id: STORAGE_SYNC_CRYPTO_KEYRING_RECORD_ID };
     }
     return data;
@@ -1370,3 +1372,14 @@ class ExtensionStorageSync {
 }
 this.ExtensionStorageSync = ExtensionStorageSync;
 extensionStorageSync = new ExtensionStorageSync(_fxaService);
+
+// For test use only.
+const KintoStorageTestUtils = {
+  CollectionKeyEncryptionRemoteTransformer,
+  CryptoCollection,
+  EncryptionRemoteTransformer,
+  KeyRingEncryptionRemoteTransformer,
+  cleanUpForContext,
+  idToKey,
+  keyToId,
+};

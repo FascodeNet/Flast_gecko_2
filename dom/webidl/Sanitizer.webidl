@@ -11,17 +11,17 @@
  */
 
 
-typedef (DOMString or DocumentFragment or Document) SanitizerInput;
+typedef (DocumentFragment or Document) SanitizerInput;
 typedef record<DOMString, sequence<DOMString>> AttributeMatchList;
 
 [Exposed=Window, SecureContext, Pref="dom.security.sanitizer.enabled"]
 interface Sanitizer {
-  [Throws]
+  [Throws, UseCounter]
   constructor(optional SanitizerConfig sanitizerConfig = {});
-  [Throws]
+  [UseCounter, Throws]
   DocumentFragment sanitize(SanitizerInput input);
-  [Throws]
-  DOMString sanitizeToString(SanitizerInput input);
+  [UseCounter, Throws]
+  Element? sanitizeFor(DOMString element, DOMString input);
 };
 
 dictionary SanitizerConfig {
@@ -31,4 +31,5 @@ dictionary SanitizerConfig {
   AttributeMatchList allowAttributes;
   AttributeMatchList dropAttributes;
   boolean allowCustomElements;
+  boolean allowComments;
 };

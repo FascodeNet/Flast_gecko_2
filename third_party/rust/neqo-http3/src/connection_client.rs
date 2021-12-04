@@ -10,9 +10,12 @@ use crate::hframe::HFrame;
 use crate::push_controller::PushController;
 use crate::push_stream::PushStream;
 use crate::recv_message::{MessageType, RecvMessage};
+use crate::request_target::{AsRequestTarget, RequestTarget};
 use crate::send_message::{SendMessage, SendMessageEvents};
 use crate::settings::HSettings;
-use crate::{Header, ReceiveOutput, RecvMessageEvents, ResetType};
+use crate::{
+    Header, NewStreamType, Priority, PriorityHandler, ReceiveOutput, RecvMessageEvents, ResetType,
+};
 use neqo_common::{
     event::Provider as EventProvider, hex, hex_with_len, qdebug, qinfo, qlog::NeqoQlog, qtrace,
     Datagram, Decoder, Encoder, Role,
@@ -170,7 +173,7 @@ impl Http3Client {
     /// the same origin.
     #[must_use]
     pub fn connection_id(&self) -> &ConnectionId {
-        &self.conn.odcid().expect("Client always has odcid")
+        self.conn.odcid().expect("Client always has odcid")
     }
 
     /// A resumption token encodes transport and settings parameter as well.
@@ -261,23 +264,21 @@ impl Http3Client {
     /// is created. A response body may be added by calling `send_request_body`.
     /// # Errors
     /// If a new stream cannot be created an error will be return.
-    pub fn fetch(
+    pub fn fetch<'x, 't: 'x, T>(
         &mut self,
         now: Instant,
         method: &str,
-        scheme: &str,
-        host: &str,
-        path: &str,
+        target: &'t T,
         headers: &[Header],
-    ) -> Res<u64> {
-        qinfo!(
-            [self],
-            "Fetch method={}, scheme={}, host={}, path={}",
-            method,
-            scheme,
-            host,
-            path
-        );
+        priority: Priority,
+    ) -> Res<u64>
+    where
+        T: AsRequestTarget<'x> + ?Sized,
+    {
+        let target = target
+            .as_request_target()
+            .map_err(|_| Error::InvalidRequestTarget)?;
+        qinfo!([self], "Fetch method={}, target={:?}", method, target);
         // Requests cannot be created when a connection is in states: Initializing, GoingAway, Closing and Closed.
         match self.base_handler.state() {
             Http3State::GoingAway(..) | Http3State::Closing(..) | Http3State::Closed(..) => {
@@ -296,10 +297,13 @@ impl Http3Client {
         // Transform pseudo-header fields
         let mut final_headers = vec![
             Header::new(":method", method),
-            Header::new(":scheme", scheme),
-            Header::new(":authority", host),
-            Header::new(":path", path),
+            Header::new(":scheme", target.scheme()),
+            Header::new(":authority", target.authority()),
+            Header::new(":path", target.path()),
         ];
+        if let Some(priority_header) = priority.header() {
+            final_headers.push(priority_header);
+        }
         final_headers.extend_from_slice(headers);
 
         self.base_handler.add_streams(
@@ -311,6 +315,7 @@ impl Http3Client {
                 Rc::clone(&self.base_handler.qpack_decoder),
                 Box::new(self.events.clone()),
                 Some(Rc::clone(&self.push_handler)),
+                PriorityHandler::new(false, priority),
             )),
         );
 
@@ -333,6 +338,16 @@ impl Http3Client {
         }
 
         Ok(id)
+    }
+
+    /// Send an [`PRIORITY_UPDATE`-frame][1] on next [Http3Client::process_output()]-call,
+    /// returns if the priority got changed
+    /// # Errors
+    /// `InvalidStreamId` if the stream does not exist
+    ///
+    /// [1]: https://datatracker.ietf.org/doc/html/draft-kazuho-httpbis-priority-04#section-5.2
+    pub fn priority_update(&mut self, stream_id: u64, priority: Priority) -> Res<bool> {
+        self.base_handler.queue_update_priority(stream_id, priority)
     }
 
     /// An application may reset a stream(request).
@@ -540,7 +555,7 @@ impl Http3Client {
                     StreamType::BiDi => return Err(Error::HttpStreamCreation),
                     StreamType::UniDi => self
                         .base_handler
-                        .handle_new_unidi_stream(stream_id.as_u64()),
+                        .handle_new_unidi_stream(stream_id.as_u64(), Role::Client),
                 },
                 ConnectionEvent::SendStreamWritable { stream_id } => {
                     if let Some(s) = self.base_handler.send_streams.get_mut(&stream_id.as_u64()) {
@@ -570,13 +585,13 @@ impl Http3Client {
                 } => self
                     .base_handler
                     .handle_stream_stop_sending(stream_id, app_error)?,
-                ConnectionEvent::SendStreamComplete { .. } => {}
+
                 ConnectionEvent::SendStreamCreatable { stream_type } => {
-                    self.events.new_requests_creatable(stream_type)
+                    self.events.new_requests_creatable(stream_type);
                 }
                 ConnectionEvent::AuthenticationNeeded => self.events.authentication_needed(),
                 ConnectionEvent::EchFallbackAuthenticationNeeded { public_name } => {
-                    self.events.ech_fallback_authentication_needed(public_name)
+                    self.events.ech_fallback_authentication_needed(public_name);
                 }
                 ConnectionEvent::StateChange(state) => {
                     if self
@@ -595,6 +610,10 @@ impl Http3Client {
                 ConnectionEvent::ResumptionToken(token) => {
                     self.create_resumption_token(&token);
                 }
+                ConnectionEvent::SendStreamComplete { .. }
+                | ConnectionEvent::Datagram { .. }
+                | ConnectionEvent::OutgoingDatagramOutcome { .. }
+                | ConnectionEvent::IncomingDatagramDropped => {}
             }
         }
         Ok(())
@@ -605,7 +624,9 @@ impl Http3Client {
             .base_handler
             .handle_stream_readable(&mut self.conn, stream_id)?
         {
-            ReceiveOutput::PushStream => self.handle_new_push_stream(stream_id),
+            ReceiveOutput::NewStream(NewStreamType::Push(push_id)) => {
+                self.handle_new_push_stream(stream_id, push_id)
+            }
             ReceiveOutput::ControlFrames(control_frames) => {
                 for f in control_frames {
                     match f {
@@ -613,11 +634,13 @@ impl Http3Client {
                             .push_handler
                             .borrow_mut()
                             .handle_cancel_push(push_id, &mut self.conn, &mut self.base_handler),
-                        HFrame::MaxPushId { .. } => Err(Error::HttpFrameUnexpected),
+                        HFrame::MaxPushId { .. }
+                        | HFrame::PriorityUpdateRequest { .. }
+                        | HFrame::PriorityUpdatePush { .. } => Err(Error::HttpFrameUnexpected),
                         HFrame::Goaway { stream_id } => self.handle_goaway(stream_id),
                         _ => {
                             unreachable!(
-                                "we should only put MaxPushId and Goaway into control_frames."
+                                "we should only put MaxPushId, Goaway and PriorityUpdates into control_frames."
                             );
                         }
                     }?;
@@ -628,25 +651,44 @@ impl Http3Client {
         }
     }
 
-    fn handle_new_push_stream(&mut self, stream_id: u64) -> Res<()> {
-        if self.push_handler.borrow().can_receive_push() {
-            self.base_handler.add_recv_stream(
-                stream_id,
-                Box::new(PushStream::new(
-                    stream_id,
-                    Rc::clone(&self.push_handler),
-                    Rc::clone(&self.base_handler.qpack_decoder),
-                    self.events.clone(),
-                )),
-            );
-            let res = self
-                .base_handler
-                .handle_stream_readable(&mut self.conn, stream_id)?;
-            debug_assert!(matches!(res, ReceiveOutput::NoOutput));
-            Ok(())
-        } else {
-            Err(Error::HttpId)
+    fn handle_new_push_stream(&mut self, stream_id: u64, push_id: u64) -> Res<()> {
+        if !self.push_handler.borrow().can_receive_push() {
+            return Err(Error::HttpId);
         }
+
+        // Add a new push stream to `PushController`. `add_new_push_stream` may return an error
+        // (this will be a connection error) or a bool.
+        // If false is returned that means that the stream should be reset because the push has
+        // been already canceled (CANCEL_PUSH frame or canceling push from the application).
+        if !self
+            .push_handler
+            .borrow_mut()
+            .add_new_push_stream(push_id, stream_id)?
+        {
+            // We are not interested in the result of stream_stop_sending, we are not interested
+            // in this stream.
+            mem::drop(
+                self.conn
+                    .stream_stop_sending(stream_id, Error::HttpRequestCancelled.code()),
+            );
+            return Ok(());
+        }
+
+        self.base_handler.add_recv_stream(
+            stream_id,
+            Box::new(PushStream::new(
+                stream_id,
+                push_id,
+                Rc::clone(&self.push_handler),
+                Rc::clone(&self.base_handler.qpack_decoder),
+                Priority::default(),
+            )),
+        );
+        let res = self
+            .base_handler
+            .handle_stream_readable(&mut self.conn, stream_id)?;
+        debug_assert!(matches!(res, ReceiveOutput::NoOutput));
+        Ok(())
     }
 
     fn handle_goaway(&mut self, goaway_stream_id: u64) -> Res<()> {
@@ -764,7 +806,7 @@ mod tests {
     use crate::hframe::{HFrame, H3_FRAME_TYPE_SETTINGS, H3_RESERVED_FRAME_TYPES};
     use crate::qpack_encoder_receiver::EncoderRecvStream;
     use crate::settings::{HSetting, HSettingType, H3_RESERVED_SETTINGS};
-    use crate::{Http3Server, RecvStream};
+    use crate::{Http3Server, Priority, RecvStream};
     use neqo_common::{event::Provider, qtrace, Datagram, Decoder, Encoder};
     use neqo_crypto::{AllowZeroRtt, AntiReplay, ResumptionToken};
     use neqo_qpack::encoder::QPackEncoder;
@@ -784,7 +826,7 @@ mod tests {
     fn assert_closed(client: &Http3Client, expected: &Error) {
         match client.state() {
             Http3State::Closing(err) | Http3State::Closed(err) => {
-                assert_eq!(err, ConnectionError::Application(expected.code()))
+                assert_eq!(err, ConnectionError::Application(expected.code()));
             }
             _ => panic!("Wrong state {:?}", client.state()),
         };
@@ -1089,7 +1131,7 @@ mod tests {
             let header_block = self
                 .encoder
                 .borrow_mut()
-                .encode_header_block(&mut self.conn, &headers, stream_id)
+                .encode_header_block(&mut self.conn, headers, stream_id)
                 .unwrap();
             let hframe = HFrame::Headers {
                 header_block: header_block.to_vec(),
@@ -1172,6 +1214,24 @@ mod tests {
     }
 
     // Perform Quic transport handshake and exchange Http3 settings.
+    fn connect_with_connection_parameters(
+        server_conn_params: ConnectionParameters,
+    ) -> (Http3Client, TestServer) {
+        // connecting with default max_table_size
+        let mut client = default_http3_client_param(100);
+        let server = Connection::new_server(
+            test_fixture::DEFAULT_KEYS,
+            test_fixture::DEFAULT_ALPN_H3,
+            Rc::new(RefCell::new(CountingConnectionIdGenerator::default())),
+            server_conn_params,
+        )
+        .unwrap();
+        let mut server = TestServer::new_with_conn(server);
+        connect_with(&mut client, &mut server);
+        (client, server)
+    }
+
+    // Perform Quic transport handshake and exchange Http3 settings.
     fn connect() -> (Http3Client, TestServer) {
         let mut client = default_http3_client();
         let mut server = TestServer::new();
@@ -1182,7 +1242,13 @@ mod tests {
     // Fetch request fetch("GET", "https", "something.com", "/", headers).
     fn make_request(client: &mut Http3Client, close_sending_side: bool, headers: &[Header]) -> u64 {
         let request_stream_id = client
-            .fetch(now(), "GET", "https", "something.com", "/", headers)
+            .fetch(
+                now(),
+                "GET",
+                "https://something.com/",
+                headers,
+                Priority::default(),
+            )
             .unwrap();
         if close_sending_side {
             client.stream_close_send(request_stream_id).unwrap();
@@ -1732,6 +1798,17 @@ mod tests {
         test_wrong_frame_on_control_stream(&[0x5, 0x2, 0x1, 0x2]);
     }
 
+    // send PRIORITY_UPDATE frame on a control stream to the client
+    #[test]
+    fn test_priority_update_request_on_control_stream() {
+        test_wrong_frame_on_control_stream(&[0x80, 0x0f, 0x07, 0x00, 0x01, 0x03]);
+    }
+
+    #[test]
+    fn test_priority_update_push_on_control_stream() {
+        test_wrong_frame_on_control_stream(&[0x80, 0x0f, 0x07, 0x01, 0x01, 0x03]);
+    }
+
     fn test_wrong_frame_on_push_stream(v: &[u8]) {
         let (mut client, mut server, request_stream_id) = connect_and_send_request(false);
 
@@ -1766,6 +1843,16 @@ mod tests {
     #[test]
     fn test_push_promise_frame_on_push_stream() {
         test_wrong_frame_on_push_stream(&[0x5, 0x2, 0x1, 0x2]);
+    }
+
+    #[test]
+    fn test_priority_update_request_on_push_stream() {
+        test_wrong_frame_on_push_stream(&[0x80, 0x0f, 0x07, 0x00, 0x01, 0x03]);
+    }
+
+    #[test]
+    fn test_priority_update_push_on_push_stream() {
+        test_wrong_frame_on_push_stream(&[0x80, 0x0f, 0x07, 0x01, 0x01, 0x03]);
     }
 
     #[test]
@@ -1849,6 +1936,16 @@ mod tests {
     #[test]
     fn test_max_push_id_frame_on_request_stream() {
         test_wrong_frame_on_request_stream(&[0xd, 0x1, 0x5]);
+    }
+
+    #[test]
+    fn test_priority_update_request_on_request_stream() {
+        test_wrong_frame_on_request_stream(&[0x80, 0x0f, 0x07, 0x00, 0x01, 0x03]);
+    }
+
+    #[test]
+    fn test_priority_update_push_on_request_stream() {
+        test_wrong_frame_on_request_stream(&[0x80, 0x0f, 0x07, 0x01, 0x01, 0x03]);
     }
 
     // Test reading of a slowly streamed frame. bytes are received one by one
@@ -2748,7 +2845,7 @@ mod tests {
                 assert_eq!(res.unwrap_err(), Error::HttpFrame);
             }
         }
-        assert_closed(&client, &error);
+        assert_closed(&client, error);
     }
 
     // Incomplete DATA frame
@@ -2842,7 +2939,13 @@ mod tests {
 
         // Check that a new request cannot be made.
         assert_eq!(
-            client.fetch(now(), "GET", "https", "something.com", "/", &[]),
+            client.fetch(
+                now(),
+                "GET",
+                &("https", "something.com", "/"),
+                &[],
+                Priority::default()
+            ),
             Err(Error::AlreadyClosed)
         );
 
@@ -3341,8 +3444,7 @@ mod tests {
                 );
             }
             x => {
-                eprintln!("event {:?}", x);
-                panic!()
+                panic!("event {:?}", x);
             }
         }
 
@@ -3390,8 +3492,7 @@ mod tests {
                 assert!(fin);
             }
             x => {
-                eprintln!("event {:?}", x);
-                panic!()
+                panic!("event {:?}", x);
             }
         }
         // Stream should now be closed and gone
@@ -3463,8 +3564,7 @@ mod tests {
                     assert_eq!(stream_id, request_stream_id);
                 }
                 x => {
-                    eprintln!("event {:?}", x);
-                    panic!()
+                    panic!("event {:?}", x);
                 }
             }
         }
@@ -3651,7 +3751,13 @@ mod tests {
     fn zero_rtt_before_resumption_token() {
         let mut client = default_http3_client();
         assert!(client
-            .fetch(now(), "GET", "https", "something.com", "/", &[])
+            .fetch(
+                now(),
+                "GET",
+                &("https", "something.com", "/"),
+                &[],
+                Priority::default()
+            )
             .is_err());
     }
 
@@ -5713,7 +5819,7 @@ mod tests {
         let encoded_headers = server
             .encoder
             .borrow_mut()
-            .encode_header_block(&mut server.conn, &headers, request_stream_id)
+            .encode_header_block(&mut server.conn, headers, request_stream_id)
             .unwrap();
         let hframe = HFrame::Headers {
             header_block: encoded_headers.to_vec(),
@@ -6236,7 +6342,7 @@ mod tests {
     fn handshake_client_error(client: &mut Http3Client, server: &mut TestServer, error: &Error) {
         let out = handshake_only(client, server);
         client.process(out.dgram(), now());
-        assert_closed(&client, error);
+        assert_closed(client, error);
     }
 
     /// Client fails to create a control stream, since server does not allow it.
@@ -6263,7 +6369,7 @@ mod tests {
         setup_server_side_encoder(&mut client, &mut server);
 
         let mut d = Encoder::default();
-        server.encode_headers(request_stream_id, &headers, &mut d);
+        server.encode_headers(request_stream_id, headers, &mut d);
 
         // Send response
         server_send_response_and_exchange_packet(
@@ -6522,6 +6628,55 @@ mod tests {
         let out = server.conn.process(None, now());
         client.process(out.dgram(), now());
         assert_closed(&client, &Error::HttpGeneralProtocol);
+    }
+
+    #[test]
+    fn priority_update_during_full_buffer() {
+        // set a lower MAX_DATA on the server side to restrict the data the client can send
+        let (mut client, mut server) =
+            connect_with_connection_parameters(ConnectionParameters::default().max_data(1200));
+
+        let request_stream_id = make_request_and_exchange_pkts(&mut client, &mut server, false);
+        let data_writable = |e| matches!(e, Http3ClientEvent::DataWritable { .. });
+        assert!(client.events().any(data_writable));
+        // Send a lot of data to reach the flow control limit
+        client
+            .send_request_body(request_stream_id, &[0; 2000])
+            .unwrap();
+
+        // now queue a priority_update packet for that stream
+        assert!(client
+            .priority_update(request_stream_id, Priority::new(6, false))
+            .unwrap());
+
+        let md_before = server.conn.stats().frame_tx.max_data;
+
+        // sending the http request and most most of the request data
+        let out = client.process(None, now()).dgram();
+        let out = server.conn.process(out, now()).dgram();
+
+        // the server responses with an ack, but the max_data didn't change
+        assert_eq!(md_before, server.conn.stats().frame_tx.max_data);
+
+        let out = client.process(out, now()).dgram();
+        let out = server.conn.process(out, now()).dgram();
+
+        // the server increased the max_data during the second read if that isn't the case
+        // in the future and therefore this asserts fails, the request data on stream 0 could be read
+        // to cause a max_update frame
+        assert_eq!(md_before + 1, server.conn.stats().frame_tx.max_data);
+
+        // make sure that the server didn't receive a priority_update on client control stream (stream_id 2) yet
+        let mut buf = [0; 32];
+        assert_eq!(server.conn.stream_recv(2, &mut buf), Ok((0, false)));
+
+        // the client now sends the priority update
+        let out = client.process(out, now()).dgram();
+        server.conn.process_input(out.unwrap(), now());
+
+        // check that the priority_update arrived at the client control stream
+        let num_read = server.conn.stream_recv(2, &mut buf).unwrap();
+        assert_eq!(b"\x80\x0f\x07\x00\x04\x00\x75\x3d\x36", &buf[0..num_read.0]);
     }
 
     #[test]

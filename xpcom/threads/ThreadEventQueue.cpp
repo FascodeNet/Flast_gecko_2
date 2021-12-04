@@ -84,6 +84,8 @@ bool ThreadEventQueue::PutEventInternal(already_AddRefed<nsIRunnable>&& aEvent,
         runnablePrio->GetPriority(&prio);
         if (prio == nsIRunnablePriority::PRIORITY_CONTROL) {
           aPriority = EventQueuePriority::Control;
+        } else if (prio == nsIRunnablePriority::PRIORITY_RENDER_BLOCKING) {
+          aPriority = EventQueuePriority::RenderBlocking;
         } else if (prio == nsIRunnablePriority::PRIORITY_VSYNC) {
           aPriority = EventQueuePriority::Vsync;
         } else if (prio == nsIRunnablePriority::PRIORITY_INPUT_HIGH) {
@@ -259,7 +261,8 @@ already_AddRefed<nsIThreadObserver> ThreadEventQueue::GetObserverOnThread() {
 
 void ThreadEventQueue::SetObserver(nsIThreadObserver* aObserver) {
   MutexAutoLock lock(mLock);
-  mObserver = aObserver;
+  nsCOMPtr observer = aObserver;
+  mObserver.swap(observer);
   if (NS_IsMainThread()) {
     TaskController::Get()->SetThreadObserver(aObserver);
   }

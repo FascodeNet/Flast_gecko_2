@@ -528,6 +528,12 @@ function _execute_test() {
       );
       geckoViewStartup.observe(null, "profile-after-change", null);
       geckoViewStartup.observe(null, "app-startup", null);
+
+      // Glean needs to be initialized for metric recording & tests to work.
+      // Usually this happens through Glean Kotlin,
+      // but for xpcshell tests we initialize it from here.
+      const FOG = Cc["@mozilla.org/toolkit/glean;1"].createInstance(Ci.nsIFOG);
+      FOG.initializeFOG();
     } catch (ex) {
       do_throw(`Failed to initialize GeckoView: ${ex}`, ex.stack);
     }
@@ -695,10 +701,18 @@ function _execute_test() {
   if (_profileInitialized) {
     // Since we have a profile, we will notify profile shutdown topics at
     // the end of the current test, to ensure correct cleanup on shutdown.
-    _Services.obs.notifyObservers(null, "profile-change-net-teardown");
-    _Services.obs.notifyObservers(null, "profile-change-teardown");
-    _Services.obs.notifyObservers(null, "profile-before-change");
-    _Services.obs.notifyObservers(null, "profile-before-change-qm");
+    _Services.startup.advanceShutdownPhase(
+      _Services.startup.SHUTDOWN_PHASE_APPSHUTDOWNNETTEARDOWN
+    );
+    _Services.startup.advanceShutdownPhase(
+      _Services.startup.SHUTDOWN_PHASE_APPSHUTDOWNTEARDOWN
+    );
+    _Services.startup.advanceShutdownPhase(
+      _Services.startup.SHUTDOWN_PHASE_APPSHUTDOWN
+    );
+    _Services.startup.advanceShutdownPhase(
+      _Services.startup.SHUTDOWN_PHASE_APPSHUTDOWNQM
+    );
 
     _profileInitialized = false;
   }

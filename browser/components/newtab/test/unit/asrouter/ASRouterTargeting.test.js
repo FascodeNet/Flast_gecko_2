@@ -18,6 +18,7 @@ describe("#CachedTargetingGetter", () => {
   let frecentStub;
   let topsitesCache;
   let globals;
+  let doesAppNeedPinStub;
   beforeEach(() => {
     sandbox = sinon.createSandbox();
     clock = sinon.useFakeTimers();
@@ -40,12 +41,38 @@ describe("#CachedTargetingGetter", () => {
         }
       }
     );
+    doesAppNeedPinStub = sandbox.stub().resolves();
   });
 
   afterEach(() => {
     sandbox.restore();
     clock.restore();
     globals.restore();
+  });
+
+  it("should cache allow for optional getter argument", async () => {
+    let cachedGetter = new CachedTargetingGetter(
+      "doesAppNeedPin",
+      undefined,
+      undefined,
+      { doesAppNeedPin: doesAppNeedPinStub }
+    );
+    // Need to tick forward because Date.now() is stubbed
+    clock.tick(sixHours);
+
+    await cachedGetter.get();
+    await cachedGetter.get();
+    await cachedGetter.get();
+
+    // Called once; cached request
+    assert.calledOnce(doesAppNeedPinStub);
+
+    // Expire and call again
+    clock.tick(sixHours);
+    await cachedGetter.get();
+
+    // Call goes through
+    assert.calledTwice(doesAppNeedPinStub);
   });
 
   it("should only make a request every 6 hours", async () => {
@@ -286,6 +313,7 @@ describe("ASRouterTargeting", () => {
     fakeTargetingContext = {
       combineContexts: sandbox.stub(),
       evalWithDefault: sandbox.stub().resolves(),
+      setTelemetrySource: sandbox.stub(),
     };
     globals = new GlobalOverrider();
     globals.set(
@@ -293,6 +321,10 @@ describe("ASRouterTargeting", () => {
       class {
         static combineContexts(...args) {
           return fakeTargetingContext.combineContexts.apply(sandbox, args);
+        }
+
+        setTelemetrySource(id) {
+          fakeTargetingContext.setTelemetrySource(id);
         }
 
         evalWithDefault(expr) {
@@ -306,6 +338,23 @@ describe("ASRouterTargeting", () => {
     clock.restore();
     sandbox.restore();
     globals.restore();
+  });
+  it("should provide message.id as source", async () => {
+    await ASRouterTargeting.checkMessageTargeting(
+      {
+        id: "message",
+        targeting: "true",
+      },
+      fakeTargetingContext,
+      sandbox.stub(),
+      false
+    );
+    assert.calledOnce(fakeTargetingContext.evalWithDefault);
+    assert.calledWithExactly(fakeTargetingContext.evalWithDefault, "true");
+    assert.calledWithExactly(
+      fakeTargetingContext.setTelemetrySource,
+      "message"
+    );
   });
   it("should cache evaluation result", async () => {
     evalStub.resolves(true);

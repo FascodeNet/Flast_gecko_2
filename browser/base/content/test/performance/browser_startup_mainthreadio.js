@@ -214,13 +214,6 @@ const startupPhases = {
       read: 1,
       close: 1,
     },
-    {
-      // bug 1546838
-      path: "ProfD:xulstore/data.mdb",
-      condition: WIN,
-      read: 1,
-      write: 1,
-    },
   ],
 
   "before opening first browser window": [
@@ -350,12 +343,6 @@ const startupPhases = {
       condition: WIN && !AppConstants.MOZILLA_OFFICIAL,
       stat: 1,
     },
-    {
-      // bug 1546838
-      path: "ProfD:xulstore/data.mdb",
-      condition: MAC,
-      write: 1,
-    },
   ],
 
   // We are at this phase once we are ready to handle user events.
@@ -370,14 +357,14 @@ const startupPhases = {
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:cert9.db",
+      path: `ProfD:cert9.db`,
       condition: WIN,
       read: 5,
-      stat: 4,
+      stat: AppConstants.NIGHTLY_BUILD ? 5 : 4,
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:cert9.db",
+      path: `ProfD:cert9.db`,
       condition: WIN,
       ignoreIfUnused: true, // if canonicalize(ProfD) == ProfD, we'll use the previous entry.
       canonicalize: true,
@@ -385,14 +372,14 @@ const startupPhases = {
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:cert9.db-journal",
+      path: `ProfD:cert9.db-journal`,
       condition: WIN,
       canonicalize: true,
       stat: 3,
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:cert9.db-wal",
+      path: `ProfD:cert9.db-wal`,
       condition: WIN,
       canonicalize: true,
       stat: 3,
@@ -405,14 +392,14 @@ const startupPhases = {
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:key4.db",
+      path: `ProfD:key4.db`,
       condition: WIN,
       read: 8,
-      stat: 4,
+      stat: AppConstants.NIGHTLY_BUILD ? 5 : 4,
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:key4.db",
+      path: `ProfD:key4.db`,
       condition: WIN,
       ignoreIfUnused: true, // if canonicalize(ProfD) == ProfD, we'll use the previous entry.
       canonicalize: true,
@@ -420,14 +407,14 @@ const startupPhases = {
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:key4.db-journal",
+      path: `ProfD:key4.db-journal`,
       condition: WIN,
       canonicalize: true,
       stat: 5,
     },
     {
       // bug 1370516 - NSS should be initialized off main thread.
-      path: "ProfD:key4.db-wal",
+      path: `ProfD:key4.db-wal`,
       condition: WIN,
       canonicalize: true,
       stat: 5,
@@ -486,8 +473,8 @@ const startupPhases = {
       ignoreIfUnused: true,
       stat: 4,
       fsync: 3,
-      read: 44,
-      write: 164,
+      read: 47,
+      write: 170,
     },
     {
       // bug 1391590
@@ -503,7 +490,7 @@ const startupPhases = {
       fsync: 2,
       read: 4,
       stat: 3,
-      write: 1317,
+      write: 1320,
     },
     {
       // bug 1391590
@@ -540,13 +527,13 @@ const startupPhases = {
       write: 1300,
     },
     {
-      path: "ProfD:key4.db-journal",
+      path: `ProfD:key4.db-journal`,
       condition: WIN,
       canonicalize: true,
       stat: 2,
     },
     {
-      path: "ProfD:key4.db-wal",
+      path: `ProfD:key4.db-wal`,
       condition: WIN,
       canonicalize: true,
       stat: 2,
@@ -883,12 +870,8 @@ add_task(async function() {
     let path = Cc["@mozilla.org/process/environment;1"]
       .getService(Ci.nsIEnvironment)
       .get("MOZ_UPLOAD_DIR");
-    let encoder = new TextEncoder();
-    let profilePath = OS.Path.join(path, filename);
-    await OS.File.writeAtomic(
-      profilePath,
-      encoder.encode(JSON.stringify(startupRecorder.data.profile))
-    );
+    let profilePath = PathUtils.join(path, filename);
+    await IOUtils.writeJSON(profilePath, startupRecorder.data.profile);
     ok(
       false,
       "Unexpected main thread I/O behavior during startup; open the " +

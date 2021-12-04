@@ -49,7 +49,7 @@ namespace net {
 
 //-----------------------------------------------------------------------------
 
-NS_IMPL_ISUPPORTS(nsHttpConnectionMgr, nsIObserver)
+NS_IMPL_ISUPPORTS(nsHttpConnectionMgr, nsIObserver, nsINamed)
 
 //-----------------------------------------------------------------------------
 
@@ -156,7 +156,8 @@ nsresult nsHttpConnectionMgr::Shutdown() {
   }
 
   // wait for shutdown event to complete
-  SpinEventLoopUntil([&, shutdownWrapper]() { return shutdownWrapper->mBool; });
+  SpinEventLoopUntil("nsHttpConnectionMgr::Shutdown"_ns,
+                     [&, shutdownWrapper]() { return shutdownWrapper->mBool; });
 
   return NS_OK;
 }
@@ -248,6 +249,16 @@ void nsHttpConnectionMgr::ConditionallyStopTimeoutTick() {
 
   mTimeoutTick->Cancel();
   mTimeoutTickArmed = false;
+}
+
+//-----------------------------------------------------------------------------
+// nsHttpConnectionMgr::nsINamed
+//-----------------------------------------------------------------------------
+
+NS_IMETHODIMP
+nsHttpConnectionMgr::GetName(nsACString& aName) {
+  aName.AssignLiteral("nsHttpConnectionMgr");
+  return NS_OK;
 }
 
 //-----------------------------------------------------------------------------
@@ -1637,7 +1648,7 @@ nsresult nsHttpConnectionMgr::ProcessNewTransaction(nsHttpTransaction* trans) {
       trans->Caps() & NS_HTTP_DISALLOW_HTTP3);
   MOZ_ASSERT(ent);
 
-  if (gHttpHandler->EchConfigEnabled()) {
+  if (gHttpHandler->EchConfigEnabled(ci->IsHttp3())) {
     ent->MaybeUpdateEchConfig(ci);
   }
 
@@ -3220,7 +3231,7 @@ ConnectionEntry* nsHttpConnectionMgr::GetOrCreateConnectionEntry(
   }
 
   // step 2
-  if (!prohibitWildCard && !aNoHttp3) {
+  if (!prohibitWildCard && aNoHttp3) {
     RefPtr<nsHttpConnectionInfo> wildCardProxyCI;
     DebugOnly<nsresult> rv =
         specificCI->CreateWildCard(getter_AddRefs(wildCardProxyCI));

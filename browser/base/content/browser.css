@@ -236,7 +236,7 @@ panelview[mainview] > .panel-header {
 %endif
 
 #tabbrowser-tabs[positionpinnedtabs] > #tabbrowser-arrowscrollbox > .tabbrowser-tab[pinned] {
-  position: fixed !important;
+  position: absolute !important;
   display: block;
 }
 
@@ -321,8 +321,7 @@ toolbar[customizing] #whats-new-menu-button {
 :root:not([sizemode=normal]) .titlebar-spacer[type="pre-tabs"],
 %endif
 %endif
-:root:not([chromemargin]) .titlebar-buttonbox-container,
-:root[inFullscreen] .titlebar-buttonbox-container,
+:root:not([chromemargin], [inFullscreen]) .titlebar-buttonbox-container,
 :root[inFullscreen] .titlebar-spacer,
 :root:not([tabsintitlebar]) .titlebar-spacer {
   display: none;
@@ -342,8 +341,8 @@ toolbar[customizing] #whats-new-menu-button {
 }
 %endif
 
-:root:not([sizemode=maximized]) .titlebar-restore,
-:root[sizemode=maximized] .titlebar-max {
+:root:not([sizemode=maximized], [sizemode=fullscreen]) .titlebar-restore,
+:root:is([sizemode=maximized], [sizemode=fullscreen]) .titlebar-max {
   display: none;
 }
 
@@ -361,7 +360,7 @@ toolbar[customizing] #whats-new-menu-button {
   position: relative;
 }
 
-:root:not([tabsintitlebar]) .titlebar-buttonbox {
+:root:not([tabsintitlebar], [sizemode=fullscreen]) .titlebar-buttonbox {
   display: none;
 }
 
@@ -389,18 +388,19 @@ toolbarpaletteitem {
 }
 
 %ifdef XP_MACOSX
-/**
- * On macOS, the window caption buttons are on the left side of the window titlebar,
- * even when using the RTL UI direction. These next rules enforce that ordering.
- */
-#titlebar-secondary-buttonbox:-moz-locale-dir(ltr) {
-  -moz-box-ordinal-group: 1000;
+
+@media not (-moz-mac-rtl) {
+  .titlebar-buttonbox-container:-moz-locale-dir(ltr) {
+    -moz-box-ordinal-group: 0;
+  }
 }
 
-#titlebar-secondary-buttonbox:-moz-locale-dir(rtl),
-.titlebar-buttonbox-container:-moz-locale-dir(ltr) {
-  -moz-box-ordinal-group: 0;
+@media (-moz-mac-rtl) {
+  .titlebar-buttonbox-container:-moz-locale-dir(rtl) {
+    -moz-box-ordinal-group: 0;
+  }
 }
+
 %endif
 
 :root[inDOMFullscreen] #navigator-toolbox,
@@ -1235,6 +1235,7 @@ toolbarpaletteitem[dragover] {
 
 #customization-footer {
   display: flex;
+  align-items: center;
   flex-shrink: 0;
   flex-wrap: wrap;
 }
@@ -1399,7 +1400,6 @@ toolbarpaletteitem:not([place="palette"]) > #stop-reload-button {
 }
 
 .previewRendering {
-  background-image: url("chrome://browser/skin/tabbrowser/pendingpaint.png");
   background-repeat: no-repeat;
   background-size: 60px 60px;
   background-position: center center;
@@ -1416,7 +1416,6 @@ toolbarpaletteitem:not([place="palette"]) > #stop-reload-button {
 .printPreviewBrowser {
   visibility: collapse;
   opacity: 1;
-  transition: opacity 60ms;
 }
 
 .previewStack[previewtype="source"] > .printPreviewBrowser[previewtype="source"],
@@ -1427,7 +1426,6 @@ toolbarpaletteitem:not([place="palette"]) > #stop-reload-button {
 
 .previewStack[rendering=true] > .printPreviewBrowser {
   opacity: 0;
-  transition: opacity 1ms 250ms;
 }
 
 .print-pending-label {
@@ -1437,21 +1435,42 @@ toolbarpaletteitem:not([place="palette"]) > #stop-reload-button {
 
 printpreview-pagination {
   opacity: 0;
-  transition: opacity 100ms 500ms;
 }
 printpreview-pagination:focus-within,
 .previewStack:hover printpreview-pagination {
   opacity: 1;
-  transition: opacity 100ms;
 }
 .previewStack[rendering=true] printpreview-pagination {
   opacity: 0;
 }
 
-@media (-moz-toolbar-prefers-color-scheme: dark) {
+@media (prefers-color-scheme: dark) {
   .previewStack {
     background-color: #2A2A2E;
     color: rgb(249, 249, 250);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .previewRendering {
+    background-image: url("chrome://browser/skin/tabbrowser/pendingpaint.png");
+  }
+
+  .printPreviewBrowser {
+    transition: opacity 60ms;
+  }
+
+  .previewStack[rendering=true] > .printPreviewBrowser {
+    transition: opacity 1ms 250ms;
+  }
+
+  printpreview-pagination {
+    transition: opacity 100ms 500ms;
+  }
+
+  printpreview-pagination:focus-within,
+  .previewStack:hover printpreview-pagination {
+    transition: opacity 100ms;
   }
 }
 
@@ -1517,6 +1536,24 @@ toolbar[keyNav=true]:not([collapsed=true], [customizing=true]) toolbartabstop {
   margin: 0;
   padding: 0;
   overflow-x: auto;
+}
+
+/*
+ * In High Contrast Mode, this prevents a dialog from visually bleeding into
+ * the window behind it, which looks jarring.
+ *
+ * In some ideal world, we would also put a transparent border in the general
+ * case for .dialogBox, so that everything would layout the same either way,
+ * which would presumably make it easier for prefers-contrast renderings to
+ * Just Work. Doing that _would_ change the layout for any existing subdialog
+ * in the tree which doesn't already have a border of some sort, but we could
+ * choose to bite the bullet at some point, as it may turn out to not cause
+ * any real problems.
+ */
+@media (prefers-contrast) {
+.dialogBox {
+  border: 1px solid WindowText;
+}
 }
 
 @media (-moz-proton) {
@@ -1624,7 +1661,7 @@ toolbar[keyNav=true]:not([collapsed=true], [customizing=true]) toolbartabstop {
 }
 
 #window-modal-dialog.showToolbar::backdrop {
-  background: linear-gradient(transparent, rgba(28, 27, 34, 0.45) 20%);
+  background: linear-gradient(transparent, rgba(28, 27, 34, 0.45) 50%);
 }
 
 /* For the window-modal dialog, the background is supplied by the HTML dialog

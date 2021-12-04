@@ -21,12 +21,14 @@
 #include "lib/jxl/color_management.h"
 #include "lib/jxl/dec_external_image.h"
 #include "lib/jxl/enc_external_image.h"
+#include "lib/jxl/enc_image_bundle.h"
 #include "lib/jxl/fields.h"  // AllDefault
 #include "lib/jxl/image.h"
 #include "lib/jxl/image_bundle.h"
 #include "lib/jxl/luminance.h"
 
 namespace jxl {
+namespace extras {
 namespace {
 
 struct HeaderPGX {
@@ -171,94 +173,69 @@ Status EncodeHeader(const ImageBundle& ib, const size_t bits_per_sample,
   }
 
   // Use ML (Big Endian), LM may not be well supported by all decoders.
-  snprintf(header, kMaxHeaderSize, "PG ML + %zu %zu %zu\n%n", bits_per_sample,
-           ib.xsize(), ib.ysize(), chars_written);
+  *chars_written = snprintf(header, kMaxHeaderSize,
+                            "PG ML + %" PRIuS " %" PRIuS " %" PRIuS "\n",
+                            bits_per_sample, ib.xsize(), ib.ysize());
+  JXL_RETURN_IF_ERROR(static_cast<unsigned int>(*chars_written) <
+                      kMaxHeaderSize);
   return true;
-}
-
-Status ApplyHints(CodecInOut* io) {
-  bool got_color_space = false;
-
-  JXL_RETURN_IF_ERROR(io->dec_hints.Foreach(
-      [io, &got_color_space](const std::string& key,
-                             const std::string& value) -> Status {
-        ColorEncoding* c_original = &io->metadata.m.color_encoding;
-        if (key == "color_space") {
-          if (!ParseDescription(value, c_original) ||
-              !c_original->CreateICC()) {
-            return JXL_FAILURE("PGX: Failed to apply color_space");
-          }
-
-          if (!io->metadata.m.color_encoding.IsGray()) {
-            return JXL_FAILURE("PGX: color_space hint must be grayscale");
-          }
-
-          got_color_space = true;
-        } else if (key == "icc_pathname") {
-          PaddedBytes icc;
-          JXL_RETURN_IF_ERROR(ReadFile(value, &icc));
-          JXL_RETURN_IF_ERROR(c_original->SetICC(std::move(icc)));
-          got_color_space = true;
-        } else {
-          JXL_WARNING("PGX decoder ignoring %s hint", key.c_str());
-        }
-        return true;
-      }));
-
-  if (!got_color_space) {
-    JXL_WARNING("PGX: no color_space/icc_pathname given, assuming sRGB");
-    JXL_RETURN_IF_ERROR(
-        io->metadata.m.color_encoding.SetSRGB(ColorSpace::kGray));
-  }
-
-  return true;
-}
-
-template <typename T>
-void ExpectNear(T a, T b, T precision) {
-  JXL_CHECK(std::abs(a - b) <= precision);
-}
-
-Span<const uint8_t> MakeSpan(const char* str) {
-  return Span<const uint8_t>(reinterpret_cast<const uint8_t*>(str),
-                             strlen(str));
 }
 
 }  // namespace
 
-Status DecodeImagePGX(const Span<const uint8_t> bytes, ThreadPool* pool,
-                      CodecInOut* io) {
+Status DecodeImagePGX(const Span<const uint8_t> bytes,
+                      const ColorHints& color_hints,
+                      const SizeConstraints& constraints,
+                      PackedPixelFile* ppf) {
   Parser parser(bytes);
   HeaderPGX header = {};
   const uint8_t* pos;
   if (!parser.ParseHeader(&header, &pos)) return false;
   JXL_RETURN_IF_ERROR(
-      VerifyDimensions(&io->constraints, header.xsize, header.ysize));
+      VerifyDimensions(&constraints, header.xsize, header.ysize));
   if (header.bits_per_sample == 0 || header.bits_per_sample > 32) {
     return JXL_FAILURE("PGX: bits_per_sample invalid");
   }
 
-  JXL_RETURN_IF_ERROR(ApplyHints(io));
-  io->metadata.m.SetUintSamples(header.bits_per_sample);
-  io->metadata.m.SetAlphaBits(0);
-  io->dec_pixels = header.xsize * header.ysize;
-  io->SetSize(header.xsize, header.ysize);
-  io->frames.clear();
-  io->frames.reserve(1);
-  ImageBundle ib(&io->metadata.m);
+  JXL_RETURN_IF_ERROR(ApplyColorHints(color_hints, /*color_already_set=*/false,
+                                      /*is_gray=*/true, ppf));
+  ppf->info.xsize = header.xsize;
+  ppf->info.ysize = header.ysize;
+  // Original data is uint, so exponent_bits_per_sample = 0.
+  ppf->info.bits_per_sample = header.bits_per_sample;
+  ppf->info.exponent_bits_per_sample = 0;
+  ppf->info.uses_original_profile = true;
 
-  const bool has_alpha = false;
-  const bool flipped_y = false;
-  const Span<const uint8_t> span(pos, bytes.data() + bytes.size() - pos);
-  JXL_RETURN_IF_ERROR(ConvertFromExternal(
-      span, header.xsize, header.ysize, io->metadata.m.color_encoding,
-      has_alpha,
-      /*alpha_is_premultiplied=*/false,
-      io->metadata.m.bit_depth.bits_per_sample,
-      header.big_endian ? JXL_BIG_ENDIAN : JXL_LITTLE_ENDIAN, flipped_y, pool,
-      &ib));
-  io->frames.push_back(std::move(ib));
-  SetIntensityTarget(io);
+  // No alpha in PGX
+  ppf->info.alpha_bits = 0;
+  ppf->info.alpha_exponent_bits = 0;
+  ppf->info.num_color_channels = 1;  // Always grayscale
+  ppf->info.orientation = JXL_ORIENT_IDENTITY;
+
+  JxlDataType data_type;
+  if (header.bits_per_sample > 16) {
+    data_type = JXL_TYPE_UINT32;
+  } else if (header.bits_per_sample > 8) {
+    data_type = JXL_TYPE_UINT16;
+  } else {
+    data_type = JXL_TYPE_UINT8;
+  }
+
+  const JxlPixelFormat format{
+      /*num_channels=*/1,
+      /*data_type=*/data_type,
+      /*endianness=*/header.big_endian ? JXL_BIG_ENDIAN : JXL_LITTLE_ENDIAN,
+      /*align=*/0,
+  };
+  ppf->frames.clear();
+  // Allocates the frame buffer.
+  ppf->frames.emplace_back(header.xsize, header.ysize, format);
+  const auto& frame = ppf->frames.back();
+  size_t pgx_remaining_size = bytes.data() + bytes.size() - pos;
+  if (pgx_remaining_size < frame.color.pixels_size) {
+    return JXL_FAILURE("PGX file too small");
+  }
+  memcpy(frame.color.pixels(), pos, frame.color.pixels_size);
   return true;
 }
 
@@ -302,57 +279,5 @@ Status EncodeImagePGX(const CodecInOut* io, const ColorEncoding& c_desired,
   return true;
 }
 
-void TestCodecPGX() {
-  {
-    std::string pgx = "PG ML + 8 2 3\npixels";
-
-    CodecInOut io;
-    ThreadPool* pool = nullptr;
-
-    Status ok = DecodeImagePGX(MakeSpan(pgx.c_str()), pool, &io);
-    JXL_CHECK(ok == true);
-
-    ScaleImage(255.f, io.Main().color());
-
-    JXL_CHECK(!io.metadata.m.bit_depth.floating_point_sample);
-    JXL_CHECK(io.metadata.m.bit_depth.bits_per_sample == 8);
-    JXL_CHECK(io.metadata.m.color_encoding.IsGray());
-    JXL_CHECK(io.xsize() == 2);
-    JXL_CHECK(io.ysize() == 3);
-    float eps = 1e-5;
-    ExpectNear<float>('p', io.Main().color()->Plane(0).Row(0)[0], eps);
-    ExpectNear<float>('i', io.Main().color()->Plane(0).Row(0)[1], eps);
-    ExpectNear<float>('x', io.Main().color()->Plane(0).Row(1)[0], eps);
-    ExpectNear<float>('e', io.Main().color()->Plane(0).Row(1)[1], eps);
-    ExpectNear<float>('l', io.Main().color()->Plane(0).Row(2)[0], eps);
-    ExpectNear<float>('s', io.Main().color()->Plane(0).Row(2)[1], eps);
-  }
-
-  {
-    std::string pgx = "PG ML + 16 2 3\np_i_x_e_l_s_";
-
-    CodecInOut io;
-    ThreadPool* pool = nullptr;
-
-    Status ok = DecodeImagePGX(MakeSpan(pgx.c_str()), pool, &io);
-    JXL_CHECK(ok == true);
-
-    ScaleImage(255.f, io.Main().color());
-
-    JXL_CHECK(!io.metadata.m.bit_depth.floating_point_sample);
-    JXL_CHECK(io.metadata.m.bit_depth.bits_per_sample == 16);
-    JXL_CHECK(io.metadata.m.color_encoding.IsGray());
-    JXL_CHECK(io.xsize() == 2);
-    JXL_CHECK(io.ysize() == 3);
-    float eps = 1e-7;
-    const auto& plane = io.Main().color()->Plane(0);
-    ExpectNear(256.0f * 'p' + '_', plane.Row(0)[0] * 257, eps);
-    ExpectNear(256.0f * 'i' + '_', plane.Row(0)[1] * 257, eps);
-    ExpectNear(256.0f * 'x' + '_', plane.Row(1)[0] * 257, eps);
-    ExpectNear(256.0f * 'e' + '_', plane.Row(1)[1] * 257, eps);
-    ExpectNear(256.0f * 'l' + '_', plane.Row(2)[0] * 257, eps);
-    ExpectNear(256.0f * 's' + '_', plane.Row(2)[1] * 257, eps);
-  }
-}
-
+}  // namespace extras
 }  // namespace jxl

@@ -22,7 +22,6 @@
 #include "vm/JSObject.h"
 #include "vm/ShapeZone.h"
 
-#include "vm/Caches-inl.h"
 #include "vm/JSContext-inl.h"
 #include "vm/JSObject-inl.h"
 #include "vm/NativeObject-inl.h"
@@ -125,6 +124,96 @@ class MOZ_RAII AutoCheckShapeConsistency {
 
 }  // namespace js
 
+static bool ReshapeForShadowedPropSlow(JSContext* cx, HandleNativeObject obj,
+                                       HandleId id) {
+  MOZ_ASSERT(obj->isUsedAsPrototype());
+
+  // Lookups on integer ids cannot be cached through prototypes.
+  if (JSID_IS_INT(id)) {
+    return true;
+  }
+
+  RootedObject proto(cx, obj->staticPrototype());
+  while (proto) {
+    // Lookups will not be cached through non-native protos.
+    if (!proto->is<NativeObject>()) {
+      break;
+    }
+
+    if (proto->as<NativeObject>().contains(cx, id)) {
+      return JSObject::setInvalidatedTeleporting(cx, proto);
+    }
+
+    proto = proto->staticPrototype();
+  }
+
+  return true;
+}
+
+static MOZ_ALWAYS_INLINE bool ReshapeForShadowedProp(JSContext* cx,
+                                                     HandleNativeObject obj,
+                                                     HandleId id) {
+  // If |obj| is a prototype of another object, check if we're shadowing a
+  // property on its proto chain. In this case we need to reshape that object
+  // for shape teleporting to work correctly.
+  //
+  // See also the 'Shape Teleporting Optimization' comment in jit/CacheIR.cpp.
+
+  // Inlined fast path for non-prototype objects.
+  if (!obj->isUsedAsPrototype()) {
+    return true;
+  }
+
+  return ReshapeForShadowedPropSlow(cx, obj, id);
+}
+
+static bool ReshapeForProtoMutation(JSContext* cx, HandleObject obj) {
+  // To avoid the JIT guarding on each prototype in chain to detect prototype
+  // mutation, we can instead reshape the rest of the proto chain such that a
+  // guard on any of them is sufficient. To avoid excessive reshaping and
+  // invalidation, we apply heuristics to decide when to apply this and when
+  // to require a guard.
+  //
+  // There are two cases:
+  //
+  // (1) The object is not marked IsUsedAsPrototype. This is the common case.
+  //     Because shape implies proto, we rely on the caller changing the
+  //     object's shape. The JIT guards on this object's shape or prototype so
+  //     there's nothing we have to do here for objects on the proto chain.
+  //
+  // (2) The object is marked IsUsedAsPrototype. This implies the object may be
+  //     participating in shape teleporting. To invalidate JIT ICs depending on
+  //     the proto chain being unchanged, set the InvalidatedTeleporting shape
+  //     flag for this object and objects on its proto chain.
+  //
+  //     This flag disables future shape teleporting attempts, so next time this
+  //     happens the loop below will be a no-op.
+  //
+  // NOTE: We only handle NativeObjects and don't propagate reshapes through
+  //       any non-native objects on the chain.
+  //
+  // See Also:
+  //  - GeneratePrototypeGuards
+  //  - GeneratePrototypeHoleGuards
+
+  if (!obj->isUsedAsPrototype()) {
+    return true;
+  }
+
+  RootedObject pobj(cx, obj);
+
+  while (pobj && pobj->is<NativeObject>()) {
+    if (!pobj->hasInvalidatedTeleporting()) {
+      if (!JSObject::setInvalidatedTeleporting(cx, pobj)) {
+        return false;
+      }
+    }
+    pobj = pobj->staticPrototype();
+  }
+
+  return true;
+}
+
 /* static */ MOZ_ALWAYS_INLINE bool
 NativeObject::maybeConvertToDictionaryForAdd(JSContext* cx,
                                              HandleNativeObject obj) {
@@ -158,6 +247,10 @@ bool NativeObject::addCustomDataProperty(JSContext* cx, HandleNativeObject obj,
 
   AutoCheckShapeConsistency check(obj);
   AssertValidCustomDataProp(obj, flags);
+
+  if (!ReshapeForShadowedProp(cx, obj, id)) {
+    return false;
+  }
 
   if (!maybeConvertToDictionaryForAdd(cx, obj)) {
     return false;
@@ -278,6 +371,10 @@ bool NativeObject::addProperty(JSContext* cx, HandleNativeObject obj,
       obj->isExtensible() ||
           (JSID_IS_INT(id) && obj->containsDenseElement(JSID_TO_INT(id))));
 
+  if (!ReshapeForShadowedProp(cx, obj, id)) {
+    return false;
+  }
+
   if (!maybeConvertToDictionaryForAdd(cx, obj)) {
     return false;
   }
@@ -386,6 +483,10 @@ bool NativeObject::addPropertyInReservedSlot(JSContext* cx,
 
   // The object must not be in dictionary mode. This simplifies the code below.
   MOZ_ASSERT(!obj->inDictionaryMode());
+
+  // We don't need to call ReshapeForShadowedProp here because this is only used
+  // for non-prototype objects.
+  MOZ_ASSERT(!obj->isUsedAsPrototype());
 
   ObjectFlags objectFlags = obj->shape()->objectFlags();
   const JSClass* clasp = obj->shape()->getObjectClass();
@@ -863,10 +964,21 @@ bool JSObject::setFlag(JSContext* cx, HandleObject obj, ObjectFlag flag) {
 bool JSObject::setProtoUnchecked(JSContext* cx, HandleObject obj,
                                  Handle<TaggedProto> proto) {
   MOZ_ASSERT(cx->compartment() == obj->compartment());
-  MOZ_ASSERT_IF(proto.isObject(), proto.toObject()->isUsedAsPrototype());
+  MOZ_ASSERT(!obj->staticPrototypeIsImmutable());
+  MOZ_ASSERT_IF(!obj->is<ProxyObject>(), obj->nonProxyIsExtensible());
+  MOZ_ASSERT(obj->shape()->proto() != proto);
 
-  if (obj->shape()->proto() == proto) {
-    return true;
+  // Update prototype shapes if needed to invalidate JIT code that is affected
+  // by a prototype mutation.
+  if (!ReshapeForProtoMutation(cx, obj)) {
+    return false;
+  }
+
+  if (proto.isObject()) {
+    RootedObject protoObj(cx, proto.toObject());
+    if (!JSObject::setIsUsedAsPrototype(cx, protoObj)) {
+      return false;
+    }
   }
 
   if (obj->is<NativeObject>() && obj->as<NativeObject>().inDictionaryMode()) {
@@ -955,7 +1067,6 @@ Shape* SharedShape::new_(JSContext* cx, Handle<BaseShape*> base,
                          Handle<SharedPropMap*> map, uint32_t mapLength) {
   Shape* shape = Allocate<Shape>(cx);
   if (!shape) {
-    ReportOutOfMemory(cx);
     return nullptr;
   }
 
@@ -969,7 +1080,6 @@ Shape* DictionaryShape::new_(JSContext* cx, Handle<BaseShape*> base,
                              uint32_t mapLength) {
   Shape* shape = Allocate<Shape>(cx);
   if (!shape) {
-    ReportOutOfMemory(cx);
     return nullptr;
   }
 
@@ -1165,29 +1275,6 @@ Shape* SharedShape::getInitialOrPropMapShape(
   return getPropMapShape(cx, nbase, nfixed, map, mapLength, objectFlags);
 }
 
-void NewObjectCache::invalidateEntriesForShape(Shape* shape) {
-  const JSClass* clasp = shape->getObjectClass();
-
-  gc::AllocKind kind = gc::GetGCObjectKind(shape->numFixedSlots());
-  if (CanChangeToBackgroundAllocKind(kind, clasp)) {
-    kind = ForegroundToBackgroundAllocKind(kind);
-  }
-
-  EntryIndex entry;
-  for (RealmsInZoneIter realm(shape->zone()); !realm.done(); realm.next()) {
-    if (GlobalObject* global = realm->unsafeUnbarrieredMaybeGlobal()) {
-      if (lookupGlobal(clasp, global, kind, &entry)) {
-        PodZero(&entries[entry]);
-      }
-    }
-  }
-
-  JSObject* proto = shape->proto().toObject();
-  if (!proto->is<GlobalObject>() && lookupProto(clasp, proto, kind, &entry)) {
-    PodZero(&entries[entry]);
-  }
-}
-
 /* static */
 void SharedShape::insertInitialShape(JSContext* cx, HandleShape shape) {
   using Lookup = InitialShapeHasher::Lookup;
@@ -1217,20 +1304,6 @@ void SharedShape::insertInitialShape(JSContext* cx, HandleShape shape) {
     if (protoObj->shape()->cache().isShapeWithProto()) {
       protoObj->shape()->cacheRef().setNone();
     }
-  }
-
-  /*
-   * This affects the shape that will be produced by the various NewObject
-   * methods, so clear any cache entry referring to the old shape. This is
-   * not required for correctness: the NewObject must always check for a
-   * nativeEmpty() result and generate the appropriate properties if found.
-   * Clearing the cache entry avoids this duplicate regeneration.
-   *
-   * Clearing is not necessary when this context is running off
-   * thread, as it will not use the new object cache for allocations.
-   */
-  if (!cx->isHelperThreadContext()) {
-    cx->caches().newObjectCache.invalidateEntriesForShape(shape);
   }
 }
 

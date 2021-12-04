@@ -9,6 +9,7 @@
 #include <ole2.h>
 #include <shlobj.h>
 
+#include "nsComponentManagerUtils.h"
 #include "nsDataObj.h"
 #include "nsArrayUtils.h"
 #include "nsClipboard.h"
@@ -28,6 +29,7 @@
 #include "mozilla/Components.h"
 #include "mozilla/SpinEventLoopUntil.h"
 #include "mozilla/Unused.h"
+#include "nsIObserverService.h"
 #include "nsIOutputStream.h"
 #include "nscore.h"
 #include "nsDirectoryServiceDefs.h"
@@ -40,6 +42,7 @@
 #include "nsMimeTypes.h"
 #include "imgIEncoder.h"
 #include "imgITools.h"
+#include "WinUtils.h"
 
 #include "mozilla/LazyIdleThread.h"
 #include <algorithm>
@@ -157,7 +160,8 @@ NS_IMETHODIMP nsDataObj::CStream::OnStopRequest(nsIRequest* aRequest,
 // and cancel the operation.
 nsresult nsDataObj::CStream::WaitForCompletion() {
   // We are guaranteed OnStopRequest will get called, so this should be ok.
-  SpinEventLoopUntil([&]() { return mChannelRead; });
+  SpinEventLoopUntil("widget:nsDataObj::CStream::WaitForCompletion"_ns,
+                     [&]() { return mChannelRead; });
 
   if (!mChannelData.Length()) mChannelResult = NS_ERROR_FAILURE;
 
@@ -538,7 +542,7 @@ STDMETHODIMP_(ULONG) nsDataObj::AddRef() {
 }
 
 namespace {
-class RemoveTempFileHelper final : public nsIObserver {
+class RemoveTempFileHelper final : public nsIObserver, public nsINamed {
  public:
   explicit RemoveTempFileHelper(nsIFile* aTempFile) : mTempFile(aTempFile) {
     MOZ_ASSERT(mTempFile);
@@ -568,6 +572,7 @@ class RemoveTempFileHelper final : public nsIObserver {
 
   NS_DECL_ISUPPORTS
   NS_DECL_NSIOBSERVER
+  NS_DECL_NSINAMED
 
  private:
   ~RemoveTempFileHelper() {
@@ -580,7 +585,7 @@ class RemoveTempFileHelper final : public nsIObserver {
   nsCOMPtr<nsITimer> mTimer;
 };
 
-NS_IMPL_ISUPPORTS(RemoveTempFileHelper, nsIObserver);
+NS_IMPL_ISUPPORTS(RemoveTempFileHelper, nsIObserver, nsINamed);
 
 NS_IMETHODIMP
 RemoveTempFileHelper::Observe(nsISupports* aSubject, const char* aTopic,
@@ -605,6 +610,12 @@ RemoveTempFileHelper::Observe(nsISupports* aSubject, const char* aTopic,
     mTempFile->Remove(false);
     mTempFile = nullptr;
   }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+RemoveTempFileHelper::GetName(nsACString& aName) {
+  aName.AssignLiteral("RemoveTempFileHelper");
   return NS_OK;
 }
 }  // namespace

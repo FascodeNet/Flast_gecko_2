@@ -6,7 +6,6 @@
 
 #![cfg_attr(feature = "deny-warnings", deny(warnings))]
 #![warn(clippy::pedantic)]
-#![allow(clippy::pub_enum_variant_names)]
 
 mod client_events;
 mod connection;
@@ -15,12 +14,14 @@ mod connection_server;
 mod control_stream_local;
 mod control_stream_remote;
 pub mod hframe;
+mod priority;
 mod push_controller;
 mod push_stream;
 mod qlog;
 mod qpack_decoder_receiver;
 mod qpack_encoder_receiver;
 mod recv_message;
+pub mod request_target;
 mod send_message;
 pub mod server;
 mod server_connection_events;
@@ -28,26 +29,32 @@ mod server_events;
 mod settings;
 mod stream_type_reader;
 
-use neqo_qpack::decoder::QPACK_UNI_STREAM_TYPE_DECODER;
-use neqo_qpack::encoder::QPACK_UNI_STREAM_TYPE_ENCODER;
 use neqo_qpack::Error as QpackError;
 pub use neqo_transport::Output;
 use neqo_transport::{AppError, Connection, Error as TransportError};
 use std::fmt::Debug;
 
+use crate::priority::PriorityHandler;
 pub use client_events::Http3ClientEvent;
 pub use connection::Http3State;
 pub use connection_client::Http3Client;
 pub use connection_client::Http3Parameters;
 pub use hframe::{HFrame, HFrameReader};
 pub use neqo_common::Header;
+pub use priority::Priority;
 pub use server::Http3Server;
 pub use server_events::{ClientRequestStream, Http3ServerEvent};
 pub use settings::HttpZeroRttChecker;
+pub use stream_type_reader::NewStreamType;
 
 type Res<T> = Result<T, Error>;
 
 #[derive(Clone, Debug, PartialEq)]
+#[allow(
+    renamed_and_removed_lints,
+    clippy::pub_enum_variant_names,
+    clippy::enum_variant_names
+)]
 pub enum Error {
     HttpNoError,
     HttpGeneralProtocol,
@@ -74,21 +81,22 @@ pub enum Error {
     AlreadyClosed,
     AlreadyInitialized,
     DecodingFrame,
+    FatalError,
     HttpGoaway,
     Internal,
+    InvalidHeader,
+    InvalidInput,
+    InvalidRequestTarget,
     InvalidResumptionToken,
-    InvalidStreamId,
     InvalidState,
+    InvalidStreamId,
     NoMoreData,
     NotEnoughData,
+    StreamLimitError,
     TransportError(TransportError),
+    TransportStreamDoesNotExist,
     Unavailable,
     Unexpected,
-    StreamLimitError,
-    TransportStreamDoesNotExist,
-    InvalidInput,
-    FatalError,
-    InvalidHeader,
 }
 
 impl Error {
@@ -120,12 +128,6 @@ impl Error {
     }
 
     #[must_use]
-    #[allow(
-        unknown_lints,
-        renamed_and_removed_lints,
-        clippy::unknown_clippy_lints,
-        clippy::unnested_or_patterns
-    )] // Until we require rust 1.53 we can't use or_patterns.
     pub fn connection_error(&self) -> bool {
         matches!(
             self,
@@ -276,9 +278,6 @@ impl ::std::fmt::Display for Error {
     }
 }
 
-pub const HTTP3_UNI_STREAM_TYPE_CONTROL: u64 = 0x0;
-pub const HTTP3_UNI_STREAM_TYPE_PUSH: u64 = 0x1;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Http3StreamType {
     Control,
@@ -290,25 +289,13 @@ pub enum Http3StreamType {
     Unknown,
 }
 
-impl From<u64> for Http3StreamType {
-    fn from(stream_type: u64) -> Self {
-        match stream_type {
-            HTTP3_UNI_STREAM_TYPE_CONTROL => Self::Control,
-            HTTP3_UNI_STREAM_TYPE_PUSH => Self::Push,
-            QPACK_UNI_STREAM_TYPE_ENCODER => Self::Decoder,
-            QPACK_UNI_STREAM_TYPE_DECODER => Self::Encoder,
-            _ => Self::Unknown,
-        }
-    }
-}
-
 #[derive(PartialEq, Debug)]
 pub enum ReceiveOutput {
     NoOutput,
     PushStream,
     ControlFrames(Vec<HFrame>),
     UnblockedStreams(Vec<u64>),
-    NewStream(Http3StreamType),
+    NewStream(NewStreamType),
 }
 
 pub trait RecvStream: Debug {
@@ -330,6 +317,8 @@ pub trait HttpRecvStream: RecvStream {
     /// # Errors
     /// An error may happen while reading a stream, e.g. early close, protocol error, etc.
     fn read_data(&mut self, conn: &mut Connection, buf: &mut [u8]) -> Res<(usize, bool)>;
+
+    fn priority_handler_mut(&mut self) -> &mut PriorityHandler;
 }
 
 pub(crate) trait RecvMessageEvents: Debug {

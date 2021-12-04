@@ -431,8 +431,9 @@ inline NativeObject* NativeObject::create(
   MOZ_ASSERT(!clasp->isJSFunction(), "should use JSFunction::create");
   MOZ_ASSERT(clasp != &ArrayObject::class_, "should use ArrayObject::create");
 
-  size_t nDynamicSlots =
-      calculateDynamicSlots(shape->numFixedSlots(), shape->slotSpan(), clasp);
+  const uint32_t nfixed = shape->numFixedSlots();
+  const uint32_t slotSpan = shape->slotSpan();
+  const size_t nDynamicSlots = calculateDynamicSlots(nfixed, slotSpan, clasp);
 
   JSObject* obj =
       js::AllocateObject(cx, kind, nDynamicSlots, heap, clasp, site);
@@ -448,8 +449,8 @@ inline NativeObject* NativeObject::create(
   }
   nobj->setEmptyElements();
 
-  if (size_t span = shape->slotSpan()) {
-    nobj->initializeSlotRange(0, span);
+  if (slotSpan > 0) {
+    nobj->initSlots(nfixed, slotSpan);
   }
 
   if (clasp->shouldDelayMetadataBuilder()) {
@@ -480,7 +481,15 @@ MOZ_ALWAYS_INLINE bool NativeObject::updateSlotsForSpan(JSContext* cx,
     if (newSpan == oldSpan + 1) {
       initSlotUnchecked(oldSpan, UndefinedValue());
     } else {
-      initializeSlotRange(oldSpan, newSpan);
+      // Initialize slots [oldSpan, newSpan). Use the *Unchecked version because
+      // the shape's slot span does not reflect the allocated slots at this
+      // point.
+      auto initRange = [](HeapSlot* start, HeapSlot* end) {
+        for (HeapSlot* slot = start; slot < end; slot++) {
+          slot->initAsUndefined();
+        }
+      };
+      forEachSlotRangeUnchecked(oldSpan, newSpan, initRange);
     }
   } else {
     /* Trigger write barriers on the old slots before reallocating. */
@@ -845,11 +854,13 @@ inline bool IsPackedArray(JSObject* obj) {
   return true;
 }
 
-MOZ_ALWAYS_INLINE bool AddDataPropertyNonPrototype(JSContext* cx,
-                                                   HandlePlainObject obj,
-                                                   HandleId id, HandleValue v) {
+// Like AddDataProperty but optimized for plain objects. Plain objects don't
+// have an addProperty hook.
+MOZ_ALWAYS_INLINE bool AddDataPropertyToPlainObject(JSContext* cx,
+                                                    HandlePlainObject obj,
+                                                    HandleId id,
+                                                    HandleValue v) {
   MOZ_ASSERT(!JSID_IS_INT(id));
-  MOZ_ASSERT(!obj->isUsedAsPrototype());
 
   uint32_t slot;
   if (!NativeObject::addProperty(cx, obj, id,

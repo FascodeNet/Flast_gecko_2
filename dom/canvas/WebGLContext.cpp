@@ -39,6 +39,7 @@
 #include "mozilla/gfx/gfxVars.h"
 #include "mozilla/Preferences.h"
 #include "mozilla/ProcessPriorityManager.h"
+#include "mozilla/ResultVariant.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/Services.h"
 #include "mozilla/StaticPrefs_webgl.h"
@@ -995,14 +996,7 @@ Maybe<uvec2> WebGLContext::FrontBufferSnapshotInto(
     }
   });
 
-  if (front->mFb) {
-    gl->fBindFramebuffer(fbTarget, front->mFb->mFB);
-  } else {
-    if (!BindDefaultFBForRead()) {
-      gfxCriticalError() << "BindDefaultFBForRead failed";
-      return {};
-    }
-  }
+  gl->fBindFramebuffer(fbTarget, front->mFb ? front->mFb->mFB : 0);
   if (pboWas) {
     BindBuffer(LOCAL_GL_PIXEL_PACK_BUFFER, nullptr);
   }

@@ -8,6 +8,7 @@
 
 #include "gfx2DGlue.h"
 #include "gfxUtils.h"
+#include "mozilla/intl/Bidi.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ComputedStyle.h"
 #include "mozilla/Preferences.h"
@@ -263,13 +264,11 @@ static void PaintTextShadowCallback(gfxContext* aCtx, nsPoint aShadowOffset,
 
 void nsDisplayXULTextBox::Paint(nsDisplayListBuilder* aBuilder,
                                 gfxContext* aCtx) {
-  DrawTargetAutoDisableSubpixelAntialiasing disable(aCtx->GetDrawTarget(),
-                                                    IsSubpixelAADisabled());
-
   // Paint the text shadow before doing any foreground stuff
   nsRect drawRect =
       static_cast<nsTextBoxFrame*>(mFrame)->mTextDrawRect + ToReferenceFrame();
-  nsLayoutUtils::PaintTextShadow(mFrame, aCtx, drawRect, GetPaintRect(),
+  nsLayoutUtils::PaintTextShadow(mFrame, aCtx, drawRect,
+                                 GetPaintRect(aBuilder, aCtx),
                                  mFrame->StyleText()->mColor.ToColor(),
                                  PaintTextShadowCallback, (void*)this);
 
@@ -279,7 +278,8 @@ void nsDisplayXULTextBox::Paint(nsDisplayListBuilder* aBuilder,
 void nsDisplayXULTextBox::PaintTextToContext(gfxContext* aCtx, nsPoint aOffset,
                                              const nscolor* aColor) {
   static_cast<nsTextBoxFrame*>(mFrame)->PaintTitle(
-      *aCtx, GetPaintRect(), ToReferenceFrame() + aOffset, aColor);
+      *aCtx, mFrame->InkOverflowRectRelativeToSelf() + ToReferenceFrame(),
+      ToReferenceFrame() + aOffset, aColor);
 }
 
 bool nsDisplayXULTextBox::CreateWebRenderCommands(
@@ -485,7 +485,8 @@ void nsTextBoxFrame::DrawText(gfxContext& aRenderingContext,
 
   if (mState & NS_FRAME_IS_BIDI) {
     presContext->SetBidiEnabled();
-    nsBidiLevel level = nsBidiPresUtils::BidiLevelFromStyle(Style());
+    mozilla::intl::Bidi::EmbeddingLevel level =
+        nsBidiPresUtils::BidiLevelFromStyle(Style());
     if (mAccessKeyInfo && mAccessKeyInfo->mAccesskeyIndex != kNotFound) {
       // We let the RenderText function calculate the mnemonic's
       // underline position for us.

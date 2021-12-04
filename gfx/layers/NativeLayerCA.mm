@@ -7,6 +7,7 @@
 
 #import <AppKit/NSAnimationContext.h>
 #import <AppKit/NSColor.h>
+#import <AVFoundation/AVFoundation.h>
 #import <OpenGL/gl.h>
 #import <QuartzCore/QuartzCore.h>
 
@@ -26,8 +27,8 @@
 #include "mozilla/layers/SurfacePoolCA.h"
 #include "mozilla/StaticPrefs_gfx.h"
 #include "mozilla/webrender/RenderMacIOSurfaceTextureHost.h"
+#include "nsCocoaFeatures.h"
 #include "ScopedGLHelpers.h"
-#include "gfxUtils.h"
 
 @interface CALayer (PrivateSetContentsOpaque)
 - (void)setContentsOpaque:(BOOL)opaque;
@@ -133,7 +134,9 @@ static CALayer* MakeOffscreenRootCALayer() {
 NativeLayerRootCA::NativeLayerRootCA(CALayer* aLayer)
     : mMutex("NativeLayerRootCA"),
       mOnscreenRepresentation(aLayer),
-      mOffscreenRepresentation(MakeOffscreenRootCALayer()) {}
+      mOffscreenRepresentation(MakeOffscreenRootCALayer()) {
+  mLastMouseMoveTime = TimeStamp::NowLoRes();
+}
 
 NativeLayerRootCA::~NativeLayerRootCA() {
   MOZ_RELEASE_ASSERT(mSublayers.IsEmpty(),
@@ -160,7 +163,8 @@ void NativeLayerRootCA::AppendLayer(NativeLayer* aLayer) {
 
   mSublayers.AppendElement(layerCA);
   layerCA->SetBackingScale(mBackingScale);
-  ForAllRepresentations([&](Representation& r) { r.mMutated = true; });
+  layerCA->SetRootWindowIsFullscreen(mWindowIsFullscreen);
+  ForAllRepresentations([&](Representation& r) { r.mMutatedLayerStructure = true; });
 }
 
 void NativeLayerRootCA::RemoveLayer(NativeLayer* aLayer) {
@@ -170,7 +174,7 @@ void NativeLayerRootCA::RemoveLayer(NativeLayer* aLayer) {
   MOZ_RELEASE_ASSERT(layerCA);
 
   mSublayers.RemoveElement(layerCA);
-  ForAllRepresentations([&](Representation& r) { r.mMutated = true; });
+  ForAllRepresentations([&](Representation& r) { r.mMutatedLayerStructure = true; });
 }
 
 void NativeLayerRootCA::SetLayers(const nsTArray<RefPtr<NativeLayer>>& aLayers) {
@@ -187,12 +191,13 @@ void NativeLayerRootCA::SetLayers(const nsTArray<RefPtr<NativeLayer>>& aLayers) 
     RefPtr<NativeLayerCA> layerCA = layer->AsNativeLayerCA();
     MOZ_RELEASE_ASSERT(layerCA);
     layerCA->SetBackingScale(mBackingScale);
+    layerCA->SetRootWindowIsFullscreen(mWindowIsFullscreen);
     layersCA.AppendElement(std::move(layerCA));
   }
 
   if (layersCA != mSublayers) {
     mSublayers = std::move(layersCA);
-    ForAllRepresentations([&](Representation& r) { r.mMutated = true; });
+    ForAllRepresentations([&](Representation& r) { r.mMutatedLayerStructure = true; });
   }
 }
 
@@ -235,7 +240,9 @@ bool NativeLayerRootCA::CommitToScreen() {
       return false;
     }
 
-    mOnscreenRepresentation.Commit(WhichRepresentation::ONSCREEN, mSublayers);
+    UpdateMouseMovedRecently(lock);
+    mOnscreenRepresentation.Commit(WhichRepresentation::ONSCREEN, mSublayers, mWindowIsFullscreen,
+                                   mMouseMovedRecently);
 
     mCommitPending = false;
   }
@@ -283,7 +290,8 @@ void NativeLayerRootCA::OnNativeLayerRootSnapshotterDestroyed(
 
 void NativeLayerRootCA::CommitOffscreen() {
   MutexAutoLock lock(mMutex);
-  mOffscreenRepresentation.Commit(WhichRepresentation::OFFSCREEN, mSublayers);
+  mOffscreenRepresentation.Commit(WhichRepresentation::OFFSCREEN, mSublayers, mWindowIsFullscreen,
+                                  false);
 }
 
 template <typename F>
@@ -296,7 +304,7 @@ NativeLayerRootCA::Representation::Representation(CALayer* aRootCALayer)
     : mRootCALayer([aRootCALayer retain]) {}
 
 NativeLayerRootCA::Representation::~Representation() {
-  if (mMutated) {
+  if (mMutatedLayerStructure) {
     // Clear the root layer's sublayers. At this point the window is usually closed, so this
     // transaction does not cause any screen updates.
     AutoCATransaction transaction;
@@ -307,8 +315,13 @@ NativeLayerRootCA::Representation::~Representation() {
 }
 
 void NativeLayerRootCA::Representation::Commit(WhichRepresentation aRepresentation,
-                                               const nsTArray<RefPtr<NativeLayerCA>>& aSublayers) {
-  if (!mMutated &&
+                                               const nsTArray<RefPtr<NativeLayerCA>>& aSublayers,
+                                               bool aWindowIsFullscreen, bool aMouseMovedRecently) {
+  bool mightIsolate = (aRepresentation == WhichRepresentation::ONSCREEN &&
+                       StaticPrefs::gfx_core_animation_specialize_video());
+  bool mustRebuild = (mightIsolate && mMutatedMouseMovedRecently);
+
+  if (!mMutatedLayerStructure && !mustRebuild &&
       std::none_of(aSublayers.begin(), aSublayers.end(), [=](const RefPtr<NativeLayerCA>& layer) {
         return layer->HasUpdate(aRepresentation);
       })) {
@@ -325,14 +338,155 @@ void NativeLayerRootCA::Representation::Commit(WhichRepresentation aRepresentati
     layer->ApplyChanges(aRepresentation);
   }
 
-  if (mMutated) {
-    NSMutableArray<CALayer*>* sublayers = [NSMutableArray arrayWithCapacity:aSublayers.Length()];
-    for (auto layer : aSublayers) {
-      [sublayers addObject:layer->UnderlyingCALayer(aRepresentation)];
+  if (mMutatedLayerStructure || mustRebuild) {
+    // Bug 1731821 should eliminate this most of this logic and allow us to unconditionally
+    // accept aSublayers.
+
+    // We're going to check for an opportunity to isolate the topmost video layer. We'll avoid
+    // modifying mRootCALayer.sublayers unless we absolutely must, which will avoid flickering
+    // in the CATranscation. We check aSublayers with 3 possible outcomes.
+    // 1) We can't isolate video, so accept the provided sublayers.
+    // 2) We can isolate video, and we weren't isolating that video before, so create our own
+    //    sublayers with the proper structure.
+    // 3) We can isolate video, and we were already doing that. The sublayers underneath the
+    //    video might have changed in some way that doesn't prevent isolation, so ignore them.
+    //    Leave our sublayers unchanged.
+
+    // Define a block we'll use to accept the provided sublayers if we must. In the different
+    // cases, we'll call this at different times.
+    void (^acceptProvidedSublayers)() = ^() {
+      NSMutableArray<CALayer*>* sublayers = [NSMutableArray arrayWithCapacity:aSublayers.Length()];
+      for (auto layer : aSublayers) {
+        [sublayers addObject:layer->UnderlyingCALayer(aRepresentation)];
+      }
+      mRootCALayer.sublayers = sublayers;
+    };
+
+    // See if the top layer is already rooted in our mRootCALayer. If it is, then we can check
+    // for isolation without first disrupting our sublayers.
+    bool topLayerIsRooted =
+        aSublayers.Length() &&
+        (aSublayers.LastElement()->UnderlyingCALayer(aRepresentation).superlayer == mRootCALayer);
+
+    if (!topLayerIsRooted) {
+      // We have to accept the provided sublayers. We may still isolate, but it's because the
+      // new topmost layer was not already isolated. This is an acceptable time to potentially
+      // flicker as the sublayers are changed.
+      acceptProvidedSublayers();
     }
-    mRootCALayer.sublayers = sublayers;
-    mMutated = false;
+
+    // Now that we've confirmed these layer relationships, we check to see if we should break
+    // them and isolate a single video layer. It's important that the topmost layer is a
+    // child of mRootCALayer for this logic to work.
+    MOZ_DIAGNOSTIC_ASSERT(
+        !aSublayers.Length() ||
+            (aSublayers.LastElement()->UnderlyingCALayer(aRepresentation).superlayer ==
+             mRootCALayer),
+        "The topmost layer must be a child of mRootCALayer.");
+
+    bool didIsolate = false;
+    if (mightIsolate && aWindowIsFullscreen && !aMouseMovedRecently) {
+      CALayer* isolatedLayer = FindVideoLayerToIsolate(aRepresentation, aSublayers);
+      if (isolatedLayer) {
+        // No matter what happens next, we did choose to isolate.
+        didIsolate = true;
+
+        // We only need to change our sublayers if we weren't already isolating, or
+        // if the isolatedLayer does not match our current top layer.
+        if (!mIsIsolatingVideo || isolatedLayer != mRootCALayer.sublayers.lastObject) {
+          // Create a full coverage black layer behind the isolated layer.
+          CGFloat rootWidth = mRootCALayer.bounds.size.width;
+          CGFloat rootHeight = mRootCALayer.bounds.size.height;
+
+          // Reaching the low-power mode requires that there is a single black layer
+          // covering the entire window behind the video layer. Create that layer.
+          CALayer* blackLayer = [CALayer layer];
+          blackLayer.position = NSZeroPoint;
+          blackLayer.anchorPoint = NSZeroPoint;
+          blackLayer.bounds = CGRectMake(0, 0, rootWidth, rootHeight);
+          blackLayer.backgroundColor = [[NSColor blackColor] CGColor];
+
+          mRootCALayer.sublayers = @[ blackLayer, isolatedLayer ];
+        }
+      }
+    }
+
+    // If we didn't accept the sublayers earlier, and we decided we couldn't isolate,
+    // accept them now.
+    if (topLayerIsRooted && !didIsolate) {
+      acceptProvidedSublayers();
+    }
+
+    mIsIsolatingVideo = didIsolate;
   }
+
+  mMutatedLayerStructure = false;
+  mMutatedMouseMovedRecently = false;
+}
+
+CALayer* NativeLayerRootCA::Representation::FindVideoLayerToIsolate(
+    WhichRepresentation aRepresentation, const nsTArray<RefPtr<NativeLayerCA>>& aSublayers) {
+  // Run a heuristic to determine if any one of aSublayers is a video layer that should be
+  // isolated. These layers are ordered back-to-front. This function will return a candidate
+  // CALayer if all of the following are true:
+  // 1) The candidate layer is the topmost layer, and is a video layer.
+  // 2) The candidate layer bounds covers at least 80% of the bounds of the root layer.
+  // 3) The candidate layer center is "near" the center of the root layer.
+  // 4) There are no other video layers other than the candidate layer.
+  // Notably, this heuristic doesn't check the contents or bounds of layers that appear
+  // before the candidate layer. This means that video layers on top of other content
+  // may be selected for isolation and that other content will be replaced with a black
+  // background.
+  // Bug 1731136 will make this heuristic simpler, or completely unnecessary.
+
+  auto topLayer = aSublayers.LastElement();
+  if (!topLayer || !topLayer->IsVideo()) {
+    // FAIL Step 1: the topmost layer is not video.
+    return nil;
+  }
+
+  CALayer* candidateLayer = topLayer->UnderlyingCALayer(aRepresentation);
+  MOZ_ASSERT(candidateLayer);
+
+  // Check coverage of the candidate layer's bounds. We need the size of the root
+  // layer to do this.
+  CGFloat rootWidth = mRootCALayer.bounds.size.width;
+  CGFloat rootHeight = mRootCALayer.bounds.size.height;
+  CGFloat rootArea = rootWidth * rootHeight;
+  CGFloat minimumRootArea = rootArea * 0.8;
+
+  // Translate the candidate layer bounds into root layer space.
+  CGRect candidateBoundsInRoot = [mRootCALayer convertRect:candidateLayer.bounds
+                                                 fromLayer:candidateLayer];
+  CGFloat candidateArea = candidateBoundsInRoot.size.width * candidateBoundsInRoot.size.height;
+  if (candidateArea < minimumRootArea) {
+    // FAIL Step 2: the candidate layer is not big enough.
+    return nil;
+  }
+
+  // Check center of the candidate layer, relative to the root layer's center.
+  CGFloat centerZoneWidth = rootWidth * 0.05;
+  CGFloat centerZoneHeight = rootHeight * 0.05;
+  CGRect centerZone =
+      CGRectMake((rootWidth * 0.5) - (centerZoneWidth * 0.5),
+                 (rootHeight * 0.5) - (centerZoneHeight * 0.5), centerZoneWidth, centerZoneHeight);
+  CGPoint candidateCenterInRoot =
+      CGPointMake(candidateBoundsInRoot.origin.x + (candidateBoundsInRoot.size.width * 0.5),
+                  candidateBoundsInRoot.origin.y + (candidateBoundsInRoot.size.height * 0.5));
+  if (!CGRectContainsPoint(centerZone, candidateCenterInRoot)) {
+    // FAIL Step 3: the candidate layer is off-center.
+    return nil;
+  }
+
+  // See if there are any other video layers behind the candidate layer.
+  for (auto layer : aSublayers) {
+    if (layer->IsVideo() && layer != topLayer) {
+      // FAIL Step 4: there are multiple video layers.
+      return nil;
+    }
+  }
+
+  return candidateLayer;
 }
 
 /* static */ UniquePtr<NativeLayerRootSnapshotterCA> NativeLayerRootSnapshotterCA::Create(
@@ -376,6 +530,39 @@ void NativeLayerRootCA::DumpLayerTreeToFile(const char* aPath) {
   }
   fileOutput << "</html>\n";
   fileOutput.close();
+}
+
+void NativeLayerRootCA::SetWindowIsFullscreen(bool aFullscreen) {
+  MutexAutoLock lock(mMutex);
+
+  if (mWindowIsFullscreen != aFullscreen) {
+    mWindowIsFullscreen = aFullscreen;
+
+    for (auto layer : mSublayers) {
+      layer->SetRootWindowIsFullscreen(mWindowIsFullscreen);
+    }
+  }
+
+  // Treat this as a mouse move, for purposes of resetting our timer.
+  mLastMouseMoveTime = TimeStamp::NowLoRes();
+}
+
+void NativeLayerRootCA::NoteMouseMoveAtTime(const TimeStamp& aTime) {
+  MutexAutoLock lock(mMutex);
+  mLastMouseMoveTime = aTime;
+}
+
+void NativeLayerRootCA::UpdateMouseMovedRecently(const MutexAutoLock& aProofOfLock) {
+  static const double SECONDS_TO_WAIT = 2.0;
+
+  bool newMouseMovedRecently =
+      ((TimeStamp::NowLoRes() - mLastMouseMoveTime).ToSeconds() < SECONDS_TO_WAIT);
+
+  if (newMouseMovedRecently != mMouseMovedRecently) {
+    mMouseMovedRecently = newMouseMovedRecently;
+
+    ForAllRepresentations([&](Representation& r) { r.mMutatedMouseMovedRecently = true; });
+  }
 }
 
 NativeLayerRootSnapshotterCA::NativeLayerRootSnapshotterCA(NativeLayerRootCA* aLayerRoot,
@@ -540,17 +727,51 @@ NativeLayerCA::~NativeLayerCA() {
 }
 
 void NativeLayerCA::AttachExternalImage(wr::RenderTextureHost* aExternalImage) {
+  MutexAutoLock lock(mMutex);
+
+  bool oldSpecializeVideo = ShouldSpecializeVideo(lock);
+
   wr::RenderMacIOSurfaceTextureHost* texture = aExternalImage->AsRenderMacIOSurfaceTextureHost();
   MOZ_ASSERT(texture);
   mTextureHost = texture;
   mSize = texture->GetSize(0);
   mDisplayRect = IntRect(IntPoint{}, mSize);
 
+  bool changedSpecializeVideo = ShouldSpecializeVideo(lock) != oldSpecializeVideo;
+
   ForAllRepresentations([&](Representation& r) {
     r.mMutatedFrontSurface = true;
     r.mMutatedDisplayRect = true;
     r.mMutatedSize = true;
+    r.mMutatedSpecializeVideo |= changedSpecializeVideo;
   });
+}
+
+bool NativeLayerCA::IsVideo() {
+  // Anything with a texture host is considered a video source.
+  return mTextureHost;
+}
+
+bool NativeLayerCA::IsVideoAndLocked(const MutexAutoLock& aProofOfLock) {
+  // Anything with a texture host is considered a video source.
+  return mTextureHost;
+}
+
+bool NativeLayerCA::ShouldSpecializeVideo(const MutexAutoLock& aProofOfLock) {
+  return StaticPrefs::gfx_core_animation_specialize_video() &&
+         nsCocoaFeatures::OnHighSierraOrLater() && mRootWindowIsFullscreen &&
+         IsVideoAndLocked(aProofOfLock);
+}
+
+void NativeLayerCA::SetRootWindowIsFullscreen(bool aFullscreen) {
+  MutexAutoLock lock(mMutex);
+
+  bool oldSpecializeVideo = ShouldSpecializeVideo(lock);
+  mRootWindowIsFullscreen = aFullscreen;
+
+  if (ShouldSpecializeVideo(lock) != oldSpecializeVideo) {
+    ForAllRepresentations([&](Representation& r) { r.mMutatedSpecializeVideo = true; });
+  }
 }
 
 void NativeLayerCA::SetSurfaceIsFlipped(bool aIsFlipped) {
@@ -564,7 +785,6 @@ void NativeLayerCA::SetSurfaceIsFlipped(bool aIsFlipped) {
 
 bool NativeLayerCA::SurfaceIsFlipped() {
   MutexAutoLock lock(mMutex);
-
   return mSurfaceIsFlipped;
 }
 
@@ -626,7 +846,7 @@ void NativeLayerCA::SetBackingScale(float aBackingScale) {
 }
 
 bool NativeLayerCA::IsOpaque() {
-  MutexAutoLock lock(mMutex);
+  // mIsOpaque is const, so no need for a lock.
   return mIsOpaque;
 }
 
@@ -746,6 +966,18 @@ gfx::IntRect NativeLayerCA::CurrentSurfaceDisplayRect() {
   MutexAutoLock lock(mMutex);
   return mDisplayRect;
 }
+
+NativeLayerCA::Representation::Representation()
+    : mMutatedPosition(true),
+      mMutatedTransform(true),
+      mMutatedDisplayRect(true),
+      mMutatedClipRect(true),
+      mMutatedBackingScale(true),
+      mMutatedSize(true),
+      mMutatedSurfaceIsFlipped(true),
+      mMutatedFrontSurface(true),
+      mMutatedSamplingFilter(true),
+      mMutatedSpecializeVideo(true) {}
 
 NativeLayerCA::Representation::~Representation() {
   [mContentCALayer release];
@@ -952,7 +1184,7 @@ void NativeLayerCA::ApplyChanges(WhichRepresentation aRepresentation) {
   }
   GetRepresentation(aRepresentation)
       .ApplyChanges(mSize, mIsOpaque, mPosition, mTransform, mDisplayRect, mClipRect, mBackingScale,
-                    mSurfaceIsFlipped, mSamplingFilter, surface);
+                    mSurfaceIsFlipped, mSamplingFilter, ShouldSpecializeVideo(lock), surface);
 }
 
 bool NativeLayerCA::HasUpdate(WhichRepresentation aRepresentation) {
@@ -965,11 +1197,72 @@ CALayer* NativeLayerCA::UnderlyingCALayer(WhichRepresentation aRepresentation) {
   return GetRepresentation(aRepresentation).UnderlyingCALayer();
 }
 
+bool NativeLayerCA::Representation::EnqueueSurface(IOSurfaceRef aSurfaceRef) {
+  MOZ_ASSERT([mContentCALayer isKindOfClass:[AVSampleBufferDisplayLayer class]]);
+
+  // Convert the IOSurfaceRef into a CMSampleBuffer, so we can enqueue it in mContentCALayer
+  CVPixelBufferRef pixelBuffer = nullptr;
+  CVReturn cvValue =
+      CVPixelBufferCreateWithIOSurface(kCFAllocatorDefault, aSurfaceRef, nullptr, &pixelBuffer);
+  if (cvValue != kCVReturnSuccess) {
+    MOZ_ASSERT(pixelBuffer == nullptr, "Failed call shouldn't allocate memory.");
+    return false;
+  }
+  CFTypeRefPtr<CVPixelBufferRef> pixelBufferDeallocator =
+      CFTypeRefPtr<CVPixelBufferRef>::WrapUnderCreateRule(pixelBuffer);
+
+  CMVideoFormatDescriptionRef formatDescription = nullptr;
+  OSStatus osValue = CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixelBuffer,
+                                                                  &formatDescription);
+  if (osValue != noErr) {
+    MOZ_ASSERT(formatDescription == nullptr, "Failed call shouldn't allocate memory.");
+    return false;
+  }
+  CFTypeRefPtr<CMVideoFormatDescriptionRef> formatDescriptionDeallocator =
+      CFTypeRefPtr<CMVideoFormatDescriptionRef>::WrapUnderCreateRule(formatDescription);
+
+  CMSampleBufferRef sampleBuffer = nullptr;
+  osValue = CMSampleBufferCreateReadyWithImageBuffer(
+      kCFAllocatorDefault, pixelBuffer, formatDescription, &kCMTimingInfoInvalid, &sampleBuffer);
+  if (osValue != noErr) {
+    MOZ_ASSERT(sampleBuffer == nullptr, "Failed call shouldn't allocate memory.");
+    return false;
+  }
+  CFTypeRefPtr<CMSampleBufferRef> sampleBufferDeallocator =
+      CFTypeRefPtr<CMSampleBufferRef>::WrapUnderCreateRule(sampleBuffer);
+
+  // Since we don't have timing information for the sample, before we enqueue it, we
+  // attach an attribute that specifies that the sample should be played immediately.
+  CFArrayRef attachmentsArray = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, YES);
+  if (!attachmentsArray || CFArrayGetCount(attachmentsArray) == 0) {
+    // No dictionary to alter.
+    return false;
+  }
+  CFMutableDictionaryRef sample0Dictionary =
+      (__bridge CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachmentsArray, 0);
+  CFDictionarySetValue(sample0Dictionary, kCMSampleAttachmentKey_DisplayImmediately,
+                       kCFBooleanTrue);
+
+  [(AVSampleBufferDisplayLayer*)mContentCALayer enqueueSampleBuffer:sampleBuffer];
+
+  return true;
+}
+
 void NativeLayerCA::Representation::ApplyChanges(
     const IntSize& aSize, bool aIsOpaque, const IntPoint& aPosition, const Matrix4x4& aTransform,
     const IntRect& aDisplayRect, const Maybe<IntRect>& aClipRect, float aBackingScale,
-    bool aSurfaceIsFlipped, gfx::SamplingFilter aSamplingFilter,
+    bool aSurfaceIsFlipped, gfx::SamplingFilter aSamplingFilter, bool aSpecializeVideo,
     CFTypeRefPtr<IOSurfaceRef> aFrontSurface) {
+  if (mWrappingCALayer && mMutatedSpecializeVideo) {
+    // Since specialize video changes the way we construct our wrapping and content layers,
+    // we have to scrap them if this value has changed. We can leave mOpaquenessTintLayer alone.
+    [mContentCALayer release];
+    mContentCALayer = nil;
+    [mWrappingCALayer removeFromSuperlayer];
+    [mWrappingCALayer release];
+    mWrappingCALayer = nil;
+  }
+
   if (!mWrappingCALayer) {
     mWrappingCALayer = [[CALayer layer] retain];
     mWrappingCALayer.position = NSZeroPoint;
@@ -977,7 +1270,11 @@ void NativeLayerCA::Representation::ApplyChanges(
     mWrappingCALayer.anchorPoint = NSZeroPoint;
     mWrappingCALayer.contentsGravity = kCAGravityTopLeft;
     mWrappingCALayer.edgeAntialiasingMask = 0;
-    mContentCALayer = [[CALayer layer] retain];
+    if (aSpecializeVideo) {
+      mContentCALayer = [[AVSampleBufferDisplayLayer layer] retain];
+    } else {
+      mContentCALayer = [[CALayer layer] retain];
+    }
     mContentCALayer.position = NSZeroPoint;
     mContentCALayer.anchorPoint = NSZeroPoint;
     mContentCALayer.contentsGravity = kCAGravityTopLeft;
@@ -1092,7 +1389,16 @@ void NativeLayerCA::Representation::ApplyChanges(
   }
 
   if (mMutatedFrontSurface) {
-    mContentCALayer.contents = (id)aFrontSurface.get();
+    bool isEnqueued = false;
+    IOSurfaceRef surface = aFrontSurface.get();
+    if (aSpecializeVideo && CanSpecializeSurface(surface)) {
+      // Attempt to enqueue this as a video frame. If we fail, we'll fall back to image case.
+      isEnqueued = EnqueueSurface(surface);
+    }
+
+    if (!isEnqueued) {
+      mContentCALayer.contents = (id)surface;
+    }
   }
 
   if (mMutatedSamplingFilter) {
@@ -1114,6 +1420,7 @@ void NativeLayerCA::Representation::ApplyChanges(
   mMutatedClipRect = false;
   mMutatedFrontSurface = false;
   mMutatedSamplingFilter = false;
+  mMutatedSpecializeVideo = false;
 }
 
 bool NativeLayerCA::Representation::HasUpdate() {
@@ -1123,7 +1430,16 @@ bool NativeLayerCA::Representation::HasUpdate() {
 
   return mMutatedPosition || mMutatedTransform || mMutatedDisplayRect || mMutatedClipRect ||
          mMutatedBackingScale || mMutatedSize || mMutatedSurfaceIsFlipped || mMutatedFrontSurface ||
-         mMutatedSamplingFilter;
+         mMutatedSamplingFilter || mMutatedSpecializeVideo;
+}
+
+bool NativeLayerCA::Representation::CanSpecializeSurface(IOSurfaceRef surface) {
+  // Software decoded videos can't achieve detached mode. Until Bug 1731691 is fixed,
+  // there's no benefit to specializing these videos. For now, only allow 420v or 420f,
+  // which we get from hardware decode.
+  OSType pixelFormat = IOSurfaceGetPixelFormat(surface);
+  return (pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ||
+          pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange);
 }
 
 // Called when mMutex is already being held by the current thread.

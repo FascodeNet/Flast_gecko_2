@@ -556,14 +556,6 @@ class PackedType : public T {
     *this = RefType::fromTypeIndex(newIndex, isNullable());
   }
 
-  void offsetTypeIndex(uint32_t offsetBy) {
-    if (!isTypeIndex()) {
-      return;
-    }
-    *this =
-        RefType::fromTypeIndex(refType().typeIndex() + offsetBy, isNullable());
-  }
-
   // Some types are encoded as JS::Value when they escape from Wasm (when passed
   // as parameters to imports or returned from exports).  For ExternRef the
   // Value encoding is pretty much a requirement.  For other types it's a choice
@@ -724,10 +716,24 @@ static inline jit::MIRType ToMIRType(const Maybe<ValType>& t) {
 }
 
 extern bool ToValType(JSContext* cx, HandleValue v, ValType* out);
+extern bool ToRefType(JSContext* cx, JSLinearString* typeLinearStr,
+                      RefType* out);
+
+extern UniqueChars ToString(RefType type);
 
 extern UniqueChars ToString(ValType type);
 
 extern UniqueChars ToString(const Maybe<ValType>& type);
+
+#ifdef ENABLE_WASM_TYPE_REFLECTIONS
+
+// The JS API sometimes uses different names ("anyfunc" rather than "funcref").
+
+extern UniqueChars ToJSAPIString(RefType type);
+
+extern UniqueChars ToJSAPIString(ValType type);
+
+#endif
 
 }  // namespace wasm
 }  // namespace js

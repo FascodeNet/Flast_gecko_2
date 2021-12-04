@@ -189,6 +189,10 @@ class gfxTextRun : public gfxShapedText {
     AutoWithoutManualInSameWord
   };
 
+  static bool IsOptionalHyphenBreak(HyphenType aType) {
+    return aType >= HyphenType::Soft;
+  }
+
   struct HyphenationState {
     uint32_t mostRecentBoundary = 0;
     bool hasManualHyphen = false;
@@ -253,6 +257,7 @@ class gfxTextRun : public gfxShapedText {
     gfxFloat* advanceWidth = nullptr;
     mozilla::SVGContextPaint* contextPaint = nullptr;
     gfxTextRunDrawCallbacks* callbacks = nullptr;
+    bool allowGDI = true;
     explicit DrawParams(gfxContext* aContext) : context(aContext) {}
   };
 
@@ -902,7 +907,8 @@ class gfxFontGroup final : public gfxTextRunFactory {
   static void
   Shutdown();  // platform must call this to release the languageAtomService
 
-  gfxFontGroup(const mozilla::StyleFontFamilyList& aFontFamilyList,
+  gfxFontGroup(nsPresContext* aPresContext,
+               const mozilla::StyleFontFamilyList& aFontFamilyList,
                const gfxFontStyle* aStyle, nsAtom* aLanguage,
                bool aExplicitLanguage, gfxTextPerfMetrics* aTextPerf,
                gfxUserFontSet* aUserFontSet, gfxFloat aDevToCssSize);
@@ -1338,6 +1344,8 @@ class gfxFontGroup final : public gfxTextRunFactory {
     bool mIsSharedFamily : 1;
     bool mHasFontEntry : 1;
   };
+
+  nsPresContext* mPresContext = nullptr;
 
   // List of font families, either named or generic.
   // Generic names map to system pref fonts based on language.

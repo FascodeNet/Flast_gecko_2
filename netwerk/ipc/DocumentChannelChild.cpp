@@ -7,7 +7,9 @@
 
 #include "DocumentChannelChild.h"
 
+#include "mozilla/dom/Document.h"
 #include "mozilla/extensions/StreamFilterParent.h"
+#include "mozilla/ipc/Endpoint.h"
 #include "mozilla/net/HttpBaseChannel.h"
 #include "mozilla/net/NeckoChild.h"
 #include "mozilla/ScopeExit.h"
@@ -20,6 +22,7 @@
 #include "nsFrameLoader.h"
 #include "nsFrameLoaderOwner.h"
 #include "nsQueryObject.h"
+#include "nsDocShellLoadState.h"
 
 using namespace mozilla::dom;
 using namespace mozilla::ipc;
@@ -109,7 +112,7 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   args.loadState() = mLoadState->Serialize();
   args.cacheKey() = mCacheKey;
   args.channelId() = mChannelId;
-  args.asyncOpenTime() = mAsyncOpenTime;
+  args.asyncOpenTime() = TimeStamp::Now();
 
   Maybe<IPCClientInfo> ipcClientInfo;
   if (mInitialClientInfo.isSome()) {

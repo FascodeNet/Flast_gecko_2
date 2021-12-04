@@ -325,7 +325,7 @@ void CompositorBridgeParent::Initialize() {
     MOZ_ASSERT(!mApzcTreeManager);
     MOZ_ASSERT(!mApzSampler);
     MOZ_ASSERT(!mApzUpdater);
-    mApzcTreeManager = new APZCTreeManager(mRootLayerTreeID, true);
+    mApzcTreeManager = new APZCTreeManager(mRootLayerTreeID);
     mApzSampler = new APZSampler(mApzcTreeManager, true);
     mApzUpdater = new APZUpdater(mApzcTreeManager, true);
   }
@@ -500,56 +500,40 @@ mozilla::ipc::IPCResult CompositorBridgeParent::RecvResumeAsync() {
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult CompositorBridgeParent::RecvMakeSnapshot(
-    const SurfaceDescriptor& aInSnapshot, const gfx::IntRect& aRect) {
-  RefPtr<DrawTarget> target = GetDrawTargetForDescriptor(aInSnapshot);
-  MOZ_ASSERT(target);
-  if (!target) {
-    // We kill the content process rather than have it continue with an invalid
-    // snapshot, that may be too harsh and we could decide to return some sort
-    // of error to the child process and let it deal with it...
-    return IPC_FAIL_NO_REASON(this);
-  }
-  ForceComposeToTarget(target, &aRect);
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult
 CompositorBridgeParent::RecvWaitOnTransactionProcessed() {
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult CompositorBridgeParent::RecvFlushRendering() {
+mozilla::ipc::IPCResult CompositorBridgeParent::RecvFlushRendering(
+    const wr::RenderReasons& aReasons) {
   if (mWrBridge) {
-    mWrBridge->FlushRendering();
+    mWrBridge->FlushRendering(aReasons);
     return IPC_OK();
   }
 
   if (mCompositorScheduler->NeedsComposite()) {
     CancelCurrentCompositeTask();
-    ForceComposeToTarget(nullptr);
+    ForceComposeToTarget(aReasons, nullptr, nullptr);
   }
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult CompositorBridgeParent::RecvFlushRenderingAsync() {
+mozilla::ipc::IPCResult CompositorBridgeParent::RecvFlushRenderingAsync(
+    const wr::RenderReasons& aReasons) {
   if (mWrBridge) {
-    mWrBridge->FlushRendering(false);
+    mWrBridge->FlushRendering(aReasons, false);
     return IPC_OK();
   }
 
-  return RecvFlushRendering();
+  return RecvFlushRendering(aReasons);
 }
 
-mozilla::ipc::IPCResult CompositorBridgeParent::RecvForcePresent() {
+mozilla::ipc::IPCResult CompositorBridgeParent::RecvForcePresent(
+    const wr::RenderReasons& aReasons) {
   if (mWrBridge) {
-    mWrBridge->ScheduleForcedGenerateFrame();
+    mWrBridge->ScheduleForcedGenerateFrame(aReasons);
   }
-  return IPC_OK();
-}
-
-mozilla::ipc::IPCResult CompositorBridgeParent::RecvNotifyRegionInvalidated(
-    const nsIntRegion& aRegion) {
   return IPC_OK();
 }
 
@@ -595,11 +579,12 @@ void CompositorBridgeParent::ActorDestroy(ActorDestroyReason why) {
                         &CompositorBridgeParent::DeferredDestroy));
 }
 
-void CompositorBridgeParent::ScheduleRenderOnCompositorThread() {
+void CompositorBridgeParent::ScheduleRenderOnCompositorThread(
+    wr::RenderReasons aReasons) {
   MOZ_ASSERT(CompositorThread());
-  CompositorThread()->Dispatch(
-      NewRunnableMethod("layers::CompositorBridgeParent::ScheduleComposition",
-                        this, &CompositorBridgeParent::ScheduleComposition));
+  CompositorThread()->Dispatch(NewRunnableMethod<wr::RenderReasons>(
+      "layers::CompositorBridgeParent::ScheduleComposition", this,
+      &CompositorBridgeParent::ScheduleComposition, aReasons));
 }
 
 void CompositorBridgeParent::PauseComposition() {
@@ -650,17 +635,18 @@ void CompositorBridgeParent::ResumeComposition() {
   mPaused = false;
 
   Invalidate();
-  mCompositorScheduler->ForceComposeToTarget(nullptr, nullptr);
+  mCompositorScheduler->ForceComposeToTarget(wr::RenderReasons::WIDGET, nullptr,
+                                             nullptr);
 
   // if anyone's waiting to make sure that composition really got resumed, tell
   // them
   lock.NotifyAll();
 }
 
-void CompositorBridgeParent::ForceComposition() {
+void CompositorBridgeParent::ForceComposition(wr::RenderReasons aReasons) {
   // Cancel the orientation changed state to force composition
   mForceCompositionTask = nullptr;
-  ScheduleRenderOnCompositorThread();
+  ScheduleRenderOnCompositorThread(aReasons);
 }
 
 void CompositorBridgeParent::CancelCurrentCompositeTask() {
@@ -692,30 +678,31 @@ void CompositorBridgeParent::NotifyShadowTreeTransaction(
     bool aScheduleComposite, uint32_t aPaintSequenceNumber,
     bool aIsRepeatTransaction, bool aHitTestUpdate) {
   if (aScheduleComposite) {
-    ScheduleComposition();
+    ScheduleComposition(wr::RenderReasons::OTHER);
   }
 }
 
-void CompositorBridgeParent::ScheduleComposition() {
+void CompositorBridgeParent::ScheduleComposition(wr::RenderReasons aReasons) {
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
   if (mPaused) {
     return;
   }
 
   if (mWrBridge) {
-    mWrBridge->ScheduleGenerateFrame();
+    mWrBridge->ScheduleGenerateFrame(aReasons);
   } else {
-    mCompositorScheduler->ScheduleComposition();
+    mCompositorScheduler->ScheduleComposition(aReasons);
   }
 }
 
-void CompositorBridgeParent::ForceComposeToTarget(DrawTarget* aTarget,
+void CompositorBridgeParent::ForceComposeToTarget(wr::RenderReasons aReasons,
+                                                  DrawTarget* aTarget,
                                                   const gfx::IntRect* aRect) {
   AUTO_PROFILER_LABEL("CompositorBridgeParent::ForceComposeToTarget", GRAPHICS);
 
   AutoRestore<bool> override(mOverrideComposeReadiness);
   mOverrideComposeReadiness = true;
-  mCompositorScheduler->ForceComposeToTarget(aTarget, aRect);
+  mCompositorScheduler->ForceComposeToTarget(aReasons, aTarget, aRect);
 }
 
 PAPZCTreeManagerParent* CompositorBridgeParent::AllocPAPZCTreeManagerParent(
@@ -856,7 +843,7 @@ bool CompositorBridgeParent::SetTestSampleTime(const LayersId& aId,
   }
 
   if (mWrBridge) {
-    mWrBridge->FlushRendering();
+    mWrBridge->FlushRendering(wr::RenderReasons::TESTING);
     return true;
   }
 
@@ -969,7 +956,7 @@ void CompositorBridgeParent::SetFixedLayerMargins(ScreenIntCoord aTop,
   }
 
   Invalidate();
-  ScheduleComposition();
+  ScheduleComposition(wr::RenderReasons::RESIZE);
 }
 
 CompositorBridgeParent* CompositorBridgeParent::GetCompositorBridgeParent(
@@ -1022,7 +1009,7 @@ void CompositorBridgeParent::NotifyVsync(const VsyncEvent& aVsync,
 
 /* static */
 void CompositorBridgeParent::ScheduleForcedComposition(
-    const LayersId& aLayersId) {
+    const LayersId& aLayersId, wr::RenderReasons aReasons) {
   MOZ_ASSERT(XRE_GetProcessType() == GeckoProcessType_GPU);
   MOZ_ASSERT(CompositorThreadHolder::IsInCompositorThread());
 
@@ -1038,9 +1025,9 @@ void CompositorBridgeParent::ScheduleForcedComposition(
   }
 
   if (cbp->mWrBridge) {
-    cbp->mWrBridge->ScheduleForcedGenerateFrame();
+    cbp->mWrBridge->ScheduleForcedGenerateFrame(aReasons);
   } else if (cbp->CanComposite()) {
-    cbp->mCompositorScheduler->ScheduleComposition();
+    cbp->mCompositorScheduler->ScheduleComposition(aReasons);
   }
 }
 
@@ -1109,7 +1096,6 @@ mozilla::ipc::IPCResult CompositorBridgeParent::RecvAdoptChild(
     const LayersId& child) {
   RefPtr<APZUpdater> oldApzUpdater;
   APZCTreeManagerParent* parent;
-  bool scheduleComposition = false;
   bool apzEnablementChanged = false;
   RefPtr<WebRenderBridgeParent> childWrBridge;
 
@@ -1159,10 +1145,6 @@ mozilla::ipc::IPCResult CompositorBridgeParent::RecvAdoptChild(
       childWrBridge = sIndirectLayerTrees[child].mWrBridge;
     }
     parent = sIndirectLayerTrees[child].mApzcTreeManagerParent;
-  }
-
-  if (scheduleComposition) {
-    ScheduleComposition();
   }
 
   if (childWrBridge) {
@@ -1357,10 +1339,10 @@ void CompositorBridgeParent::AccumulateMemoryReport(wr::MemoryReport* aReport) {
 void CompositorBridgeParent::InitializeStatics() {
   gfxVars::SetForceSubpixelAAWherePossibleListener(&UpdateQualitySettings);
   gfxVars::SetWebRenderDebugFlagsListener(&UpdateDebugFlags);
-  gfxVars::SetUseWebRenderMultithreadingListener(
-      &UpdateWebRenderMultithreading);
-  gfxVars::SetWebRenderBatchingLookbackListener(
-      &UpdateWebRenderBatchingParameters);
+  gfxVars::SetWebRenderBoolParametersListener(&UpdateWebRenderBoolParameters);
+  gfxVars::SetWebRenderBatchingLookbackListener(&UpdateWebRenderParameters);
+  gfxVars::SetWebRenderBlobTileSizeListener(&UpdateWebRenderParameters);
+
   gfxVars::SetWebRenderProfilerUIListener(&UpdateWebRenderProfilerUI);
 }
 
@@ -1405,12 +1387,12 @@ void CompositorBridgeParent::UpdateDebugFlags() {
 }
 
 /*static*/
-void CompositorBridgeParent::UpdateWebRenderMultithreading() {
+void CompositorBridgeParent::UpdateWebRenderBoolParameters() {
   if (!CompositorThreadHolder::IsInCompositorThread()) {
     if (CompositorThread()) {
       CompositorThread()->Dispatch(NewRunnableFunction(
-          "CompositorBridgeParent::UpdateWebRenderMultithreading",
-          &CompositorBridgeParent::UpdateWebRenderMultithreading));
+          "CompositorBridgeParent::UpdateWebRenderBoolParameters",
+          &CompositorBridgeParent::UpdateWebRenderBoolParameters));
     }
 
     return;
@@ -1418,17 +1400,17 @@ void CompositorBridgeParent::UpdateWebRenderMultithreading() {
 
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   ForEachWebRenderBridgeParent([&](WebRenderBridgeParent* wrBridge) -> void {
-    wrBridge->UpdateMultithreading();
+    wrBridge->UpdateBoolParameters();
   });
 }
 
 /*static*/
-void CompositorBridgeParent::UpdateWebRenderBatchingParameters() {
+void CompositorBridgeParent::UpdateWebRenderParameters() {
   if (!CompositorThreadHolder::IsInCompositorThread()) {
     if (CompositorThread()) {
       CompositorThread()->Dispatch(NewRunnableFunction(
-          "CompositorBridgeParent::UpdateWebRenderBatchingParameters",
-          &CompositorBridgeParent::UpdateWebRenderBatchingParameters));
+          "CompositorBridgeParent::UpdateWebRenderParameters",
+          &CompositorBridgeParent::UpdateWebRenderParameters));
     }
 
     return;
@@ -1436,7 +1418,7 @@ void CompositorBridgeParent::UpdateWebRenderBatchingParameters() {
 
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
   ForEachWebRenderBridgeParent([&](WebRenderBridgeParent* wrBridge) -> void {
-    wrBridge->UpdateBatchingParameters();
+    wrBridge->UpdateParameters();
   });
 }
 
@@ -1509,20 +1491,10 @@ static void UpdateControllerForLayersId(LayersId aLayersId,
 }
 
 ScopedLayerTreeRegistration::ScopedLayerTreeRegistration(
-    LayersId aLayersId, Layer* aRoot, GeckoContentController* aController)
-    : mLayersId(aLayersId) {
-  EnsureLayerTreeMapReady();
-  MonitorAutoLock lock(*sIndirectLayerTreesLock);
-  sIndirectLayerTrees[aLayersId].mRoot = aRoot;
-  sIndirectLayerTrees[aLayersId].mController = aController;
-}
-
-ScopedLayerTreeRegistration::ScopedLayerTreeRegistration(
     LayersId aLayersId, GeckoContentController* aController)
     : mLayersId(aLayersId) {
   EnsureLayerTreeMapReady();
   MonitorAutoLock lock(*sIndirectLayerTreesLock);
-  sIndirectLayerTrees[aLayersId].mRoot = nullptr;
   sIndirectLayerTrees[aLayersId].mController = aController;
 }
 
@@ -1671,7 +1643,7 @@ void CompositorBridgeParent::NotifyDidSceneBuild(
   if (mWrBridge) {
     mWrBridge->NotifyDidSceneBuild(aInfo);
   } else {
-    mCompositorScheduler->ScheduleComposition();
+    mCompositorScheduler->ScheduleComposition(wr::RenderReasons::SCENE);
   }
 }
 
@@ -1825,13 +1797,6 @@ void CompositorBridgeParent::InvalidateRemoteLayers() {
   });
 }
 
-void UpdateIndirectTree(LayersId aId, Layer* aRoot,
-                        const TargetConfig& aTargetConfig) {
-  MonitorAutoLock lock(*sIndirectLayerTreesLock);
-  sIndirectLayerTrees[aId].mRoot = aRoot;
-  sIndirectLayerTrees[aId].mTargetConfig = aTargetConfig;
-}
-
 /* static */ CompositorBridgeParent::LayerTreeState*
 CompositorBridgeParent::GetIndirectShadowTree(LayersId aId) {
   // Only the compositor thread should use this method variant
@@ -1953,7 +1918,7 @@ int32_t RecordContentFrameTime(
   double latencyNorm = latencyMs / aVsyncRate.ToMilliseconds();
   int32_t fracLatencyNorm = lround(latencyNorm * 100.0);
 
-  if (profiler_can_accept_markers()) {
+  if (profiler_thread_is_being_profiled()) {
     struct ContentFrameMarker {
       static constexpr Span<const char> MarkerTypeName() {
         return MakeStringSpan("CONTENT_FRAME_TIME");

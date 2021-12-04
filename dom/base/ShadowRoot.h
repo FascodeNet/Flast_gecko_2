@@ -53,6 +53,7 @@ class ShadowRoot final : public DocumentFragment,
   NS_DECL_ISUPPORTS_INHERITED
 
   ShadowRoot(Element* aElement, ShadowRootMode aMode,
+             Element::DelegatesFocus aDelegatesFocus,
              SlotAssignmentMode aSlotAssignment,
              already_AddRefed<mozilla::dom::NodeInfo>&& aNodeInfo);
 
@@ -67,6 +68,9 @@ class ShadowRoot final : public DocumentFragment,
   // child from the currently-assigned slot, if any.
   void MaybeUnslotHostChild(nsIContent&);
 
+  // Find the first focusable element in this tree.
+  Element* GetFirstFocusable(bool aWithMouse) const;
+
   // Shadow DOM v1
   Element* Host() const {
     MOZ_ASSERT(GetHost(),
@@ -76,6 +80,9 @@ class ShadowRoot final : public DocumentFragment,
   }
 
   ShadowRootMode Mode() const { return mMode; }
+  bool DelegatesFocus() const {
+    return mDelegatesFocus == Element::DelegatesFocus::Yes;
+  }
   SlotAssignmentMode SlotAssignment() const { return mSlotAssignment; }
   bool IsClosed() const { return mMode == ShadowRootMode::Closed; }
 
@@ -272,6 +279,8 @@ class ShadowRoot final : public DocumentFragment,
   virtual ~ShadowRoot();
 
   const ShadowRootMode mMode;
+
+  Element::DelegatesFocus mDelegatesFocus;
 
   const SlotAssignmentMode mSlotAssignment;
 

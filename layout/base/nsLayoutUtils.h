@@ -932,7 +932,8 @@ class nsLayoutUtils {
 
   /**
    * Gets the scale factors of the transform for aFrame relative to the root
-   * frame if this transform is 2D, or the identity scale factors otherwise.
+   * frame if this transform can be drawn 2D, or the identity scale factors
+   * otherwise.
    */
   static gfxSize GetTransformToAncestorScale(const nsIFrame* aFrame);
 
@@ -943,6 +944,19 @@ class nsLayoutUtils {
    * animated scale, returns the identity scale factors.
    */
   static gfxSize GetTransformToAncestorScaleExcludingAnimated(nsIFrame* aFrame);
+
+  /**
+   * Gets a scale that includes CSS transforms in this process as well as the
+   * transform to ancestor scale passed down from our direct ancestor process
+   * (which includes any enclosing CSS transforms and resolution). Note: this
+   * does not include any resolution in the current process (this is on purpose
+   * because that is what the transform to ancestor field on FrameMetrics needs,
+   * see its definition for explanation as to why). This is the transform to
+   * ancestor scale to set on FrameMetrics.
+   */
+  static mozilla::ParentLayerToScreenScale2D
+  GetTransformToAncestorScaleCrossProcessForFrameMetrics(
+      const nsIFrame* aFrame);
 
   /**
    * Find the nearest common ancestor frame for aFrame1 and aFrame2. The
@@ -1140,11 +1154,9 @@ class nsLayoutUtils {
     HideCaret = 0x20,
     ToWindow = 0x40,
     ExistingTransaction = 0x80,
-    NoComposite = 0x100,
-    Compressed = 0x200,
-    ForWebRender = 0x400,
-    UseHighQualityScaling = 0x800,
-    ResetViewportScrolling = 0x1000,
+    ForWebRender = 0x100,
+    UseHighQualityScaling = 0x200,
+    ResetViewportScrolling = 0x400,
   };
 
   /**
@@ -2664,12 +2676,6 @@ class nsLayoutUtils {
   static bool AsyncPanZoomEnabled(const nsIFrame* aFrame);
 
   /**
-   * Returns the current APZ Resolution Scale. When Java Pan/Zoom is
-   * enabled in Fennec it will always return 1.0.
-   */
-  static float GetCurrentAPZResolutionScale(PresShell* aPresShell);
-
-  /**
    * Returns true if aDocument should be allowed to use resolution
    * zooming.
    */
@@ -2760,10 +2766,10 @@ class nsLayoutUtils {
 
   static ScrollMetadata ComputeScrollMetadata(
       const nsIFrame* aForFrame, const nsIFrame* aScrollFrame,
-      nsIContent* aContent, const nsIFrame* aReferenceFrame,
+      nsIContent* aContent, const nsIFrame* aItemFrame,
+      const nsPoint& aOffsetToReferenceFrame,
       mozilla::layers::WebRenderLayerManager* aLayerManager,
-      ViewID aScrollParentId, const nsSize& aScrollPortSize,
-      const mozilla::Maybe<nsRect>& aClipRect, bool aIsRoot);
+      ViewID aScrollParentId, const nsSize& aScrollPortSize, bool aIsRoot);
 
   /**
    * Returns the metadata to put onto the root layer of a layer tree, if one is
@@ -2788,13 +2794,6 @@ class nsLayoutUtils {
    */
   static nsMargin ScrollbarAreaToExcludeFromCompositionBoundsFor(
       const nsIFrame* aScrollFrame);
-
-  /**
-   * Looks in the layer subtree rooted at aLayer for a metrics with scroll id
-   * aScrollId. Returns true if such is found.
-   */
-  static bool ContainsMetricsWithId(const Layer* aLayer,
-                                    const ViewID& aScrollId);
 
   static bool ShouldUseNoScriptSheet(mozilla::dom::Document*);
   static bool ShouldUseNoFramesSheet(mozilla::dom::Document*);

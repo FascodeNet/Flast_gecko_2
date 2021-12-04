@@ -10,30 +10,69 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/Result.h"
-#include "mozilla/ResultVariant.h"
+#include "mozilla/Span.h"
 #include "mozilla/Utf8.h"
 #include "mozilla/Vector.h"
 #include "mozilla/intl/ICUError.h"
 
+// When building standalone js shell, it will include headers from
+// intl/components if JS_HAS_INTL_API is true (the default value), but js shell
+// won't include headers from XPCOM, so don't include nsTArray.h when building
+// standalone js shell.
+#ifndef JS_STANDALONE
+#  include "nsTArray.h"
+#endif
+
+#include <cstring>
+#include <iterator>
+#include <stddef.h>
+#include <stdint.h>
+#include <string_view>
+
 namespace mozilla::intl {
 
 static inline const char* IcuLocale(const char* aLocale) {
+  // Return the empty string if the input is exactly equal to the string "und".
   const char* locale = aLocale;
-  if (!strncmp(locale, "und", 3)) {
-    locale = "";
+  if (!std::strcmp(locale, "und")) {
+    locale = "";  // ICU root locale
   }
   return locale;
+}
+
+static inline const char* AssertNullTerminatedString(Span<const char> aSpan) {
+  // Intentionally check one past the last character, because we expect that the
+  // NUL character isn't part of the string.
+  MOZ_ASSERT(*(aSpan.data() + aSpan.size()) == '\0');
+
+  // Also ensure there aren't any other NUL characters within the string.
+  MOZ_ASSERT(std::strlen(aSpan.data()) == aSpan.size());
+
+  return aSpan.data();
+}
+
+static inline const char* AssertNullTerminatedString(std::string_view aView) {
+  // Intentionally check one past the last character, because we expect that the
+  // NUL character isn't part of the string.
+  MOZ_ASSERT(*(aView.data() + aView.size()) == '\0');
+
+  // Also ensure there aren't any other NUL characters within the string.
+  MOZ_ASSERT(std::strlen(aView.data()) == aView.size());
+
+  return aView.data();
 }
 
 using ICUResult = Result<Ok, ICUError>;
 
 /**
- * Convert a UErrorCode to ICUResult.
+ * Convert a UErrorCode to ICUError. This will correctly apply the OutOfMemory
+ * case.
  */
 ICUError ToICUError(UErrorCode status);
 
 /**
- * Convert a UErrorCode to ICUResult.
+ * Convert a UErrorCode to ICUResult. This will correctly apply the OutOfMemory
+ * case.
  */
 ICUResult ToICUResult(UErrorCode status);
 
@@ -47,22 +86,39 @@ static inline bool ICUSuccessForStringSpan(UErrorCode status) {
 }
 
 /**
- * This class manages the access to an ICU pointer. It allows requesting either
- * a mutable or const pointer. This pointer should match the const or mutability
- * of the ICU APIs. This will then correctly propagate const-ness into the
- * mozilla::intl APIs.
+ * This class enforces that the unified mozilla::intl methods match the
+ * const-ness of the underlying ICU4C API calls. const ICU4C APIs take a const
+ * pointer, while mutable ones take a non-const pointer.
+ *
+ * For const ICU4C calls use:
+ *   ICUPointer::GetConst().
+ *
+ * For non-const ICU4C calls use:
+ *   ICUPointer::GetMut().
+ *
+ * This will propagate the `const` specifier from the ICU4C API call to the
+ * unified method, and it will be enforced by the compiler. This helps ensures
+ * a consistence and correct implementation.
  */
 template <typename T>
 class ICUPointer {
  public:
   explicit ICUPointer(T* aPointer) : mPointer(aPointer) {}
 
-  // Only allow moves, no copies.
+  // Only allow moves of ICUPointers, no copies.
   ICUPointer(ICUPointer&& other) noexcept = default;
   ICUPointer& operator=(ICUPointer&& other) noexcept = default;
 
+  // Implicitly take ownership of a raw pointer through copy assignment.
+  ICUPointer& operator=(T* aPointer) noexcept {
+    mPointer = aPointer;
+    return *this;
+  };
+
   const T* GetConst() const { return const_cast<const T*>(mPointer); }
   T* GetMut() { return mPointer; }
+
+  explicit operator bool() const { return !!mPointer; }
 
  private:
   T* mPointer;
@@ -81,7 +137,9 @@ class ICUPointer {
 template <typename ICUStringFunction, typename Buffer>
 static ICUResult FillBufferWithICUCall(Buffer& buffer,
                                        const ICUStringFunction& strFn) {
-  static_assert(std::is_same<typename Buffer::CharType, char16_t>::value);
+  static_assert(std::is_same_v<typename Buffer::CharType, char16_t> ||
+                std::is_same_v<typename Buffer::CharType, char> ||
+                std::is_same_v<typename Buffer::CharType, uint8_t>);
 
   UErrorCode status = U_ZERO_ERROR;
   int32_t length = strFn(buffer.data(), buffer.capacity(), &status);
@@ -97,7 +155,7 @@ static ICUResult FillBufferWithICUCall(Buffer& buffer,
     MOZ_ASSERT(length == length2);
   }
   if (!ICUSuccessForStringSpan(status)) {
-    return Err(ICUError::InternalError);
+    return Err(ToICUError(status));
   }
 
   buffer.written(length);
@@ -106,59 +164,157 @@ static ICUResult FillBufferWithICUCall(Buffer& buffer,
 }
 
 /**
- * A variant of FillBufferWithICUCall that accepts a mozilla::Vector rather than
- * a Buffer.
+ * Adaptor for mozilla::Vector to implement the Buffer interface.
+ */
+template <typename T, size_t N>
+class VectorToBufferAdaptor {
+  mozilla::Vector<T, N>& vector;
+
+ public:
+  using CharType = T;
+
+  explicit VectorToBufferAdaptor(mozilla::Vector<T, N>& vector)
+      : vector(vector) {}
+
+  T* data() { return vector.begin(); }
+
+  size_t capacity() const { return vector.capacity(); }
+
+  bool reserve(size_t length) { return vector.reserve(length); }
+
+  void written(size_t length) {
+    mozilla::DebugOnly<bool> result = vector.resizeUninitialized(length);
+    MOZ_ASSERT(result);
+  }
+};
+
+/**
+ * An overload of FillBufferWithICUCall that accepts a mozilla::Vector rather
+ * than a Buffer.
  */
 template <typename ICUStringFunction, size_t InlineSize, typename CharType>
-static ICUResult FillVectorWithICUCall(Vector<CharType, InlineSize>& vector,
+static ICUResult FillBufferWithICUCall(Vector<CharType, InlineSize>& vector,
                                        const ICUStringFunction& strFn) {
-  UErrorCode status = U_ZERO_ERROR;
-  int32_t length = strFn(vector.begin(), vector.capacity(), &status);
-  if (status == U_BUFFER_OVERFLOW_ERROR) {
-    MOZ_ASSERT(length >= 0);
-
-    if (!vector.reserve(length)) {
-      return Err(ICUError::OutOfMemory);
-    }
-
-    status = U_ZERO_ERROR;
-    mozilla::DebugOnly<int32_t> length2 =
-        strFn(vector.begin(), length, &status);
-    MOZ_ASSERT(length == length2);
-  }
-  if (!ICUSuccessForStringSpan(status)) {
-    return Err(ICUError::InternalError);
-  }
-
-  mozilla::DebugOnly<bool> result = vector.resizeUninitialized(length);
-  MOZ_ASSERT(result);
-  return Ok{};
+  VectorToBufferAdaptor buffer(vector);
+  return FillBufferWithICUCall(buffer, strFn);
 }
+
+#ifndef JS_STANDALONE
+/**
+ * mozilla::intl APIs require sizeable buffers. This class abstracts over
+ * the nsTArray.
+ */
+template <typename T>
+class nsTArrayToBufferAdapter {
+ public:
+  using CharType = T;
+
+  // Do not allow copy or move. Move could be added in the future if needed.
+  nsTArrayToBufferAdapter(const nsTArrayToBufferAdapter&) = delete;
+  nsTArrayToBufferAdapter& operator=(const nsTArrayToBufferAdapter&) = delete;
+
+  explicit nsTArrayToBufferAdapter(nsTArray<CharType>& aArray)
+      : mArray(aArray) {}
+
+  /**
+   * Ensures the buffer has enough space to accommodate |size| elements.
+   */
+  [[nodiscard]] bool reserve(size_t size) {
+    // Use faillible behavior here.
+    return mArray.SetCapacity(size, fallible);
+  }
+
+  /**
+   * Returns the raw data inside the buffer.
+   */
+  CharType* data() { return mArray.Elements(); }
+
+  /**
+   * Returns the count of elements written into the buffer.
+   */
+  size_t length() const { return mArray.Length(); }
+
+  /**
+   * Returns the buffer's overall capacity.
+   */
+  size_t capacity() const { return mArray.Capacity(); }
+
+  /**
+   * Resizes the buffer to the given amount of written elements.
+   */
+  void written(size_t amount) {
+    MOZ_ASSERT(amount <= mArray.Capacity());
+    // This sets |mArray|'s internal size so that it matches how much was
+    // written. This is necessary because the write happens across FFI
+    // boundaries.
+    mArray.SetLengthAndRetainStorage(amount);
+  }
+
+ private:
+  nsTArray<CharType>& mArray;
+};
+
+template <typename T, size_t N>
+class AutoTArrayToBufferAdapter : public nsTArrayToBufferAdapter<T> {
+  using nsTArrayToBufferAdapter<T>::nsTArrayToBufferAdapter;
+};
+
+/**
+ * An overload of FillBufferWithICUCall that accepts a nsTArray.
+ */
+template <typename ICUStringFunction, typename CharType>
+static ICUResult FillBufferWithICUCall(nsTArray<CharType>& array,
+                                       const ICUStringFunction& strFn) {
+  nsTArrayToBufferAdapter<CharType> buffer(array);
+  return FillBufferWithICUCall(buffer, strFn);
+}
+
+template <typename ICUStringFunction, typename CharType, size_t N>
+static ICUResult FillBufferWithICUCall(AutoTArray<CharType, N>& array,
+                                       const ICUStringFunction& strFn) {
+  AutoTArrayToBufferAdapter<CharType, N> buffer(array);
+  return FillBufferWithICUCall(buffer, strFn);
+}
+#endif
 
 /**
  * ICU4C works with UTF-16 strings, but consumers of mozilla::intl may require
  * UTF-8 strings.
  */
 template <typename Buffer>
-[[nodiscard]] bool FillUTF8Buffer(Span<const char16_t> utf16Span,
-                                  Buffer& utf8TargetBuffer) {
-  static_assert(std::is_same<typename Buffer::CharType, char>::value ||
-                std::is_same<typename Buffer::CharType, unsigned char>::value);
+[[nodiscard]] bool FillBuffer(Span<const char16_t> utf16Span,
+                              Buffer& targetBuffer) {
+  static_assert(std::is_same_v<typename Buffer::CharType, char> ||
+                std::is_same_v<typename Buffer::CharType, unsigned char> ||
+                std::is_same_v<typename Buffer::CharType, char16_t>);
 
-  if (utf16Span.Length() & mozilla::tl::MulOverflowMask<3>::value) {
-    // Tripling the size of the buffer overflows the size_t.
-    return false;
+  if constexpr (std::is_same_v<typename Buffer::CharType, char> ||
+                std::is_same_v<typename Buffer::CharType, unsigned char>) {
+    if (utf16Span.Length() & mozilla::tl::MulOverflowMask<3>::value) {
+      // Tripling the size of the buffer overflows the size_t.
+      return false;
+    }
+
+    if (!targetBuffer.reserve(3 * utf16Span.Length())) {
+      return false;
+    }
+
+    size_t amount = ConvertUtf16toUtf8(
+        utf16Span, Span(reinterpret_cast<char*>(targetBuffer.data()),
+                        targetBuffer.capacity()));
+
+    targetBuffer.written(amount);
   }
-
-  if (!utf8TargetBuffer.reserve(3 * utf16Span.Length())) {
-    return false;
+  if constexpr (std::is_same_v<typename Buffer::CharType, char16_t>) {
+    size_t amount = utf16Span.Length();
+    if (!targetBuffer.reserve(amount)) {
+      return false;
+    }
+    for (size_t i = 0; i < amount; i++) {
+      targetBuffer.data()[i] = utf16Span[i];
+    }
+    targetBuffer.written(amount);
   }
-
-  size_t amount = ConvertUtf16toUtf8(
-      utf16Span, Span(reinterpret_cast<char*>(utf8TargetBuffer.data()),
-                      utf8TargetBuffer.capacity()));
-
-  utf8TargetBuffer.written(amount);
 
   return true;
 }
@@ -312,16 +468,6 @@ class Enumeration {
 };
 
 template <typename CharType>
-Result<const CharType*, InternalError> NullTerminatedMapper(
-    const CharType* string, int32_t length) {
-  // Return the raw value from this Iterator.
-  if (string == nullptr) {
-    return Err(InternalError{});
-  }
-  return string;
-}
-
-template <typename CharType>
 Result<Span<const CharType>, InternalError> SpanMapper(const CharType* string,
                                                        int32_t length) {
   // Return the raw value from this Iterator.
@@ -337,6 +483,66 @@ using SpanResult = Result<Span<const CharType>, InternalError>;
 
 template <typename CharType>
 using SpanEnumeration = Enumeration<CharType, SpanResult<CharType>, SpanMapper>;
+
+/**
+ * An iterable class that wraps calls to ICU's available locales API.
+ */
+template <int32_t(CountAvailable)(), const char*(GetAvailable)(int32_t)>
+class AvailableLocalesEnumeration final {
+  // The overall count of available locales.
+  int32_t mLocalesCount = 0;
+
+ public:
+  AvailableLocalesEnumeration() { mLocalesCount = CountAvailable(); }
+
+  class Iterator {
+   public:
+    // std::iterator traits.
+    using iterator_category = std::input_iterator_tag;
+    using value_type = const char*;
+    using difference_type = ptrdiff_t;
+    using pointer = value_type*;
+    using reference = value_type&;
+
+   private:
+    // The current position in the list of available locales.
+    int32_t mLocalesPos = 0;
+
+   public:
+    explicit Iterator(int32_t aLocalesPos) : mLocalesPos(aLocalesPos) {}
+
+    Iterator& operator++() {
+      mLocalesPos++;
+      return *this;
+    }
+
+    Iterator operator++(int) {
+      Iterator result = *this;
+      ++(*this);
+      return result;
+    }
+
+    bool operator==(const Iterator& aOther) const {
+      return mLocalesPos == aOther.mLocalesPos;
+    }
+
+    bool operator!=(const Iterator& aOther) const { return !(*this == aOther); }
+
+    value_type operator*() const { return GetAvailable(mLocalesPos); }
+  };
+
+  // std::iterator begin() and end() methods.
+
+  /**
+   * Return an iterator pointing to the first available locale.
+   */
+  Iterator begin() const { return Iterator(0); }
+
+  /**
+   * Return an iterator pointing to one past the last available locale.
+   */
+  Iterator end() const { return Iterator(mLocalesCount); }
+};
 
 }  // namespace mozilla::intl
 

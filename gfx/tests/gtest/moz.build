@@ -16,7 +16,6 @@ UNIFIED_SOURCES += [
     "TestConfigManager.cpp",
     "TestCoord.cpp",
     "TestGfxWidgets.cpp",
-    "TestLayers.cpp",
     "TestMatrix.cpp",
     "TestMoz2D.cpp",
     "TestPolygon.cpp",
@@ -37,7 +36,6 @@ if not (CONFIG["OS_TARGET"] == "WINNT" and CONFIG["CPU_ARCH"] == "aarch64"):
 if CONFIG["OS_TARGET"] != "Android":
     UNIFIED_SOURCES += [
         "TestRect.cpp",
-        "TestTextureCompatibility.cpp",
     ]
 
 UNIFIED_SOURCES += [

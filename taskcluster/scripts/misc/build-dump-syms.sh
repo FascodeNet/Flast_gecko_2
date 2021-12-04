@@ -5,14 +5,11 @@ PROJECT=dump_syms
 # Needed by osx-cross-linker.
 export TARGET=$1
 
+COMPRESS_EXT=zst
 # This script is for building dump_syms
 case "$(uname -s)" in
-Linux)
-    COMPRESS_EXT=xz
-    ;;
 MINGW*)
     UPLOAD_DIR=$PWD/public/build
-    COMPRESS_EXT=bz2
 
     . $GECKO_PATH/taskcluster/scripts/misc/vs-setup.sh
     ;;
@@ -32,15 +29,17 @@ case "$(uname -s)" in
 Linux)
     case "$TARGET" in
     *-apple-darwin)
-        export PATH="$MOZ_FETCHES_DIR/llvm-dsymutil/bin:$PATH"
+        export PATH="$MOZ_FETCHES_DIR/clang/bin:$PATH"
         export PATH="$MOZ_FETCHES_DIR/cctools/bin:$PATH"
         export RUSTFLAGS="-C linker=$GECKO_PATH/taskcluster/scripts/misc/osx-cross-linker"
-        export CC="$MOZ_FETCHES_DIR/clang/bin/clang"
         if test "$TARGET" = "aarch64-apple-darwin"; then
-            export SDK_VER=11.0
+            export MACOSX_DEPLOYMENT_TARGET=11.0
+        else
+            export MACOSX_DEPLOYMENT_TARGET=10.12
         fi
-        export TARGET_CC="$MOZ_FETCHES_DIR/clang/bin/clang -isysroot $MOZ_FETCHES_DIR/MacOSX${SDK_VER:-10.12}.sdk"
-        export TARGET_CXX="$MOZ_FETCHES_DIR/clang/bin/clang++ -isysroot $MOZ_FETCHES_DIR/MacOSX${SDK_VER:-10.12}.sdk -stdlib=libc++"
+        export CC="$MOZ_FETCHES_DIR/clang/bin/clang"
+        export TARGET_CC="$MOZ_FETCHES_DIR/clang/bin/clang -isysroot $MOZ_FETCHES_DIR/MacOSX11.0.sdk"
+        export TARGET_CXX="$MOZ_FETCHES_DIR/clang/bin/clang++ -isysroot $MOZ_FETCHES_DIR/MacOSX11.0.sdk -stdlib=libc++"
         cargo build --verbose --release --target $TARGET
         ;;
     *)
@@ -65,7 +64,7 @@ if [ -n "$TARGET" ]; then
     PROJECT_OUT=target/${TARGET}/release/${PROJECT}*
 fi
 cp ${PROJECT_OUT} ${PROJECT}/
-tar -acf ${PROJECT}.tar.$COMPRESS_EXT $PROJECT
+tar -c $PROJECT | python3 $GECKO_PATH/taskcluster/scripts/misc/zstdpy > ${PROJECT}.tar.$COMPRESS_EXT
 mkdir -p $UPLOAD_DIR
 cp ${PROJECT}.tar.$COMPRESS_EXT $UPLOAD_DIR
 

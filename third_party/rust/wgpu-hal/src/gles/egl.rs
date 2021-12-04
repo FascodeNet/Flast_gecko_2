@@ -844,7 +844,11 @@ impl crate::Surface<super::Api> for Surface {
                     }
                     #[cfg(target_os = "android")]
                     Rwh::Android(handle) => handle.a_native_window,
-                    #[cfg(not(any(target_os = "android", target_os = "macos", target_os = "solaris")))]
+                    #[cfg(not(any(
+                        target_os = "android",
+                        target_os = "macos",
+                        target_os = "solaris"
+                    )))]
                     Rwh::Wayland(handle) => {
                         let library = self.wsi_library.as_ref().expect("unsupported window");
                         let wl_egl_window_create: libloading::Symbol<WlEglWindowCreateFun> =
@@ -984,6 +988,11 @@ impl crate::Surface<super::Api> for Surface {
             mip_level_count: 1,
             format: sc.format,
             format_desc: sc.format_desc.clone(),
+            copy_size: crate::CopyExtent {
+                width: sc.extent.width,
+                height: sc.extent.height,
+                depth: 1,
+            },
         };
         Ok(Some(crate::AcquiredSurfaceTexture {
             texture,

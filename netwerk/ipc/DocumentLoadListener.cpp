@@ -54,6 +54,7 @@
 #include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/Element.h"
 #include "mozilla/dom/nsHTTPSOnlyUtils.h"
+#include "mozilla/dom/ReferrerInfo.h"
 #include "mozilla/dom/RemoteWebProgressRequest.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "mozilla/ExtensionPolicyService.h"
@@ -217,8 +218,7 @@ class ParentProcessDocumentOpenInfo final : public nsDocumentOpenInfo,
   // channel listener so that we forward onto DocumentLoadListener.
   bool TryDefaultContentListener(nsIChannel* aChannel,
                                  const nsCString& aContentType) {
-    uint32_t canHandle = nsWebNavigationInfo::IsTypeSupported(
-        aContentType, mBrowsingContext->GetAllowPlugins());
+    uint32_t canHandle = nsWebNavigationInfo::IsTypeSupported(aContentType);
     if (canHandle != nsIWebNavigationInfo::UNSUPPORTED) {
       m_targetStreamListener = mListener;
       nsLoadFlags loadFlags = 0;
@@ -809,7 +809,7 @@ auto DocumentLoadListener::OpenObject(
 
   MOZ_ASSERT(!mIsDocumentLoad);
 
-  auto sandboxFlags = GetLoadingBrowsingContext()->GetSandboxFlags();
+  auto sandboxFlags = aLoadState->TriggeringSandboxFlags();
 
   RefPtr<LoadInfo> loadInfo = CreateObjectLoadInfo(
       aLoadState, aInnerWindowId, aContentPolicyType, sandboxFlags);
@@ -1400,14 +1400,7 @@ void DocumentLoadListener::SerializeRedirectData(
     redirectLoadInfo =
         static_cast<mozilla::net::LoadInfo*>(channelLoadInfo.get())->Clone();
 
-    nsCOMPtr<nsIPrincipal> uriPrincipal;
-    nsIScriptSecurityManager* sm = nsContentUtils::GetSecurityManager();
-    sm->GetChannelURIPrincipal(mChannel, getter_AddRefs(uriPrincipal));
-
-    nsCOMPtr<nsIRedirectHistoryEntry> entry =
-        new nsRedirectHistoryEntry(uriPrincipal, nullptr, ""_ns);
-
-    redirectLoadInfo->AppendRedirectHistoryEntry(entry, true);
+    redirectLoadInfo->AppendRedirectHistoryEntry(mChannel, true);
   }
 
   const Maybe<ClientInfo>& reservedClientInfo =
@@ -1474,6 +1467,21 @@ void DocumentLoadListener::SerializeRedirectData(
   }
 }
 
+DocumentLoadListener::ProcessBehavior GetProcessSwitchBehavior(
+    Element* aBrowserElement) {
+  if (aBrowserElement->HasAttribute(u"maychangeremoteness"_ns)) {
+    return DocumentLoadListener::ProcessBehavior::PROCESS_BEHAVIOR_STANDARD;
+  }
+  nsCOMPtr<nsIBrowser> browser = aBrowserElement->AsBrowser();
+  bool isRemoteBrowser = false;
+  browser->GetIsRemoteBrowser(&isRemoteBrowser);
+  if (isRemoteBrowser) {
+    return DocumentLoadListener::ProcessBehavior::
+        PROCESS_BEHAVIOR_SUBFRAME_ONLY;
+  }
+  return DocumentLoadListener::ProcessBehavior::PROCESS_BEHAVIOR_DISABLED;
+}
+
 static bool ContextCanProcessSwitch(CanonicalBrowsingContext* aBrowsingContext,
                                     WindowGlobalParent* aParentWindow) {
   if (NS_WARN_IF(!aBrowsingContext)) {
@@ -1514,26 +1522,20 @@ static bool ContextCanProcessSwitch(CanonicalBrowsingContext* aBrowsingContext,
     return false;
   }
 
-  nsIBrowser::ProcessBehavior processBehavior =
-      nsIBrowser::PROCESS_BEHAVIOR_DISABLED;
-  nsresult rv = browser->GetProcessSwitchBehavior(&processBehavior);
-  if (NS_FAILED(rv)) {
-    MOZ_ASSERT_UNREACHABLE(
-        "nsIBrowser::GetProcessSwitchBehavior shouldn't fail");
-    MOZ_LOG(gProcessIsolationLog, LogLevel::Warning,
-            ("Process Switch Abort: failed to get process switch behavior"));
-    return false;
-  }
+  DocumentLoadListener::ProcessBehavior processBehavior =
+      GetProcessSwitchBehavior(browserElement);
 
   // Check if the process switch we're considering is disabled by the
   // <browser>'s process behavior.
-  if (processBehavior == nsIBrowser::PROCESS_BEHAVIOR_DISABLED) {
+  if (processBehavior ==
+      DocumentLoadListener::ProcessBehavior::PROCESS_BEHAVIOR_DISABLED) {
     MOZ_LOG(gProcessIsolationLog, LogLevel::Warning,
             ("Process Switch Abort: switch disabled by <browser>"));
     return false;
   }
-  if (!aParentWindow &&
-      processBehavior == nsIBrowser::PROCESS_BEHAVIOR_SUBFRAME_ONLY) {
+  if (!aParentWindow && processBehavior ==
+                            DocumentLoadListener::ProcessBehavior::
+                                PROCESS_BEHAVIOR_SUBFRAME_ONLY) {
     MOZ_LOG(gProcessIsolationLog, LogLevel::Warning,
             ("Process Switch Abort: toplevel switch disabled by <browser>"));
     return false;
@@ -2022,6 +2024,14 @@ bool DocumentLoadListener::DocShellWillDisplayContent(nsresult aStatus) {
       aStatus, mChannel, mLoadStateLoadType, loadingContext->IsTop(),
       loadingContext->GetUseErrorPages(), isInitialDocument, nullptr);
 
+  if (NS_SUCCEEDED(rv)) {
+    MOZ_LOG(gProcessIsolationLog, LogLevel::Verbose,
+            ("Skipping process switch, as DocShell will not display content "
+             "(status: %s) %s",
+             GetStaticErrorName(aStatus),
+             mChannelCreationURI->GetSpecOrDefault().get()));
+  }
+
   // If filtering returned a failure code, then an error page will
   // be display for that code, so return true;
   return NS_FAILED(rv);
@@ -2075,6 +2085,41 @@ bool DocumentLoadListener::MaybeHandleLoadErrorWithURIFixup(nsresult aStatus) {
     // We have to exempt the load from HTTPS-First to prevent a
     // upgrade-downgrade loop.
     loadState->SetIsExemptFromHTTPSOnlyMode(true);
+  }
+
+  // Ensure to set referrer information in the fallback channel equally to the
+  // not-upgraded original referrer info.
+  //
+  // A simply copy of the referrer info from the upgraded one leads to problems.
+  // For example:
+  // 1. https://some-site.com redirects to http://other-site.com with referrer
+  // policy
+  //   "no-referrer-when-downgrade".
+  // 2. https-first upgrades the redirection, so redirects to
+  // https://other-site.com,
+  //    according to referrer policy the referrer will be send (https-> https)
+  // 3. Assume other-site.com is not supporting https, https-first performs
+  // fall-
+  //    back.
+  // If the referrer info from the upgraded channel gets copied into the
+  // http fallback channel, the referrer info would contain the referrer
+  // (https://some-site.com). That would violate the policy
+  // "no-referrer-when-downgrade". A recreation of the original referrer info
+  // would ensure us that the referrer is set according to the referrer policy.
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(mChannel);
+  if (httpChannel) {
+    nsCOMPtr<nsIReferrerInfo> referrerInfo = httpChannel->GetReferrerInfo();
+    if (referrerInfo) {
+      ReferrerPolicy referrerPolicy = referrerInfo->ReferrerPolicy();
+      nsCOMPtr<nsIURI> originalReferrer = referrerInfo->GetOriginalReferrer();
+      if (originalReferrer) {
+        // Create new ReferrerInfo with the original referrer and the referrer
+        // policy.
+        nsCOMPtr<nsIReferrerInfo> newReferrerInfo =
+            new ReferrerInfo(originalReferrer, referrerPolicy);
+        loadState->SetReferrerInfo(newReferrerInfo);
+      }
+    }
   }
 
   bc->LoadURI(loadState, false);
@@ -2186,6 +2231,8 @@ DocumentLoadListener::OnStartRequest(nsIRequest* aRequest) {
       // support redirects, then we need to do it manually, by faking a process
       // switch.
       mDoingProcessSwitch = true;
+
+      DisconnectListeners(NS_BINDING_ABORTED, NS_BINDING_ABORTED, true);
 
       // XXX(anny) This is currently a dead code path because parent-controlled
       // DC pref is off. When we enable the pref, we might get extra STATE_START
@@ -2430,7 +2477,7 @@ DocumentLoadListener::AsyncOnChannelRedirect(
       mLoadingSessionHistoryInfo =
           GetDocumentBrowsingContext()
               ->ReplaceLoadingSessionHistoryEntryForLoad(
-                  mLoadingSessionHistoryInfo.get(), aNewChannel);
+                  mLoadingSessionHistoryInfo.get(), aOldChannel, aNewChannel);
     }
     if (!net::ChannelIsPost(aOldChannel)) {
       AddURIVisit(aOldChannel, 0);

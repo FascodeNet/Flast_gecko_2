@@ -260,6 +260,8 @@ partial interface Element {
 // https://dom.spec.whatwg.org/#dictdef-shadowrootinit
 dictionary ShadowRootInit {
   required ShadowRootMode mode;
+  [Pref="dom.shadowdom.delegatesFocus.enabled"]
+  boolean delegatesFocus = false;
   [Pref="dom.shadowdom.slot.assign.enabled"]
   SlotAssignmentMode slotAssignment = "named";
 };
@@ -377,4 +379,15 @@ partial interface Element {
   // height. If the direction is vertical, it represents box's width.
   [ChromeOnly]
   readonly attribute double firstLineBoxBSize;
+};
+
+
+// Sanitizer API, https://wicg.github.io/sanitizer-api/
+dictionary SetHTMLOptions {
+  Sanitizer sanitizer;
+};
+
+partial interface Element {
+  [UseCounter, Throws, Pref="dom.security.sanitizer.enabled"]
+    void setHTML(DOMString aInnerHTML, optional SetHTMLOptions options = {});
 };

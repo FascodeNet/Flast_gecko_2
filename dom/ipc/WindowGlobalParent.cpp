@@ -29,6 +29,7 @@
 #include "mozilla/dom/sessionstore/SessionStoreTypes.h"
 #include "mozilla/dom/SessionStoreUtils.h"
 #include "mozilla/dom/SessionStoreUtilsBinding.h"
+#include "mozilla/Components.h"
 #include "mozilla/ScopeExit.h"
 #include "mozilla/ServoCSSParser.h"
 #include "mozilla/ServoStyleSet.h"
@@ -49,10 +50,13 @@
 #include "nsSandboxFlags.h"
 #include "nsSerializationHelper.h"
 #include "nsIBrowser.h"
+#include "nsIEffectiveTLDService.h"
+#include "nsIHttpsOnlyModePermission.h"
 #include "nsIPromptCollection.h"
 #include "nsITimer.h"
 #include "nsITransportSecurityInfo.h"
 #include "nsISharePicker.h"
+#include "nsIURIMutator.h"
 #include "mozilla/Telemetry.h"
 
 #include "mozilla/dom/DOMException.h"
@@ -1355,7 +1359,7 @@ mozilla::ipc::IPCResult WindowGlobalParent::RecvRequestRestoreTabContent() {
   return IPC_OK();
 }
 
-nsCString BFCacheStatusToString(uint16_t aFlags) {
+nsCString BFCacheStatusToString(uint32_t aFlags) {
   if (aFlags == 0) {
     return "0"_ns;
   }
@@ -1383,6 +1387,7 @@ nsCString BFCacheStatusToString(uint16_t aFlags) {
   ADD_BFCACHESTATUS_TO_STRING(HAS_USED_VR);
   ADD_BFCACHESTATUS_TO_STRING(CONTAINS_REMOTE_SUBFRAMES);
   ADD_BFCACHESTATUS_TO_STRING(NOT_ONLY_TOPLEVEL_IN_BCG);
+  ADD_BFCACHESTATUS_TO_STRING(ACTIVE_LOCK);
 
 #undef ADD_BFCACHESTATUS_TO_STRING
 
@@ -1392,7 +1397,7 @@ nsCString BFCacheStatusToString(uint16_t aFlags) {
 }
 
 mozilla::ipc::IPCResult WindowGlobalParent::RecvUpdateBFCacheStatus(
-    const uint16_t& aOnFlags, const uint16_t& aOffFlags) {
+    const uint32_t& aOnFlags, const uint32_t& aOffFlags) {
   if (MOZ_UNLIKELY(MOZ_LOG_TEST(gSHIPBFCacheLog, LogLevel::Debug))) {
     nsAutoCString uri("[no uri]");
     if (mDocumentURI) {
@@ -1444,6 +1449,82 @@ mozilla::ipc::IPCResult WindowGlobalParent::RecvSetDocumentDomain(
   }
 
   mDocumentPrincipal->SetDomain(aDomain);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult WindowGlobalParent::RecvReloadWithHttpsOnlyException() {
+  nsresult rv;
+  nsCOMPtr<nsIURI> currentUri = BrowsingContext()->Top()->GetCurrentURI();
+
+  bool isViewSource = currentUri->SchemeIs("view-source");
+
+  nsCOMPtr<nsINestedURI> nestedURI = do_QueryInterface(currentUri);
+  nsCOMPtr<nsIURI> innerURI;
+  if (isViewSource) {
+    nestedURI->GetInnerURI(getter_AddRefs(innerURI));
+  } else {
+    innerURI = currentUri;
+  }
+
+  if (!innerURI->SchemeIs("https") && !innerURI->SchemeIs("http")) {
+    return IPC_FAIL(this, "HTTPS-only mode: Illegal state");
+  }
+
+  // If the error page is within an iFrame, we create an exception for whatever
+  // scheme the top-level site is currently on, because the user wants to
+  // unbreak the iFrame and not the top-level page. When the error page shows up
+  // on a top-level request, then we replace the scheme with http, because the
+  // user wants to unbreak the whole page.
+  nsCOMPtr<nsIURI> newURI;
+  if (!BrowsingContext()->IsTop()) {
+    newURI = innerURI;
+  } else {
+    Unused << NS_MutateURI(innerURI).SetScheme("http"_ns).Finalize(
+        getter_AddRefs(newURI));
+  }
+
+  OriginAttributes originAttributes =
+      TopWindowContext()->DocumentPrincipal()->OriginAttributesRef();
+
+  originAttributes.SetFirstPartyDomain(true, newURI);
+
+  nsCOMPtr<nsIPermissionManager> permMgr =
+      components::PermissionManager::Service();
+  if (!permMgr) {
+    return IPC_FAIL(
+        this, "HTTPS-only mode: Failed to get Permission Manager service");
+  }
+
+  nsCOMPtr<nsIPrincipal> principal =
+      BasePrincipal::CreateContentPrincipal(newURI, originAttributes);
+
+  rv = permMgr->AddFromPrincipal(
+      principal, "https-only-load-insecure"_ns,
+      nsIHttpsOnlyModePermission::LOAD_INSECURE_ALLOW_SESSION,
+      nsIPermissionManager::EXPIRE_SESSION, 0);
+
+  if (NS_FAILED(rv)) {
+    return IPC_FAIL(
+        this, "HTTPS-only mode: Failed to add permission to the principal");
+  }
+
+  nsCOMPtr<nsIURI> insecureURI = newURI;
+  if (isViewSource) {
+    nsAutoCString spec;
+    MOZ_ALWAYS_SUCCEEDS(newURI->GetSpec(spec));
+    if (NS_FAILED(
+            NS_NewURI(getter_AddRefs(insecureURI), "view-source:"_ns + spec))) {
+      return IPC_FAIL(
+          this, "HTTPS-only mode: Failed to re-construct view-source URI");
+    }
+  }
+
+  RefPtr<nsDocShellLoadState> loadState = new nsDocShellLoadState(insecureURI);
+  loadState->SetTriggeringPrincipal(nsContentUtils::GetSystemPrincipal());
+  loadState->SetLoadFlags(nsIWebNavigation::LOAD_FLAGS_REPLACE_HISTORY);
+
+  BrowsingContext()->Top()->LoadURI(loadState, /* setNavigating */ true);
+
   return IPC_OK();
 }
 

@@ -188,11 +188,14 @@ gfxFontCache::gfxFontCache(nsIEventTarget* aEventTarget)
   if (XRE_IsContentProcess() && NS_IsMainThread()) {
     target = aEventTarget;
   }
-  NS_NewTimerWithFuncCallback(getter_AddRefs(mWordCacheExpirationTimer),
-                              WordCacheExpirationTimerCallback, this,
-                              SHAPED_WORD_TIMEOUT_SECONDS * 1000,
-                              nsITimer::TYPE_REPEATING_SLACK,
-                              "gfxFontCache::gfxFontCache", target);
+
+  // Create the timer used to expire shaped-word records from each font's
+  // cache after a short period of non-use. We have a single timer in
+  // gfxFontCache that loops over all fonts known to the cache, to avoid
+  // the overhead of individual timers in each font instance.
+  // The timer will be started any time shaped word records are cached
+  // (and pauses itself when all caches become empty).
+  mWordCacheExpirationTimer = NS_NewTimer(target);
 }
 
 gfxFontCache::~gfxFontCache() {
@@ -291,9 +294,13 @@ void gfxFontCache::DestroyFont(gfxFont* aFont) {
 /*static*/
 void gfxFontCache::WordCacheExpirationTimerCallback(nsITimer* aTimer,
                                                     void* aCache) {
+  bool allEmpty = true;
   gfxFontCache* cache = static_cast<gfxFontCache*>(aCache);
   for (const auto& entry : cache->mFonts) {
-    entry.mFont->AgeCachedWords();
+    allEmpty = entry.mFont->AgeCachedWords() && allEmpty;
+  }
+  if (allEmpty) {
+    cache->PauseWordCacheExpirationTimer();
   }
 }
 
@@ -301,6 +308,7 @@ void gfxFontCache::FlushShapedWordCaches() {
   for (const auto& entry : mFonts) {
     entry.mFont->ClearCachedWords();
   }
+  PauseWordCacheExpirationTimer();
 }
 
 void gfxFontCache::NotifyGlyphsChanged() {
@@ -1448,10 +1456,6 @@ bool gfxFont::SupportsSubSuperscript(uint32_t aSubSuperscript,
       ch = SURROGATE_TO_UCS4(ch, aString[i]);
     }
 
-    if (ch == 0xa0) {
-      ch = ' ';
-    }
-
     hb_codepoint_t gid = shaper->GetNominalGlyph(ch);
     hb_set_add(defaultGlyphsInRun, gid);
   }
@@ -1488,10 +1492,6 @@ bool gfxFont::FeatureWillHandleChar(Script aRunScript, uint32_t aFeature,
   // get the hbset containing input glyphs for the feature
   const hb_set_t* inputGlyphs =
       mFontEntry->InputsForOpenTypeFeature(aRunScript, aFeature);
-
-  if (aUnicode == 0xa0) {
-    aUnicode = ' ';
-  }
 
   hb_codepoint_t gid = shaper->GetNominalGlyph(aUnicode);
   return hb_set_has(inputGlyphs, gid);
@@ -2086,11 +2086,14 @@ void gfxFont::Draw(const gfxTextRun* aTextRun, uint32_t aStart, uint32_t aEnd,
     fontParams.drawOptions = *aRunParams.drawOpts;
   }
 
-  fontParams.scaledFont = GetScaledFont(aRunParams.dt);
+  if (aRunParams.allowGDI) {
+    fontParams.scaledFont = GetScaledFont(aRunParams.dt);
+  } else {
+    fontParams.scaledFont = GetScaledFontNoGDI(aRunParams.dt);
+  }
   if (!fontParams.scaledFont) {
     return;
   }
-
   auto* textDrawer = aRunParams.context->GetTextDrawer();
 
   fontParams.obliqueSkew = SkewForSyntheticOblique();
@@ -2711,7 +2714,7 @@ gfxFont::RunMetrics gfxFont::Measure(const gfxTextRun* aTextRun,
   return metrics;
 }
 
-void gfxFont::AgeCachedWords() {
+bool gfxFont::AgeCachedWords() {
   if (mWordCache) {
     for (auto it = mWordCache->Iter(); !it.Done(); it.Next()) {
       CacheHashEntry* entry = it.Get();
@@ -2722,7 +2725,9 @@ void gfxFont::AgeCachedWords() {
         it.Remove();
       }
     }
+    return mWordCache->IsEmpty();
   }
+  return true;
 }
 
 void gfxFont::NotifyGlyphsChanged() {
@@ -2807,6 +2812,8 @@ gfxShapedWord* gfxFont::GetShapedWord(
                                  aLanguage, aVertical, aRounding, sw);
 
   NS_WARNING_ASSERTION(ok, "failed to shape word - expect garbled text");
+
+  gfxFontCache::GetCache()->RunWordCacheExpirationTimer();
 
   return sw;
 }
@@ -3280,13 +3287,11 @@ template bool gfxFont::SplitAndInitTextRun(
     nsAtom* aLanguage, ShapedTextFlags aOrientation);
 
 template <>
-bool gfxFont::InitFakeSmallCapsRun(DrawTarget* aDrawTarget,
-                                   gfxTextRun* aTextRun, const char16_t* aText,
-                                   uint32_t aOffset, uint32_t aLength,
-                                   FontMatchType aMatchType,
-                                   gfx::ShapedTextFlags aOrientation,
-                                   Script aScript, nsAtom* aLanguage,
-                                   bool aSyntheticLower, bool aSyntheticUpper) {
+bool gfxFont::InitFakeSmallCapsRun(
+    nsPresContext* aPresContext, DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
+    const char16_t* aText, uint32_t aOffset, uint32_t aLength,
+    FontMatchType aMatchType, gfx::ShapedTextFlags aOrientation, Script aScript,
+    nsAtom* aLanguage, bool aSyntheticLower, bool aSyntheticUpper) {
   bool ok = true;
 
   RefPtr<gfxFont> smallCapsFont = GetSmallCapsFont();
@@ -3435,19 +3440,18 @@ bool gfxFont::InitFakeSmallCapsRun(DrawTarget* aDrawTarget,
 }
 
 template <>
-bool gfxFont::InitFakeSmallCapsRun(DrawTarget* aDrawTarget,
-                                   gfxTextRun* aTextRun, const uint8_t* aText,
-                                   uint32_t aOffset, uint32_t aLength,
-                                   FontMatchType aMatchType,
-                                   gfx::ShapedTextFlags aOrientation,
-                                   Script aScript, nsAtom* aLanguage,
-                                   bool aSyntheticLower, bool aSyntheticUpper) {
+bool gfxFont::InitFakeSmallCapsRun(
+    nsPresContext* aPresContext, DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
+    const uint8_t* aText, uint32_t aOffset, uint32_t aLength,
+    FontMatchType aMatchType, gfx::ShapedTextFlags aOrientation, Script aScript,
+    nsAtom* aLanguage, bool aSyntheticLower, bool aSyntheticUpper) {
   NS_ConvertASCIItoUTF16 unicodeString(reinterpret_cast<const char*>(aText),
                                        aLength);
-  return InitFakeSmallCapsRun(
-      aDrawTarget, aTextRun, static_cast<const char16_t*>(unicodeString.get()),
-      aOffset, aLength, aMatchType, aOrientation, aScript, aLanguage,
-      aSyntheticLower, aSyntheticUpper);
+  return InitFakeSmallCapsRun(aPresContext, aDrawTarget, aTextRun,
+                              static_cast<const char16_t*>(unicodeString.get()),
+                              aOffset, aLength, aMatchType, aOrientation,
+                              aScript, aLanguage, aSyntheticLower,
+                              aSyntheticUpper);
 }
 
 gfxFont* gfxFont::GetSmallCapsFont() {

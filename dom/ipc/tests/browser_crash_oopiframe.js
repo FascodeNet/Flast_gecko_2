@@ -6,8 +6,7 @@ ChromeUtils.defineModuleGetter(
   "resource://testing-common/TelemetryTestUtils.jsm"
 );
 
-const SUBFRAME_CRASH_PRESENTED_KEY =
-  "dom.contentprocess.crash_subframe_ui_presented";
+const SUBFRAME_CRASH_PRESENTED_KEY = "notificationbar.crash_subframe_ui";
 
 /**
  * Opens a number of tabs containing an out-of-process iframe.
@@ -126,30 +125,33 @@ async function testFrameCrash(numTabs) {
   // Next, check that the crash notification bar has appeared.
   await notificationPromise;
 
-  TelemetryTestUtils.assertScalar(
-    TelemetryTestUtils.getProcessScalars("parent"),
+  info("Subframe crashed ui count");
+  TelemetryTestUtils.assertKeyedScalar(
+    TelemetryTestUtils.getProcessScalars("parent", true),
     SUBFRAME_CRASH_PRESENTED_KEY,
-    1,
-    "Subframe crashed ui count"
+    "shown",
+    1
   );
 
   if (numTabs > 1) {
     // Showing another tab should increase the subframe crash UI telemetry probe as the other
     // notification will now be visible.
     await BrowserTestUtils.switchTab(gBrowser, gBrowser.tabs[1]);
-    TelemetryTestUtils.assertScalar(
-      TelemetryTestUtils.getProcessScalars("parent"),
+    info("Subframe crashed ui count after switching tab");
+    TelemetryTestUtils.assertKeyedScalar(
+      TelemetryTestUtils.getProcessScalars("parent", true),
       SUBFRAME_CRASH_PRESENTED_KEY,
-      2,
-      "Subframe crashed ui count after switching tab"
+      "shown",
+      2
     );
 
     await BrowserTestUtils.switchTab(gBrowser, gBrowser.tabs[2]);
-    TelemetryTestUtils.assertScalar(
-      TelemetryTestUtils.getProcessScalars("parent"),
+    info("Subframe crashed ui count after switching tab again");
+    TelemetryTestUtils.assertKeyedScalar(
+      TelemetryTestUtils.getProcessScalars("parent", true),
       SUBFRAME_CRASH_PRESENTED_KEY,
-      3,
-      "Subframe crashed ui count after switching tab again"
+      "shown",
+      3
     );
   }
 
@@ -203,11 +205,12 @@ async function testFrameCrash(numTabs) {
     BrowserTestUtils.removeTab(gBrowser.selectedTab);
   }
 
-  TelemetryTestUtils.assertScalar(
-    TelemetryTestUtils.getProcessScalars("parent"),
+  info("Subframe crashed ui count at end of test");
+  TelemetryTestUtils.assertKeyedScalar(
+    TelemetryTestUtils.getProcessScalars("parent", true),
     SUBFRAME_CRASH_PRESENTED_KEY,
-    numTabs > 1 ? 3 : 1,
-    "Subframe crashed ui count at end of test"
+    "shown",
+    numTabs > 1 ? 3 : 1
   );
 }
 
@@ -225,10 +228,6 @@ add_task(async function test_crashframe() {
     SpecialPowers.useRemoteSubframes,
     "This test only makes sense of we can use OOP iframes."
   );
-
-  await SpecialPowers.pushPrefEnv({
-    set: [["dom.security.enforceIPCBasedPrincipalVetting", false]],
-  });
 
   // Create the crash reporting directory if it doesn't yet exist, otherwise, a failure
   // sometimes occurs. See bug 1687855 for fixing this.

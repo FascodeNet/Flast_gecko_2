@@ -482,15 +482,15 @@ bool EditorUtils::IsDescendantOf(const nsINode& aNode, const nsINode& aParent,
 }
 
 // static
-void EditorUtils::MaskString(nsString& aString, Text* aText,
+void EditorUtils::MaskString(nsString& aString, const Text& aTextNode,
                              uint32_t aStartOffsetInString,
                              uint32_t aStartOffsetInText) {
-  MOZ_ASSERT(aText->HasFlag(NS_MAYBE_MASKED));
+  MOZ_ASSERT(aTextNode.HasFlag(NS_MAYBE_MASKED));
   MOZ_ASSERT(aStartOffsetInString == 0 || aStartOffsetInText == 0);
 
   uint32_t unmaskStart = UINT32_MAX, unmaskLength = 0;
   TextEditor* textEditor =
-      nsContentUtils::GetTextEditorFromAnonymousNodeWithoutCreation(aText);
+      nsContentUtils::GetTextEditorFromAnonymousNodeWithoutCreation(&aTextNode);
   if (textEditor && textEditor->UnmaskedLength() > 0) {
     unmaskStart = textEditor->UnmaskedStart();
     unmaskLength = textEditor->UnmaskedLength();
@@ -768,6 +768,62 @@ bool EditorDOMPointBase<PT, CT>::IsNextCharCollapsibleASCIISpaceOrNBSP() const {
   }
   return IsNextCharASCIISpaceOrNBSP() &&
          !EditorUtils::IsWhiteSpacePreformatted(*ContainerAsText());
+}
+
+NS_INSTANTIATE_EDITOR_DOM_POINT_METHOD(bool, IsCharPreformattedNewLine() const)
+
+template <typename PT, typename CT>
+bool EditorDOMPointBase<PT, CT>::IsCharPreformattedNewLine() const {
+  return IsCharNewLine() &&
+         EditorUtils::IsNewLinePreformatted(*ContainerAsText());
+}
+
+NS_INSTANTIATE_EDITOR_DOM_POINT_METHOD(
+    bool, IsCharPreformattedNewLineCollapsedWithWhiteSpaces() const)
+
+template <typename PT, typename CT>
+bool EditorDOMPointBase<
+    PT, CT>::IsCharPreformattedNewLineCollapsedWithWhiteSpaces() const {
+  return IsCharNewLine() &&
+         EditorUtils::IsOnlyNewLinePreformatted(*ContainerAsText());
+}
+
+NS_INSTANTIATE_EDITOR_DOM_POINT_METHOD(bool, IsPreviousCharPreformattedNewLine()
+                                                 const)
+
+template <typename PT, typename CT>
+bool EditorDOMPointBase<PT, CT>::IsPreviousCharPreformattedNewLine() const {
+  return IsPreviousCharNewLine() &&
+         EditorUtils::IsNewLinePreformatted(*ContainerAsText());
+}
+
+NS_INSTANTIATE_EDITOR_DOM_POINT_METHOD(
+    bool, IsPreviousCharPreformattedNewLineCollapsedWithWhiteSpaces() const)
+
+template <typename PT, typename CT>
+bool EditorDOMPointBase<
+    PT, CT>::IsPreviousCharPreformattedNewLineCollapsedWithWhiteSpaces() const {
+  return IsPreviousCharNewLine() &&
+         EditorUtils::IsOnlyNewLinePreformatted(*ContainerAsText());
+}
+
+NS_INSTANTIATE_EDITOR_DOM_POINT_METHOD(bool,
+                                       IsNextCharPreformattedNewLine() const)
+
+template <typename PT, typename CT>
+bool EditorDOMPointBase<PT, CT>::IsNextCharPreformattedNewLine() const {
+  return IsNextCharNewLine() &&
+         EditorUtils::IsNewLinePreformatted(*ContainerAsText());
+}
+
+NS_INSTANTIATE_EDITOR_DOM_POINT_METHOD(
+    bool, IsNextCharPreformattedNewLineCollapsedWithWhiteSpaces() const)
+
+template <typename PT, typename CT>
+bool EditorDOMPointBase<
+    PT, CT>::IsNextCharPreformattedNewLineCollapsedWithWhiteSpaces() const {
+  return IsNextCharNewLine() &&
+         EditorUtils::IsOnlyNewLinePreformatted(*ContainerAsText());
 }
 
 }  // namespace mozilla

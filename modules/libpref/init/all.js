@@ -662,15 +662,15 @@ pref("gfx.webrender.debug.glyph-flashing", false);
 pref("gfx.webrender.debug.capture-profiler", false);
 pref("gfx.webrender.debug.profiler-ui", "Default");
 
-// Temporarily use the debug pref to configure the upload startegy on windows.
-// If this doesn't cause breakage it will be selected directly in WebRender's
-// initialization code.
+pref("gfx.webrender.multithreading", true);
 #ifdef XP_WIN
-pref("gfx.webrender.debug.batched-texture-uploads", true);
-pref("gfx.webrender.debug.draw-calls-for-texture-copy", true);
+pref("gfx.webrender.pbo-uploads", false);
+pref("gfx.webrender.batched-texture-uploads", true);
+pref("gfx.webrender.draw-calls-for-texture-copy", true);
 #else
-pref("gfx.webrender.debug.batched-texture-uploads", false);
-pref("gfx.webrender.debug.draw-calls-for-texture-copy", false);
+pref("gfx.webrender.pbo-uploads", true);
+pref("gfx.webrender.batched-texture-uploads", false);
+pref("gfx.webrender.draw-calls-for-texture-copy", false);
 #endif
 
 
@@ -789,6 +789,9 @@ pref("toolkit.osfile.log", false);
 pref("toolkit.scrollbox.smoothScroll", true);
 pref("toolkit.scrollbox.scrollIncrement", 20);
 pref("toolkit.scrollbox.clickToScroll.scrollDelay", 150);
+
+// Controls logging for Sqlite.jsm.
+pref("toolkit.sqlitejsm.loglevel", "Error");
 
 pref("toolkit.tabbox.switchByScrolling", false);
 
@@ -1445,7 +1448,7 @@ pref("network.http.http3.alt-svc-mapping-for-testing", "");
 // alt-svc allows separation of transport routing from
 // the origin host without using a proxy.
 pref("network.http.altsvc.enabled", true);
-pref("network.http.altsvc.oe", true);
+pref("network.http.altsvc.oe", false);
 
 // Turn on 0RTT data for TLS 1.3
 pref("security.tls.enable_0rtt_data", true);
@@ -1896,7 +1899,7 @@ pref("network.online",                      true); //online/offline
 
 // The interval in seconds to move the cookies in the child process.
 // Set to 0 to disable moving the cookies.
-pref("network.cookie.move.interval_sec",    10);
+pref("network.cookie.move.interval_sec",    0);
 
 // This pref contains the list of hostnames (such as
 // "mozilla.org,example.net"). For these hosts, firefox will treat
@@ -2477,7 +2480,11 @@ pref("dom.ipc.processCount.privilegedabout", 1);
 pref("dom.ipc.processCount.privilegedmozilla", 1);
 
 // Maximum number of isolated content processes per-origin.
+#ifdef ANDROID
 pref("dom.ipc.processCount.webIsolated", 1);
+#else
+pref("dom.ipc.processCount.webIsolated", 4);
+#endif
 
 // Keep a single privileged about process alive for performance reasons.
 // e.g. we do not want to throw content processes out every time we navigate
@@ -3673,9 +3680,6 @@ pref("image.http.accept", "");
 // Image memory management prefs
 //
 
-// Allows image locking of decoded image data in content processes.
-pref("image.mem.allow_locking_in_content_processes", true);
-
 pref("webgl.renderer-string-override", "");
 pref("webgl.vendor-string-override", "");
 
@@ -4130,10 +4134,26 @@ pref("browser.search.separatePrivateDefault.ui.enabled", false);
 // Update service URL for GMP install/updates:
 pref("media.gmp-manager.url", "https://aus5.mozilla.org/update/3/GMP/%VERSION%/%BUILD_ID%/%BUILD_TARGET%/%LOCALE%/%CHANNEL%/%OS_VERSION%/%DISTRIBUTION%/%DISTRIBUTION_VERSION%/update.xml");
 
+// When |media.gmp-manager.checkContentSignature| is true, then the reply
+// containing the update xml file is expected to provide a content signature
+// header. Information from this header will be used to validate the response.
+// If this header is not present, is malformed, or cannot be determined as
+// valid then the update will fail.
+#ifdef EARLY_BETA_OR_EARLIER
+  // The plan is to have the feature gated by this pref to eventually replace
+  // the features controlled by the media.gmp-manager.cert.* prefs. Once that
+  // happens we can remove related code and prefs, but while testing we'll use
+  // this to gate (see bug 1714621 for more info).
+  pref("media.gmp-manager.checkContentSignature", true);
+#endif
+
 // When |media.gmp-manager.cert.requireBuiltIn| is true or not specified the
 // final certificate and all certificates the connection is redirected to before
 // the final certificate for the url specified in the |media.gmp-manager.url|
-// preference must be built-in.
+// preference must be built-in. The check related to this pref is not done if
+// |media.gmp-manager.checkContentSignature| is set to true (the content
+// signature check provides protection that supersedes the built in
+// requirement).
 pref("media.gmp-manager.cert.requireBuiltIn", true);
 
 // The |media.gmp-manager.certs.| preference branch contains branches that are
@@ -4148,8 +4168,10 @@ pref("media.gmp-manager.cert.requireBuiltIn", true);
 // If these conditions aren't met it will be treated the same as when there is
 // no update available. This validation will not be performed when the
 // |media.gmp-manager.url.override| user preference has been set for testing updates or
-// when the |media.gmp-manager.cert.checkAttributes| preference is set to false. Also,
-// the |media.gmp-manager.url.override| preference should ONLY be used for testing.
+// when the |media.gmp-manager.cert.checkAttributes| preference is set to false.
+// This check will also not be done if the |media.gmp-manager.checkContentSignature|
+// pref is set to true. Also, the |media.gmp-manager.url.override| preference should
+// ONLY be used for testing.
 // IMPORTANT! app.update.certs.* prefs should also be updated if these
 // are updated.
 pref("media.gmp-manager.cert.checkAttributes", true);
@@ -4292,6 +4314,15 @@ pref("toolkit.aboutProcesses.showAllSubframes", false);
 #else
   pref("toolkit.aboutProcesses.showThreads", false);
 #endif
+// If `true`, about:processes will offer to profile processes.
+#ifdef NIGHTLY_BUILD
+  pref("toolkit.aboutProcesses.showProfilerIcons", true);
+#else
+  pref("toolkit.aboutProcesses.showProfilerIcons", false);
+#endif
+// Time in seconds between when the profiler is started and when the
+// profile is captured.
+pref("toolkit.aboutProcesses.profileDuration", 5);
 
 // When a crash happens, whether to include heap regions of the crash context
 // in the minidump. Enabled by default on nightly and aurora.
@@ -4477,12 +4508,11 @@ pref("services.common.log.logger.tokenserverclient", "Debug");
 // Enable the JSON View tool (an inspector for application/json documents).
 pref("devtools.jsonview.enabled", true);
 
-// Default theme ("dark" or "light").
-#ifdef MOZ_DEV_EDITION
-  pref("devtools.theme", "dark", sticky);
-#else
-  pref("devtools.theme", "light", sticky);
-#endif
+// Default theme ("auto", "dark" or "light").
+pref("devtools.theme", "auto", sticky);
+
+// Display a notification about the new default DevTools theme "auto".
+pref("devtools.theme.show-auto-theme-info", true);
 
 // Completely disable DevTools entry points, as well as all DevTools command
 // line arguments This should be merged with devtools.enabled, see Bug 1440675.

@@ -86,11 +86,11 @@ static void InterpretObjLiteralValue(
     case ObjLiteralOpcode::ConstValue:
       valOut.set(insn.getConstValue());
       return;
-    case ObjLiteralOpcode::ConstAtom: {
+    case ObjLiteralOpcode::ConstString: {
       frontend::TaggedParserAtomIndex index = insn.getAtomIndex();
-      JSAtom* jsatom = atomCache.getExistingAtomAt(cx, index);
-      MOZ_ASSERT(jsatom);
-      valOut.setString(jsatom);
+      JSString* str = atomCache.getExistingStringAt(cx, index);
+      MOZ_ASSERT(str);
+      valOut.setString(str);
       return;
     }
     case ObjLiteralOpcode::Null:
@@ -145,7 +145,7 @@ bool InterpretObjLiteralObj(JSContext* cx, HandlePlainObject obj,
     InterpretObjLiteralValue(cx, atomCache, insn, &propVal);
 
     if constexpr (kind == PropertySetKind::UniqueNames) {
-      if (!AddDataPropertyNonPrototype(cx, obj, propId, propVal)) {
+      if (!AddDataPropertyToPlainObject(cx, obj, propId, propVal)) {
         return false;
       }
     } else {
@@ -400,7 +400,7 @@ static void DumpObjLiteral(js::JSONPrinter& json,
         json.formatProperty("op", "ConstValue(%f)", v.toNumber());
         break;
       }
-      case ObjLiteralOpcode::ConstAtom: {
+      case ObjLiteralOpcode::ConstString: {
         frontend::TaggedParserAtomIndex index = insn.getAtomIndex();
         json.beginObjectProperty("op");
         DumpTaggedParserAtomIndex(json, index, stencil);

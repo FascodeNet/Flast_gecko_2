@@ -15,20 +15,24 @@ use crate::shared_lock::{Locked, SharedRwLock};
 use crate::str::starts_with_ignore_ascii_case;
 use crate::stylesheets::document_rule::DocumentCondition;
 use crate::stylesheets::font_feature_values_rule::parse_family_name_list;
+use crate::stylesheets::import_rule::ImportLayer;
 use crate::stylesheets::keyframes_rule::parse_keyframe_list;
+use crate::stylesheets::layer_rule::{LayerName, LayerRuleKind};
+use crate::stylesheets::scroll_timeline_rule::ScrollTimelineDescriptors;
 use crate::stylesheets::stylesheet::Namespaces;
 use crate::stylesheets::supports_rule::SupportsCondition;
-use crate::stylesheets::layer_rule::{LayerName, LayerRuleKind};
-use crate::stylesheets::viewport_rule;
-use crate::stylesheets::AllowImportRules;
-use crate::stylesheets::{CorsMode, DocumentRule, FontFeatureValuesRule, KeyframesRule, MediaRule};
-use crate::stylesheets::{CssRule, CssRuleType, CssRules, RulesMutateError, StylesheetLoader};
-use crate::stylesheets::{LayerRule, NamespaceRule, PageRule, StyleRule, SupportsRule, ViewportRule};
+use crate::stylesheets::{
+    viewport_rule, AllowImportRules, CorsMode, CssRule, CssRuleType, CssRules, DocumentRule,
+    FontFeatureValuesRule, KeyframesRule, LayerRule, MediaRule, NamespaceRule, PageRule,
+    RulesMutateError, ScrollTimelineRule, StyleRule, StylesheetLoader, SupportsRule, ViewportRule,
+};
 use crate::values::computed::font::FamilyName;
-use crate::values::{CssUrl, CustomIdent, KeyframesName};
+use crate::values::{CssUrl, CustomIdent, KeyframesName, TimelineName};
 use crate::{Namespace, Prefix};
-use cssparser::{AtRuleParser, Parser, QualifiedRuleParser, RuleListParser};
-use cssparser::{BasicParseError, BasicParseErrorKind, CowRcStr, ParserState, SourcePosition};
+use cssparser::{
+    AtRuleParser, BasicParseError, BasicParseErrorKind, CowRcStr, Parser, ParserState,
+    QualifiedRuleParser, RuleListParser, SourcePosition,
+};
 use selectors::SelectorList;
 use servo_arc::Arc;
 use style_traits::{ParseError, StyleParseErrorKind};
@@ -169,11 +173,13 @@ pub enum AtRulePrelude {
     /// A @document rule, with its conditional.
     Document(DocumentCondition),
     /// A @import rule prelude.
-    Import(CssUrl, Arc<Locked<MediaList>>),
+    Import(CssUrl, Arc<Locked<MediaList>>, Option<ImportLayer>),
     /// A @namespace rule prelude.
     Namespace(Option<Prefix>, Namespace),
     /// A @layer rule prelude.
     Layer(Vec<LayerName>),
+    /// A @scroll-timeline rule prelude.
+    ScrollTimeline(TimelineName),
 }
 
 impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
@@ -206,10 +212,27 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
                 let url_string = input.expect_url_or_string()?.as_ref().to_owned();
                 let url = CssUrl::parse_from_string(url_string, &self.context, CorsMode::None);
 
+                let layer = if !static_prefs::pref!("layout.css.cascade-layers.enabled") {
+                    None
+                } else if input.try_parse(|input| input.expect_ident_matching("layer")).is_ok() {
+                    Some(ImportLayer {
+                        name: None,
+                    })
+                } else {
+                    input.try_parse(|input| {
+                        input.expect_function_matching("layer")?;
+                        input.parse_nested_block(|input| {
+                            LayerName::parse(&self.context, input)
+                        }).map(|name| ImportLayer {
+                            name: Some(name),
+                        })
+                    }).ok()
+                };
+
                 let media = MediaList::parse(&self.context, input);
                 let media = Arc::new(self.shared_lock.wrap(media));
 
-                return Ok(AtRulePrelude::Import(url, media));
+                return Ok(AtRulePrelude::Import(url, media, layer));
             },
             "namespace" => {
                 if !self.check_state(State::Namespaces) {
@@ -263,7 +286,7 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
         start: &ParserState,
     ) -> Result<Self::AtRule, ()>  {
         let rule = match prelude {
-            AtRulePrelude::Import(url, media) => {
+            AtRulePrelude::Import(url, media, layer) => {
                 let loader = self
                     .loader
                     .expect("Expected a stylesheet loader for @import");
@@ -274,6 +297,7 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
                     &self.context,
                     &self.shared_lock,
                     media,
+                    layer,
                 );
 
                 self.state = State::Imports;
@@ -295,7 +319,7 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
                     source_location: start.source_location(),
                 })))
             },
-            AtRulePrelude::Layer(names) => {
+            AtRulePrelude::Layer(ref names) => {
                 if names.is_empty() {
                     return Err(());
                 }
@@ -304,12 +328,10 @@ impl<'a, 'i> AtRuleParser<'i> for TopLevelRuleParser<'a> {
                 } else {
                     self.state = State::Body;
                 }
-                CssRule::Layer(Arc::new(self.shared_lock.wrap(LayerRule {
-                    kind: LayerRuleKind::Statement { names },
-                    source_location: start.source_location(),
-                })))
+                AtRuleParser::rule_without_block(&mut self.nested(), prelude, start)
+                    .expect("All validity checks on the nested parser should be done before changing self.state")
             },
-            _ => return Err(()),
+            _ => AtRuleParser::rule_without_block(&mut self.nested(), prelude, start)?,
         };
 
         Ok((start.position(), rule))
@@ -448,6 +470,10 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
                 let cond = DocumentCondition::parse(self.context, input)?;
                 AtRulePrelude::Document(cond)
             },
+            "scroll-timeline" if static_prefs::pref!("layout.css.scroll-linked-animations.enabled") => {
+                let name = TimelineName::parse(self.context, input)?;
+                AtRulePrelude::ScrollTimeline(name)
+            },
             _ => return Err(input.new_custom_error(StyleParseErrorKind::UnsupportedAtRule(name.clone())))
         })
     }
@@ -577,9 +603,8 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
                 ))))
             },
             AtRulePrelude::Layer(names) => {
-                let (name, is_anonymous) = match names.len() {
-                    0 => (LayerName::new_anonymous(), true),
-                    1 => (names.into_iter().next().unwrap(), false),
+                let name = match names.len() {
+                    0 | 1 => names.into_iter().next(),
                     _ => return Err(input.new_error(BasicParseErrorKind::AtRuleBodyInvalid)),
                 };
                 Ok(CssRule::Layer(Arc::new(self.shared_lock.wrap(
@@ -587,7 +612,6 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
                         kind: LayerRuleKind::Block {
                             name,
                             rules: self.parse_nested_rules(input, CssRuleType::Layer),
-                            is_anonymous,
                         },
                         source_location: start.source_location(),
                     },
@@ -597,7 +621,42 @@ impl<'a, 'b, 'i> AtRuleParser<'i> for NestedRuleParser<'a, 'b> {
                 // These rules don't have blocks.
                 Err(input.new_unexpected_token_error(cssparser::Token::CurlyBracketBlock))
             },
+            AtRulePrelude::ScrollTimeline(name) => {
+                let context = ParserContext::new_with_rule_type(
+                    self.context,
+                    CssRuleType::ScrollTimeline,
+                    self.namespaces,
+                );
+
+                Ok(CssRule::ScrollTimeline(Arc::new(self.shared_lock.wrap(
+                    ScrollTimelineRule {
+                        name,
+                        descriptors: ScrollTimelineDescriptors::parse(&context, input)?,
+                        source_location: start.source_location(),
+                    },
+                ))))
+            },
         }
+    }
+
+    #[inline]
+    fn rule_without_block(
+        &mut self,
+        prelude: AtRulePrelude,
+        start: &ParserState,
+    ) -> Result<Self::AtRule, ()>  {
+        Ok(match prelude {
+            AtRulePrelude::Layer(names) => {
+                if names.is_empty() {
+                    return Err(());
+                }
+                CssRule::Layer(Arc::new(self.shared_lock.wrap(LayerRule {
+                    kind: LayerRuleKind::Statement { names },
+                    source_location: start.source_location(),
+                })))
+            },
+            _ => return Err(()),
+        })
     }
 }
 

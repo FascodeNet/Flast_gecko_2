@@ -862,19 +862,33 @@ RefPtr<GenericPromise> GMPParent::ParseChromiumManifest(
 #if XP_WIN
     // psapi.dll added for GetMappedFileNameW, which could possibly be avoided
     // in future versions, see bug 1383611 for details.
-    mLibs = "dxva2.dll, psapi.dll"_ns;
+    mLibs = "dxva2.dll, ole32.dll, psapi.dll"_ns;
 #endif
   } else if (mDisplayName.EqualsASCII("fake")) {
     // The fake CDM just exposes a key system with id "fake".
     video.mAPITags.AppendElement(nsCString{"fake"});
 #if XP_WIN
-    mLibs = "dxva2.dll"_ns;
+    mLibs = "dxva2.dll, ole32.dll"_ns;
 #endif
   } else {
     GMP_PARENT_LOG_DEBUG("%s: Unrecognized key system: %s, failing.",
                          __FUNCTION__, mDisplayName.get());
     return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
   }
+
+#ifdef XP_LINUX
+  // These glibc libraries were merged into libc.so.6 as of glibc
+  // 2.34; they now exist only as stub libraries for compatibility and
+  // newly linked code won't depend on them, so we need to ensure
+  // they're loaded for plugins that may have been linked against a
+  // different version of glibc.  (See also bug 1725828.)
+  if (!mDisplayName.EqualsASCII("clearkey")) {
+    if (!mLibs.IsEmpty()) {
+      mLibs.AppendLiteral(", ");
+    }
+    mLibs.AppendLiteral("libdl.so.2, libpthread.so.0, librt.so.1");
+  }
+#endif
 
   nsCString codecsString = NS_ConvertUTF16toUTF8(m.mX_cdm_codecs);
   nsTArray<nsCString> codecs;

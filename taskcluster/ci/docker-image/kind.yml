@@ -2,15 +2,15 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 ---
-loader: taskgraph.loader.transform:loader
+loader: gecko_taskgraph.loader.transform:loader
 
 kind-dependencies:
     - packages
 
 transforms:
-    - taskgraph.transforms.docker_image:transforms
-    - taskgraph.transforms.cached_tasks:transforms
-    - taskgraph.transforms.task:transforms
+    - gecko_taskgraph.transforms.docker_image:transforms
+    - gecko_taskgraph.transforms.cached_tasks:transforms
+    - gecko_taskgraph.transforms.task:transforms
 
 # make a task for each docker-image we might want.  For the moment, since we
 # write artifacts for each, these are whitelisted, but ideally that will change
@@ -98,16 +98,9 @@ jobs:
         symbol: I(deb8-32-pkg)
         definition: debian-packages
         parent: debian8-i386-raw
-    deb10-toolchain-build:
-        symbol: I(deb10-toolchain)
-        parent: debian10-base
-        definition: toolchain-build
-        packages:
-            - deb10-cmake
-            - deb10-mmdebstrap
     custom-v8:
         symbol: I(custom-v8)
-        parent: debian10-base
+        parent: debian11-base
     valgrind-build:
         symbol: I(vb)
         parent: debian11-amd64-build
@@ -174,7 +167,7 @@ jobs:
         definition: toolchain-build
     android-build:
         symbol: I(agb)
-        parent: debian10-base
+        parent: debian11-base
     fetch:
         symbol: I(fetch)
         parent: debian11-raw
@@ -182,7 +175,7 @@ jobs:
             - deb11-python-zstandard
     static-analysis-build:
         symbol: I(static-analysis-build)
-        parent: debian10-base
+        parent: debian11-base
     gdb-test:
         symbol: I(gdb)
         parent: debian11-amd64-build
@@ -213,9 +206,6 @@ jobs:
         symbol: I(flatpak)
     webrender:
         symbol: I(webrender)
-        parent: debian10-base
-    wgpu:
-        symbol: I(wgpu)
         parent: debian10-base
     condprof:
         symbol: I(condprof)

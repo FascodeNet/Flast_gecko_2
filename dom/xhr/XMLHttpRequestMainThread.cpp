@@ -14,6 +14,7 @@
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Components.h"
+#include "mozilla/dom/AutoSuppressEventHandlingAndSuspend.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/dom/BlobURLProtocolHandler.h"
 #include "mozilla/dom/DocGroup.h"
@@ -529,14 +530,12 @@ nsresult XMLHttpRequestMainThread::AppendToResponseText(
     uint32_t result;
     size_t read;
     size_t written;
-    bool hadErrors;
-    Tie(result, read, written, hadErrors) =
+    Tie(result, read, written, Ignore) =
         mDecoder->DecodeToUTF16(aBuffer, handle.AsSpan().From(len), aLast);
     MOZ_ASSERT(result == kInputEmpty);
     MOZ_ASSERT(read == aBuffer.Length());
     len += written;
     MOZ_ASSERT(len <= destBufferLen.value());
-    Unused << hadErrors;
     handle.Finish(len, false);
   }  // release mutex
 
@@ -2797,14 +2796,9 @@ void XMLHttpRequestMainThread::EnsureChannelContentType() {
   }
 }
 
-void XMLHttpRequestMainThread::UnsuppressEventHandlingAndResume() {
+void XMLHttpRequestMainThread::ResumeTimeout() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(mFlagSynchronous);
-
-  if (mSuspendedDoc) {
-    mSuspendedDoc->UnsuppressEventHandlingAndFireEvents(true);
-    mSuspendedDoc = nullptr;
-  }
 
   if (mResumeTimeoutRunnable) {
     DispatchToMainThread(mResumeTimeoutRunnable.forget());
@@ -2917,6 +2911,7 @@ void XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
   // as per spec. We really should create the channel here in send(), but
   // we have internal code relying on the channel being created in open().
   if (!mChannel) {
+    mErrorLoad = ErrorType::eChannelOpen;
     mFlagSend = true;  // so CloseRequestWithError sets us to DONE.
     aRv = MaybeSilentSendFailure(NS_ERROR_DOM_NETWORK_ERR);
     return;
@@ -2924,6 +2919,7 @@ void XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
 
   // non-GET requests aren't allowed for blob.
   if (IsBlobURI(mRequestURL) && !mRequestMethod.EqualsLiteral("GET")) {
+    mErrorLoad = ErrorType::eChannelOpen;
     mFlagSend = true;  // so CloseRequestWithError sets us to DONE.
     aRv = MaybeSilentSendFailure(NS_ERROR_DOM_NETWORK_ERR);
     return;
@@ -3028,7 +3024,15 @@ void XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
   mFlagSend = true;
 
   // If we're synchronous, spin an event loop here and wait
+  RefPtr<Document> suspendedDoc;
   if (mFlagSynchronous) {
+    auto scopeExit = MakeScopeExit([&] {
+      CancelSyncTimeoutTimer();
+      ResumeTimeout();
+      ResumeEventDispatching();
+    });
+    Maybe<AutoSuppressEventHandling> autoSuppress;
+
     mFlagSyncLooping = true;
 
     if (GetOwner()) {
@@ -3036,10 +3040,8 @@ void XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
               GetOwner()->GetOuterWindow()->GetInProcessTop()) {
         if (nsCOMPtr<nsPIDOMWindowInner> topInner =
                 topWindow->GetCurrentInnerWindow()) {
-          mSuspendedDoc = topWindow->GetExtantDoc();
-          if (mSuspendedDoc) {
-            mSuspendedDoc->SuppressEventHandling();
-          }
+          suspendedDoc = topWindow->GetExtantDoc();
+          autoSuppress.emplace(topWindow->GetBrowsingContext());
           topInner->Suspend();
           mResumeTimeoutRunnable = new nsResumeTimeoutsEvent(topInner);
         }
@@ -3048,11 +3050,6 @@ void XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
 
     SuspendEventDispatching();
     StopProgressEventTimer();
-    auto scopeExit = MakeScopeExit([&] {
-      CancelSyncTimeoutTimer();
-      UnsuppressEventHandlingAndResume();
-      ResumeEventDispatching();
-    });
 
     SyncTimeoutType syncTimeoutType = MaybeStartSyncTimeoutTimer();
     if (syncTimeoutType == eErrorOrExpired) {
@@ -3061,9 +3058,10 @@ void XMLHttpRequestMainThread::SendInternal(const BodyExtractorBase* aBody,
       return;
     }
 
-    nsAutoSyncOperation sync(mSuspendedDoc,
+    nsAutoSyncOperation sync(suspendedDoc,
                              SyncOperationBehavior::eSuspendInput);
-    if (!SpinEventLoopUntil([&]() { return !mFlagSyncLooping; })) {
+    if (!SpinEventLoopUntil("XMLHttpRequestMainThread::SendInternal"_ns,
+                            [&]() { return !mFlagSyncLooping; })) {
       aRv.Throw(NS_ERROR_UNEXPECTED);
       return;
     }

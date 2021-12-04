@@ -139,8 +139,8 @@ set-as-my-default-browser =
     .label = Make Default…
     .accesskey = D
 
-startup-restore-previous-session =
-    .label = Restore previous session
+startup-restore-windows-and-tabs =
+    .label = Open previous windows and tabs
     .accesskey = s
 
 startup-restore-warn-on-quit =
@@ -159,9 +159,18 @@ open-new-link-as-tabs =
     .label = Open links in tabs instead of new windows
     .accesskey = w
 
-warn-on-close-multiple-tabs =
-    .label = Warn you when closing multiple tabs
+confirm-on-close-multiple-tabs =
+    .label = Confirm before closing multiple tabs
     .accesskey = m
+
+# This string is used for the confirm before quitting preference.
+# Variables:
+#   $quitKey (String) - the quit keyboard shortcut, and formatted
+#                       in the same manner as it would appear,
+#                       for example, in the File menu.
+confirm-on-quit-with-key =
+    .label = Confirm before quitting with { $quitKey }
+    .accesskey = b
 
 warn-on-open-many-tabs =
     .label = Warn you when opening multiple tabs might slow down { -brand-short-name }
@@ -602,11 +611,6 @@ home-prefs-content-description = Choose what content you want on your Firefox Ho
 
 home-prefs-search-header =
     .label = Web Search
-home-prefs-topsites-header =
-    .label = Top Sites
-home-prefs-topsites-description = The sites you visit most
-home-prefs-topsites-by-option-sponsored =
-    .label = Sponsored Top Sites
 home-prefs-shortcuts-header =
     .label = Shortcuts
 home-prefs-shortcuts-description = Sites you save or visit
@@ -618,7 +622,6 @@ home-prefs-shortcuts-by-option-sponsored =
 
 home-prefs-recommended-by-header =
     .label = Recommended by { $provider }
-home-prefs-recommended-by-description-update = Exceptional content from across the web, curated by { $provider }
 home-prefs-recommended-by-description-new = Exceptional content curated by { $provider }, part of the { -brand-product-name } family
 
 ##
@@ -627,9 +630,6 @@ home-prefs-recommended-by-learn-more = How it works
 home-prefs-recommended-by-option-sponsored-stories =
     .label = Sponsored Stories
 
-home-prefs-highlights-header =
-    .label = Highlights
-home-prefs-highlights-description = A selection of sites that you’ve saved or visited
 home-prefs-highlights-option-visited-pages =
     .label = Visited Pages
 home-prefs-highlights-options-bookmarks =
@@ -649,7 +649,6 @@ home-prefs-recent-activity-description = A selection of recent sites and content
 # and non-essential but also not entirely trivial and useless.
 home-prefs-snippets-header =
     .label = Snippets
-home-prefs-snippets-description = Updates from { -vendor-short-name } and { -brand-product-name }
 
 home-prefs-snippets-description-new = Tips and news from { -vendor-short-name } and { -brand-product-name }
 
@@ -1147,6 +1146,16 @@ content-blocking-all-windows-tracking-content = Tracking content in all windows
 content-blocking-all-third-party-cookies = All third-party cookies
 content-blocking-cryptominers = Cryptominers
 content-blocking-fingerprinters = Fingerprinters
+
+# "Test pilot" is used as a verb. Possible alternatives:
+# "Be the first to try", "Join an early experiment".
+content-blocking-etp-standard-tcp-rollout-checkbox =
+  .label = Test pilot our most powerful privacy feature ever
+  .accesskey = T
+
+# "Contains" here means "isolates", "limits".
+content-blocking-etp-standard-tcp-rollout-description = Total Cookie Protection contains cookies to the site you’re on, so trackers can’t use them to follow you between sites.
+content-blocking-etp-standard-tcp-rollout-learn-more = Learn more
 
 content-blocking-warning-title = Heads up!
 content-blocking-and-isolating-etp-warning-description = Blocking trackers and isolating cookies could impact the functionality of some sites. Reload a page with trackers to load all content.

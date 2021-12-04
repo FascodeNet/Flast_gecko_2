@@ -396,9 +396,8 @@ bool frontend::InstantiateStencils(JSContext* cx, CompilationInput& input,
     }
 
     Rooted<JSScript*> script(cx, gcOutput.script);
-    if (!input.options.hideFromNewScriptInitial()) {
-      DebugAPI::onNewScript(cx, script);
-    }
+    const JS::InstantiateOptions instantiateOptions(input.options);
+    FireOnNewScript(cx, instantiateOptions, script);
   }
 
   return true;
@@ -410,7 +409,7 @@ bool frontend::PrepareForInstantiate(JSContext* cx, CompilationInput& input,
   AutoGeckoProfilerEntry pseudoFrame(cx, "stencil instantiate",
                                      JS::ProfilingCategoryPair::JS_Parsing);
 
-  return CompilationStencil::prepareForInstantiate(cx, input, stencil,
+  return CompilationStencil::prepareForInstantiate(cx, input.atomCache, stencil,
                                                    gcOutput);
 }
 
@@ -1010,9 +1009,8 @@ static bool CompileLazyFunction(JSContext* cx, CompilationInput& input,
 
   AutoAssertReportedException assertException(cx);
 
-  Rooted<JSFunction*> fun(cx, input.function());
-
-  InheritThis inheritThis = fun->isArrow() ? InheritThis::Yes : InheritThis::No;
+  InheritThis inheritThis =
+      input.functionFlags().isArrow() ? InheritThis::Yes : InheritThis::No;
 
   LifoAllocScope parserAllocScope(&cx->tempLifoAlloc());
   CompilationState compilationState(cx, parserAllocScope, input);
@@ -1031,8 +1029,8 @@ static bool CompileLazyFunction(JSContext* cx, CompilationInput& input,
   }
 
   FunctionNode* pn = parser.standaloneLazyFunction(
-      fun, input.extent().toStringStart, input.strict(), input.generatorKind(),
-      input.asyncKind());
+      input, input.extent().toStringStart, input.strict(),
+      input.generatorKind(), input.asyncKind());
   if (!pn) {
     return false;
   }
@@ -1062,16 +1060,6 @@ static bool CompileLazyFunction(JSContext* cx, CompilationInput& input,
   Rooted<CompilationGCOutput> gcOutput(cx);
   {
     BorrowingCompilationStencil borrowingStencil(compilationState);
-    if (!CompilationStencil::instantiateStencils(cx, input, borrowingStencil,
-                                                 gcOutput.get())) {
-      return false;
-    }
-
-    MOZ_ASSERT(lazyFlags == gcOutput.get().script->immutableFlags());
-    MOZ_ASSERT(gcOutput.get().script->outermostScope()->hasOnChain(
-                   ScopeKind::NonSyntactic) ==
-               gcOutput.get().script->immutableFlags().hasFlag(
-                   JSScript::ImmutableFlags::HasNonSyntacticScope));
 
     if (input.source->hasEncoder()) {
       MOZ_ASSERT(!js::UseOffThreadParseGlobal());
@@ -1080,6 +1068,22 @@ static bool CompileLazyFunction(JSContext* cx, CompilationInput& input,
         return false;
       }
     }
+
+    if (!CompilationStencil::instantiateStencils(cx, input, borrowingStencil,
+                                                 gcOutput.get())) {
+      return false;
+    }
+
+    // NOTE: After instantiation succeeds and bytecode is attached, the rest of
+    //       this operation should be infallible. Any failure during
+    //       delazification should restore the function back to a consistent
+    //       lazy state.
+
+    MOZ_ASSERT(lazyFlags == gcOutput.get().script->immutableFlags());
+    MOZ_ASSERT(gcOutput.get().script->outermostScope()->hasOnChain(
+                   ScopeKind::NonSyntactic) ==
+               gcOutput.get().script->immutableFlags().hasFlag(
+                   JSScript::ImmutableFlags::HasNonSyntacticScope));
   }
 
   assertException.reset();
@@ -1215,10 +1219,9 @@ static JSFunction* CompileStandaloneFunction(
 
     MOZ_ASSERT(!cx->isHelperThreadContext());
 
+    const JS::InstantiateOptions instantiateOptions(options);
     Rooted<JSScript*> script(cx, gcOutput.get().script);
-    if (!options.hideFromNewScriptInitial()) {
-      DebugAPI::onNewScript(cx, script);
-    }
+    FireOnNewScript(cx, instantiateOptions, script);
   }
 
   assertException.reset();
@@ -1271,4 +1274,26 @@ JSFunction* frontend::CompileStandaloneFunctionInNonSyntacticScope(
                                    syntaxKind, GeneratorKind::NotGenerator,
                                    FunctionAsyncKind::SyncFunction,
                                    enclosingScope);
+}
+
+void frontend::FireOnNewScript(JSContext* cx,
+                               const JS::InstantiateOptions& options,
+                               JS::Handle<JSScript*> script) {
+  if (!options.hideFromNewScriptInitial()) {
+    DebugAPI::onNewScript(cx, script);
+  }
+}
+
+void frontend::FireOnNewScripts(JSContext* cx,
+                                const JS::InstantiateOptions& options,
+                                JS::Handle<JS::GCVector<JSScript*>> scripts) {
+  if (!options.hideFromNewScriptInitial()) {
+    JS::Rooted<JSScript*> rootedScript(cx);
+    for (auto& script : scripts) {
+      MOZ_ASSERT(script->isGlobalCode());
+
+      rootedScript = script;
+      DebugAPI::onNewScript(cx, rootedScript);
+    }
+  }
 }

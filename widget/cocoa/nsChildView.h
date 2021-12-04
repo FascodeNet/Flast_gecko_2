@@ -344,7 +344,6 @@ class nsChildView final : public nsBaseWidget {
   void EnsureContentLayerForMainThreadPainting();
 
   virtual void* GetNativeData(uint32_t aDataType) override;
-  virtual nsresult ConfigureChildren(const nsTArray<Configuration>& aConfigurations) override;
   virtual LayoutDeviceIntPoint WidgetToScreenOffset() override;
   virtual bool ShowsResizeIndicator(LayoutDeviceIntRect* aResizerRect) override { return false; }
 
@@ -510,6 +509,12 @@ class nsChildView final : public nsBaseWidget {
   // (such as a window resize) and we can start modifying CALayers from the
   // compositor thread again.
   void UnsuspendAsyncCATransactions();
+
+  // Called by nsCocoaWindow when the window's fullscreen state changes.
+  void UpdateFullscreen(bool aFullscreen);
+
+  // Called by nsCocoaWindow when a mouse move has occurred.
+  void NoteMouseMoveAtTime(const mozilla::TimeStamp& aTime);
 
  protected:
   virtual ~nsChildView();

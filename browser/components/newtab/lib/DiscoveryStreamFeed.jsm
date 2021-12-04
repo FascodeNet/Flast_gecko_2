@@ -38,9 +38,6 @@ ChromeUtils.defineModuleGetter(
   "PersistentCache",
   "resource://activity-stream/lib/PersistentCache.jsm"
 );
-XPCOMUtils.defineLazyServiceGetters(this, {
-  gUUIDGenerator: ["@mozilla.org/uuid-generator;1", "nsIUUIDGenerator"],
-});
 
 const CACHE_KEY = "discovery_stream";
 const LAYOUT_UPDATE_TIME = 30 * 60 * 1000; // 30 minutes
@@ -93,7 +90,7 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
   getOrCreateImpressionId() {
     let impressionId = Services.prefs.getCharPref(PREF_IMPRESSION_ID, "");
     if (!impressionId) {
-      impressionId = String(gUUIDGenerator.generateUUID());
+      impressionId = String(Services.uuid.generateUUID());
       Services.prefs.setCharPref(PREF_IMPRESSION_ID, impressionId);
     }
     return impressionId;
@@ -462,16 +459,40 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
         .getState()
         .Prefs.values?.pocketConfig?.spocPositions?.split(`,`);
 
+      const loadMoreEnabled = this.store.getState().Prefs.values?.pocketConfig
+        ?.loadMore;
+
+      const lastCardMessageEnabled = this.store.getState().Prefs.values
+        ?.pocketConfig?.lastCardMessageEnabled;
+
+      const saveToPocketCard = this.store.getState().Prefs.values?.pocketConfig
+        ?.saveToPocketCard;
+
       const sponsoredCollectionsEnabled = this.store.getState().Prefs.values[
         PREF_COLLECTIONS_ENABLED
       ];
 
+      const compactLayout = this.store.getState().Prefs.values?.pocketConfig
+        ?.compactLayout;
+      let items = isBasicLayout ? 3 : 21;
+      if (compactLayout) {
+        items = isBasicLayout ? 4 : 24;
+      }
+
+      const newFooterSection = this.store.getState().Prefs.values?.pocketConfig
+        ?.newFooterSection;
+
       // Set a hardcoded layout if one is needed.
       // Changing values in this layout in memory object is unnecessary.
       layoutResp = getHardcodedLayout({
-        isBasicLayout,
+        items,
         spocPositions: this.parseSpocPositions(spocPositions),
         sponsoredCollectionsEnabled,
+        compactLayout,
+        loadMoreEnabled,
+        lastCardMessageEnabled,
+        newFooterSection,
+        saveToPocketCard,
       });
     }
 
@@ -1842,12 +1863,24 @@ this.DiscoveryStreamFeed = class DiscoveryStreamFeed {
 // This is because modifying the original object would
 // persist across pref changes and system_tick updates.
 //
-// NOTE: There is some branching logic in the template based on `isBasicLayout`
-//
+// NOTE: There is some branching logic in the template.
+//   `items` How many items to include in the primary card grid.
+//   `spocPositions` Changes the position of spoc cards.
+//   `sponsoredCollectionsEnabled` Tuns on and off the sponsored collection section.
+//   `compactLayout` Changes cards to smaller more compact cards.
+//   `loadMoreEnabled` Hide half the Pocket stories behind a load more button.
+//   `lastCardMessageEnabled` Shows a message card at the end of the feed.
+//   `newFooterSection` Changes the layout of the topics section.
+//   `saveToPocketCard` Cards have a save to Pocket button over their thumbnail on hover.
 getHardcodedLayout = ({
-  isBasicLayout,
+  items = 21,
   spocPositions = [2, 4, 11, 20],
   sponsoredCollectionsEnabled = false,
+  compactLayout = false,
+  loadMoreEnabled = false,
+  lastCardMessageEnabled = false,
+  newFooterSection = false,
+  saveToPocketCard = false,
 }) => ({
   lastUpdate: Date.now(),
   spocs: {
@@ -1920,8 +1953,12 @@ getHardcodedLayout = ({
         {
           type: "CardGrid",
           properties: {
-            items: isBasicLayout ? 3 : 21,
+            items,
+            compact: compactLayout,
           },
+          loadMoreEnabled,
+          lastCardMessageEnabled,
+          saveToPocketCard,
           cta_variant: "link",
           header: {
             title: "",
@@ -1945,11 +1982,12 @@ getHardcodedLayout = ({
         },
         {
           type: "Navigation",
+          newFooterSection,
           properties: {
             alignment: "left-align",
             links: [
               {
-                name: "Self Improvement",
+                name: "Self improvement",
                 url:
                   "https://getpocket.com/explore/self-improvement?utm_source=pocket-newtab",
               },
@@ -1964,7 +2002,7 @@ getHardcodedLayout = ({
                   "https://getpocket.com/explore/entertainment?utm_source=pocket-newtab",
               },
               {
-                name: "Health",
+                name: "Health & fitness",
                 url:
                   "https://getpocket.com/explore/health?utm_source=pocket-newtab",
               },
@@ -1974,8 +2012,20 @@ getHardcodedLayout = ({
                   "https://getpocket.com/explore/science?utm_source=pocket-newtab",
               },
               {
-                name: "More Recommendations ›",
+                name: "More recommendations ›",
                 url: "https://getpocket.com/explore?utm_source=pocket-newtab",
+              },
+            ],
+            extraLinks: [
+              {
+                name: "Career",
+                url:
+                  "https://getpocket.com/explore/career?utm_source=pocket-newtab",
+              },
+              {
+                name: "Technology",
+                url:
+                  "https://getpocket.com/explore/technology?utm_source=pocket-newtab",
               },
             ],
             privacyNoticeURL: {
@@ -1995,6 +2045,19 @@ getHardcodedLayout = ({
             ".ds-navigation": "margin-top: -10px;",
           },
         },
+        ...(newFooterSection
+          ? [
+              {
+                type: "PrivacyLink",
+                properties: {
+                  url: "https://www.mozilla.org/privacy/firefox/",
+                  title: {
+                    id: "newtab-section-menu-privacy-notice",
+                  },
+                },
+              },
+            ]
+          : []),
       ],
     },
   ],

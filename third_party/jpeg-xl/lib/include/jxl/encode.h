@@ -4,7 +4,9 @@
  * license that can be found in the LICENSE file.
  */
 
-/** @file encode.h
+/** @addtogroup libjxl_encoder
+ * @{
+ * @file encode.h
  * @brief Encoding API for JPEG XL.
  */
 
@@ -69,6 +71,51 @@ typedef enum {
   JXL_ENC_NOT_SUPPORTED = 3,
 
 } JxlEncoderStatus;
+
+/**
+ * Id of options to set to JxlEncoderOptions.
+ */
+typedef enum {
+  /** Sets resampling option. If enabled, the image is downsampled before
+   * compression, and upsampled to original size in the decoder. Integer option,
+   * use 0 for the default behavior (resampling only applied for low quality),
+   * 1 for no downsampling (1x1), 2 for 2x2 downsampling, 4 for 4x4
+   * downsampling, 8 for 8x8 downsampling. The default value is 0.
+   */
+  JXL_ENC_OPTION_RESAMPLING = 0,
+
+  /** Similar to JXL_ENC_OPTION_RESAMPLING, but for extra channels. Integer
+   * option, use 1 for no downsampling (1x1), 2 for 2x2 downsampling, 4 for 4x4
+   * downsampling, 8 for 8x8 downsampling. The default value is 1.
+   */
+  JXL_ENC_OPTION_EXTRA_CHANNEL_RESAMPLING = 1,
+
+  /** Enables or disables noise generation. Integer option, use -1 for the
+   * encoder default, 0 to disable, 1 to enable. The
+   */
+  JXL_ENC_OPTION_NOISE = 2,
+
+  /** Enables or disables dots generation. Integer option, use -1 for the
+   * encoder default, 0 to disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_DOTS = 3,
+
+  /** Enables or disables patches generation. Integer option, use -1 for the
+   * encoder default, 0 to disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_PATCHES = 4,
+
+  /** Enables or disables the gaborish filter. Integer option, use -1 for the
+   * encoder default, 0 to disable, 1 to enable.
+   */
+  JXL_ENC_OPTION_GABORISH = 5,
+
+  /** Enum value not to be used as an option. This value is added to force the
+   * C compiler to have the enum to take a known size.
+   */
+  JXL_ENC_OPTION_FILL_ENUM = 65535,
+
+} JxlEncoderOptionId;
 
 /**
  * Creates an instance of JxlEncoder and initializes it.
@@ -142,6 +189,14 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderProcessOutput(JxlEncoder* enc,
 /**
  * Sets the buffer to read JPEG encoded bytes from for the next frame to encode.
  *
+ * If JxlEncoderSetBasicInfo has not yet been called, calling
+ * JxlEncoderAddJPEGFrame will implicitly call it with the parameters of the
+ * added JPEG frame.
+ *
+ * If JxlEncoderSetColorEncoding or JxlEncoderSetICCProfile has not yet been
+ * called, calling JxlEncoderAddJPEGFrame will implicitly call it with the
+ * parameters of the added JPEG frame.
+ *
  * If the encoder is set to store JPEG reconstruction metadata using @ref
  * JxlEncoderStoreJPEGMetadata and a single JPEG frame is added, it will be
  * possible to losslessly reconstruct the JPEG codestream.
@@ -157,19 +212,20 @@ JXL_EXPORT JxlEncoderStatus JxlEncoderAddJPEGFrame(
 
 /**
  * Sets the buffer to read pixels from for the next image to encode. Must call
- * JxlEncoderSetDimensions before JxlEncoderAddImageFrame.
+ * JxlEncoderSetBasicInfo before JxlEncoderAddImageFrame.
  *
  * Currently only some pixel formats are supported:
  * - JXL_TYPE_UINT8
  * - JXL_TYPE_UINT16
+ * - JXL_TYPE_FLOAT16, with nominal range 0..1
  * - JXL_TYPE_FLOAT, with nominal range 0..1
  *
  * The color profile of the pixels depends on the value of uses_original_profile
  * in the JxlBasicInfo. If true, the pixels are assumed to be encoded in the
  * original profile that is set with JxlEncoderSetColorEncoding or
  * JxlEncoderSetICCProfile. If false, the pixels are assumed to be nonlinear
- * sRGB for integer data types (JXL_TYPE_UINT8 and JXL_TYPE_UINT16), and linear
- * sRGB for floating point data types (JXL_TYPE_FLOAT).
+ * sRGB for integer data types (JXL_TYPE_UINT8, JXL_TYPE_UINT16), and linear
+ * sRGB for floating point data types (JXL_TYPE_FLOAT16, JXL_TYPE_FLOAT).
  *
  * @param options set of encoder options to use when encoding the frame.
  * @param pixel_format format for pixels. Object owned by the caller and its
@@ -224,6 +280,17 @@ JxlEncoderSetColorEncoding(JxlEncoder* enc, const JxlColorEncoding* color);
 JXL_EXPORT JxlEncoderStatus JxlEncoderSetICCProfile(JxlEncoder* enc,
                                                     const uint8_t* icc_profile,
                                                     size_t size);
+
+/**
+ * Initializes a JxlBasicInfo struct to default values.
+ * For forwards-compatibility, this function has to be called before values
+ * are assigned to the struct fields.
+ * The default values correspond to an 8-bit RGB image, no alpha or any
+ * other extra channels.
+ *
+ * @param info global image metadata. Object owned by the caller.
+ */
+JXL_EXPORT void JxlEncoderInitBasicInfo(JxlBasicInfo* info);
 
 /**
  * Sets the global metadata of the image encoded by this encoder.
@@ -298,8 +365,9 @@ JxlEncoderOptionsSetDecodingSpeed(JxlEncoderOptions* options, int tier);
 
 /**
  * Sets encoder effort/speed level without affecting decoding speed. Valid
- * values are, from faster to slower speed: 3:falcon 4:cheetah 5:hare 6:wombat
- * 7:squirrel 8:kitten 9:tortoise Default: squirrel (7).
+ * values are, from faster to slower speed: 1:lightning 2:thunder 3:falcon
+ * 4:cheetah 5:hare 6:wombat 7:squirrel 8:kitten 9:tortoise.
+ * Default: squirrel (7).
  *
  * @param options set of encoder options to update with the new mode.
  * @param effort the effort value to set.
@@ -311,14 +379,14 @@ JxlEncoderOptionsSetEffort(JxlEncoderOptions* options, int effort);
 
 /**
  * Sets the distance level for lossy compression: target max butteraugli
- *  distance, lower = higher quality. Range: 0 .. 15.
- *  0.0 = mathematically lossless (however, use JxlEncoderOptionsSetLossless to
- *  use true lossless).
- *  1.0 = visually lossless.
- *  Recommended range: 0.5 .. 3.0.
- *  Default value: 1.0.
- *  If JxlEncoderOptionsSetLossless is used, this value is unused and implied
- *  to be 0.
+ * distance, lower = higher quality. Range: 0 .. 15.
+ * 0.0 = mathematically lossless (however, use JxlEncoderOptionsSetLossless to
+ * use true lossless).
+ * 1.0 = visually lossless.
+ * Recommended range: 0.5 .. 3.0.
+ * Default value: 1.0.
+ * If JxlEncoderOptionsSetLossless is used, this value is unused and implied
+ * to be 0.
  *
  * @param options set of encoder options to update with the new mode.
  * @param distance the distance value to set.
@@ -327,6 +395,25 @@ JxlEncoderOptionsSetEffort(JxlEncoderOptions* options, int effort);
  */
 JXL_EXPORT JxlEncoderStatus
 JxlEncoderOptionsSetDistance(JxlEncoderOptions* options, float distance);
+
+/**
+ * Sets an option of integer type to the encoder option. The JxlEncoderOptionId
+ * argument determines which option is set.
+ *
+ * TODO(lode): also use the option enum for the container, lossless, speed,
+ * effort and distance options.
+ *
+ * @param options set of encoder options to update with the new mode.
+ * @param option ID of the option to set.
+ * @param value Integer value to set for this option.
+ * @return JXL_ENC_SUCCESS if the operation was successful, JXL_ENC_ERROR in
+ * case of an error, such as invalid or unknown option id, or invalid integer
+ * value for the given option. If an error is returned, the state of the
+ * JxlEncoderOptions object is still valid and is the same as before this
+ * function was called.
+ */
+JXL_EXPORT JxlEncoderStatus JxlEncoderOptionsSetAsInteger(
+    JxlEncoderOptions* options, JxlEncoderOptionId option, int32_t value);
 
 /**
  * Create a new set of encoder options, with all values initially copied from
@@ -369,3 +456,5 @@ JXL_EXPORT void JxlColorEncodingSetToLinearSRGB(
 #endif
 
 #endif /* JXL_ENCODE_H_ */
+
+/** @}*/

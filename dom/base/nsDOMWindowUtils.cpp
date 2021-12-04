@@ -125,6 +125,8 @@
 #include "mozilla/ResultExtensions.h"
 #include "mozilla/ViewportUtils.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
+#include "mozilla/IMEStateManager.h"
+#include "mozilla/IMEContentObserver.h"
 
 #ifdef XP_WIN
 #  undef GetClassName
@@ -360,8 +362,8 @@ nsDOMWindowUtils::UpdateLayerTree() {
     RefPtr<nsViewManager> vm = presShell->GetViewManager();
     if (nsView* view = vm->GetRootView()) {
       nsAutoScriptBlocker scriptBlocker;
-      presShell->Paint(view, view->GetBounds(),
-                       PaintFlags::PaintSyncDecodeImages);
+      presShell->PaintAndRequestComposite(view,
+                                          PaintFlags::PaintSyncDecodeImages);
       presShell->GetWindowRenderer()->WaitOnTransactionProcessed();
     }
   }
@@ -1123,7 +1125,8 @@ nsDOMWindowUtils::SendNativePenInput(uint32_t aPointerId,
                                      uint32_t aPointerState, int32_t aScreenX,
                                      int32_t aScreenY, double aPressure,
                                      uint32_t aRotation, int32_t aTiltX,
-                                     int32_t aTiltY, nsIObserver* aObserver) {
+                                     int32_t aTiltY, int32_t aButton,
+                                     nsIObserver* aObserver) {
   nsCOMPtr<nsIWidget> widget = GetWidget();
   if (!widget) {
     return NS_ERROR_FAILURE;
@@ -1137,12 +1140,12 @@ nsDOMWindowUtils::SendNativePenInput(uint32_t aPointerId,
   NS_DispatchToMainThread(NativeInputRunnable::Create(
       NewRunnableMethod<uint32_t, nsIWidget::TouchPointerState,
                         LayoutDeviceIntPoint, double, uint32_t, int32_t,
-                        int32_t, nsIObserver*>(
+                        int32_t, int32_t, nsIObserver*>(
           "nsIWidget::SynthesizeNativePenInput", widget,
           &nsIWidget::SynthesizeNativePenInput, aPointerId,
           (nsIWidget::TouchPointerState)aPointerState,
           LayoutDeviceIntPoint(aScreenX, aScreenY), aPressure, aRotation,
-          aTiltX, aTiltY, aObserver)));
+          aTiltX, aTiltY, aButton, aObserver)));
   return NS_OK;
 }
 
@@ -1291,14 +1294,14 @@ nsDOMWindowUtils::GarbageCollect(nsICycleCollectorListener* aListener) {
   AUTO_PROFILER_LABEL("nsDOMWindowUtils::GarbageCollect", GCCC);
 
   nsJSContext::GarbageCollectNow(JS::GCReason::DOM_UTILS);
-  nsJSContext::CycleCollectNow(aListener);
+  nsJSContext::CycleCollectNow(CCReason::API, aListener);
 
   return NS_OK;
 }
 
 NS_IMETHODIMP
 nsDOMWindowUtils::CycleCollect(nsICycleCollectorListener* aListener) {
-  nsJSContext::CycleCollectNow(aListener);
+  nsJSContext::CycleCollectNow(CCReason::API, aListener);
   return NS_OK;
 }
 
@@ -1634,13 +1637,13 @@ nsDOMWindowUtils::DisableNonTestMouseEvents(bool aDisable) {
 
 NS_IMETHODIMP
 nsDOMWindowUtils::SuppressEventHandling(bool aSuppress) {
-  nsCOMPtr<Document> doc = GetDocument();
-  NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
+  NS_ENSURE_STATE(window);
 
   if (aSuppress) {
-    doc->SuppressEventHandling();
+    window->SuppressEventHandling();
   } else {
-    doc->UnsuppressEventHandlingAndFireEvents(true);
+    window->UnsuppressEventHandling();
   }
 
   return NS_OK;
@@ -1870,6 +1873,46 @@ nsDOMWindowUtils::ToScreenRect(float aX, float aY, float aWidth, float aHeight,
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::ConvertFromParentProcessWidgetToLocal(float aX, float aY,
+                                                        float aWidth,
+                                                        float aHeight,
+                                                        DOMRect** aResult) {
+  if (!XRE_IsContentProcess()) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsCOMPtr<nsPIDOMWindowOuter> window = do_QueryReferent(mWindow);
+  if (!window) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_NOT_AVAILABLE;
+  }
+
+  LayoutDeviceRect devPixelsRect = LayoutDeviceRect(aX, aY, aWidth, aHeight);
+
+  Maybe<LayoutDeviceToLayoutDeviceMatrix4x4> inverse =
+      widget->WidgetToTopLevelWidgetTransform().MaybeInverse();
+  if (inverse) {
+    Maybe<LayoutDeviceRect> rect =
+        UntransformBy(*inverse, devPixelsRect, LayoutDeviceRect::MaxIntRect());
+    if (rect) {
+      RefPtr<DOMRect> outRect = new DOMRect(mWindow);
+      outRect->SetRect(rect->x, rect->y, rect->width, rect->height);
+      outRect.forget(aResult);
+      return NS_OK;
+    }
+  }
+
+  RefPtr<DOMRect> outRect = new DOMRect(mWindow);
+  outRect->SetRect(0, 0, 0, 0);
+  outRect.forget(aResult);
+  return NS_ERROR_NOT_AVAILABLE;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::SetDynamicToolbarMaxHeight(uint32_t aHeightInScreen) {
   if (aHeightInScreen > INT32_MAX) {
     return NS_ERROR_INVALID_ARG;
@@ -2055,6 +2098,19 @@ nsDOMWindowUtils::GetInputContextOrigin(uint32_t* aOrigin) {
   MOZ_ASSERT(context.mOrigin == InputContext::Origin::ORIGIN_MAIN ||
              context.mOrigin == InputContext::Origin::ORIGIN_CONTENT);
   *aOrigin = static_cast<uint32_t>(context.mOrigin);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::GetNodeObservedByIMEContentObserver(nsINode** aNode) {
+  NS_ENSURE_ARG_POINTER(aNode);
+
+  IMEContentObserver* observer = IMEStateManager::GetActiveContentObserver();
+  if (!observer) {
+    *aNode = nullptr;
+    return NS_OK;
+  }
+  *aNode = do_AddRef(observer->GetObservingContent()).take();
   return NS_OK;
 }
 
@@ -3959,39 +4015,6 @@ nsDOMWindowUtils::GetOMTAStyle(Element* aElement, const nsAString& aProperty,
 }
 
 NS_IMETHODIMP
-nsDOMWindowUtils::GetOMTCTransform(Element* aElement,
-                                   const nsAString& aPseudoElement,
-                                   nsAString& aResult) {
-  if (!aElement) {
-    return NS_ERROR_INVALID_ARG;
-  }
-
-  if (GetWebRenderBridge()) {
-    return NS_ERROR_NOT_IMPLEMENTED;
-  }
-
-  auto frameOrError = GetTargetFrame(aElement, aPseudoElement);
-  if (frameOrError.isErr()) {
-    return frameOrError.unwrapErr();
-  }
-
-  nsIFrame* frame = frameOrError.unwrap();
-  aResult.Truncate();
-  if (!frame) {
-    return NS_OK;
-  }
-
-  DisplayItemType itemType = DisplayItemType::TYPE_TRANSFORM;
-  if (nsLayoutUtils::HasEffectiveAnimation(
-          frame, nsCSSPropertyIDSet::OpacityProperties()) &&
-      !frame->IsTransformed()) {
-    itemType = DisplayItemType::TYPE_OPACITY;
-  }
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP
 nsDOMWindowUtils::IsAnimationInPendingTracker(dom::Animation* aAnimation,
                                               bool* aRetVal) {
   MOZ_ASSERT(aRetVal);
@@ -4661,12 +4684,6 @@ nsDOMWindowUtils::GetLayersId(uint64_t* aOutLayersId) {
     return NS_ERROR_FAILURE;
   }
   *aOutLayersId = (uint64_t)child->GetLayersId();
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-nsDOMWindowUtils::GetUsesOverlayScrollbars(bool* aResult) {
-  *aResult = Document::UseOverlayScrollbars(GetDocument());
   return NS_OK;
 }
 

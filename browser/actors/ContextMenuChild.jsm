@@ -778,21 +778,14 @@ class ContextMenuChild extends JSWindowActorChild {
 
     // Set the node to containing <video>/<audio>/<embed>/<object> if the node
     // is in the videocontrols UA Widget.
-    if (this.contentWindow.ShadowRoot) {
-      let n = node;
-      while (n) {
-        if (n instanceof this.contentWindow.ShadowRoot) {
-          if (
-            n.host instanceof this.contentWindow.HTMLMediaElement ||
-            n.host instanceof this.contentWindow.HTMLEmbedElement ||
-            n.host instanceof this.contentWindow.HTMLObjectElement
-          ) {
-            node = n.host;
-            break;
-          }
-          break;
-        }
-        n = n.parentNode;
+    if (node.containingShadowRoot?.isUAWidget()) {
+      const host = node.containingShadowRoot.host;
+      if (
+        host instanceof this.contentWindow.HTMLMediaElement ||
+        host instanceof this.contentWindow.HTMLEmbedElement ||
+        host instanceof this.contentWindow.HTMLObjectElement
+      ) {
+        node = host;
       }
     }
 
@@ -982,6 +975,16 @@ class ContextMenuChild extends JSWindowActorChild {
         context.onCompletedImage = true;
       }
 
+      // The URL of the image before redirects is the currentURI.  This is
+      // intended to be used for "Copy Image Link".
+      context.originalMediaURL = (() => {
+        let currentURI = context.target.currentURI?.spec;
+        if (currentURI && this._isMediaURLReusable(currentURI)) {
+          return currentURI;
+        }
+        return "";
+      })();
+
       // The actual URL the image was loaded from (after redirects) is the
       // currentRequestFinalURI.  We should use that as the URL for purposes of
       // deciding on the filename, if it is present. It might not be present
@@ -1165,7 +1168,7 @@ class ContextMenuChild extends JSWindowActorChild {
         }
       }
 
-      elem = elem.parentNode;
+      elem = elem.flattenedTreeParentNode;
     }
 
     // See if the user clicked in a frame.

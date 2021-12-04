@@ -7,7 +7,6 @@
 #include "mozilla/dom/HTMLCanvasElement.h"
 
 #include "ImageEncoder.h"
-#include "ImageLayers.h"
 #include "jsapi.h"
 #include "jsfriendapi.h"
 #include "Layers.h"
@@ -52,6 +51,7 @@
 #include "CanvasUtils.h"
 #include "VRManagerChild.h"
 #include "ClientWebGLContext.h"
+#include "WindowRenderer.h"
 
 using namespace mozilla::layers;
 using namespace mozilla::gfx;
@@ -1063,31 +1063,21 @@ void HTMLCanvasElement::InvalidateCanvasContent(const gfx::Rect* damageRect) {
     renderer->SetDirty();
     frame->SchedulePaint(nsIFrame::PAINT_COMPOSITE_ONLY);
   } else {
-    Layer* layer = nullptr;
     if (damageRect) {
       nsIntSize size = GetWidthHeight();
       if (size.width != 0 && size.height != 0) {
         gfx::IntRect invalRect = gfx::IntRect::Truncate(*damageRect);
-        layer =
-            frame->InvalidateLayer(DisplayItemType::TYPE_CANVAS, &invalRect);
+        frame->InvalidateLayer(DisplayItemType::TYPE_CANVAS, &invalRect);
       }
     } else {
-      layer = frame->InvalidateLayer(DisplayItemType::TYPE_CANVAS);
+      frame->InvalidateLayer(DisplayItemType::TYPE_CANVAS);
     }
 
-    if (layer) {
-      if (CanvasLayer* canvas = layer->AsCanvasLayer()) {
-        canvas->Updated();
-      } else {
-        layer->SetInvalidRectToVisibleRegion();
-      }
-    } else {
-      // This path is taken in two situations:
-      // 1) WebRender is enabled and has not yet processed a display list.
-      // 2) WebRender is disabled and layer invalidation failed.
-      // In both cases, schedule a full paint to properly update canvas.
-      frame->SchedulePaint(nsIFrame::PAINT_DEFAULT, false);
-    }
+    // This path is taken in two situations:
+    // 1) WebRender is enabled and has not yet processed a display list.
+    // 2) WebRender is disabled and layer invalidation failed.
+    // In both cases, schedule a full paint to properly update canvas.
+    frame->SchedulePaint(nsIFrame::PAINT_DEFAULT, false);
   }
 
   /*
@@ -1129,19 +1119,6 @@ CanvasContextType HTMLCanvasElement::GetCurrentContextType() {
   return mCurrentContextType;
 }
 
-already_AddRefed<Layer> HTMLCanvasElement::GetCanvasLayer(
-    nsDisplayListBuilder* aBuilder, Layer* aOldLayer, LayerManager* aManager) {
-  if (mCurrentContext) {
-    return mCurrentContext->GetCanvasLayer(aBuilder, aOldLayer, aManager);
-  }
-
-  if (mOffscreenCanvas) {
-    MOZ_CRASH("todo");
-  }
-
-  return nullptr;
-}
-
 already_AddRefed<Image> HTMLCanvasElement::GetAsImage() {
   if (mCurrentContext) {
     return mCurrentContext->GetAsImage();
@@ -1179,19 +1156,6 @@ bool HTMLCanvasElement::InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
   }
 
   return false;
-}
-
-bool HTMLCanvasElement::ShouldForceInactiveLayer(LayerManager* aManager) {
-  if (mCurrentContext) {
-    return mCurrentContext->ShouldForceInactiveLayer(aManager);
-  }
-
-  if (mOffscreenCanvas) {
-    // TODO: We should handle offscreen canvas case.
-    return false;
-  }
-
-  return true;
 }
 
 void HTMLCanvasElement::MarkContextClean() {

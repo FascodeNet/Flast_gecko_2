@@ -622,6 +622,10 @@ AtkRole getRoleCB(AtkObject* aAtkObj) {
     aAtkObj->role = ATK_ROLE_SECTION;
   } else if (aAtkObj->role == ATK_ROLE_COMMENT && !IsAtkVersionAtLeast(2, 36)) {
     aAtkObj->role = ATK_ROLE_SECTION;
+  } else if ((aAtkObj->role == ATK_ROLE_CONTENT_DELETION ||
+              aAtkObj->role == ATK_ROLE_CONTENT_INSERTION) &&
+             !IsAtkVersionAtLeast(2, 34)) {
+    aAtkObj->role = ATK_ROLE_SECTION;
   }
 
   return aAtkObj->role;
@@ -733,7 +737,7 @@ AtkObject* refChildCB(AtkObject* aAtkObj, gint aChildIndex) {
       return nullptr;
     }
 
-    LocalAccessible* accChild = accWrap->GetEmbeddedChildAt(aChildIndex);
+    LocalAccessible* accChild = accWrap->EmbeddedChildAt(aChildIndex);
     if (accChild) {
       childAtkObj = AccessibleWrap::GetAtkObject(accChild);
     } else {
@@ -748,8 +752,10 @@ AtkObject* refChildCB(AtkObject* aAtkObj, gint aChildIndex) {
       return nullptr;
     }
 
-    RemoteAccessible* child = proxy->EmbeddedChildAt(aChildIndex);
-    if (child) childAtkObj = GetWrapperFor(child);
+    Accessible* child = proxy->EmbeddedChildAt(aChildIndex);
+    if (child) {
+      childAtkObj = GetWrapperFor(child->AsRemote());
+    }
   } else {
     return nullptr;
   }

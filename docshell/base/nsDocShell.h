@@ -946,6 +946,7 @@ class nsDocShell final : public nsDocLoader,
   void FirePageHideNotificationInternal(bool aIsUnload,
                                         bool aSkipCheckingDynEntries);
 
+  void ThawFreezeNonRecursive(bool aThaw);
   void FirePageHideShowNonRecursive(bool aShow);
 
   nsresult Dispatch(mozilla::TaskCategory aCategory,
@@ -978,7 +979,8 @@ class nsDocShell final : public nsDocLoader,
   void RefreshURIToQueue();
   nsresult Embed(nsIContentViewer* aContentViewer,
                  mozilla::dom::WindowGlobalChild* aWindowActor,
-                 bool aIsTransientAboutBlank, bool aPersist);
+                 bool aIsTransientAboutBlank, bool aPersist,
+                 nsIRequest* aRequest);
   nsPresContext* GetEldestPresContext();
   nsresult CheckLoadingPermissions();
   nsresult LoadHistoryEntry(nsISHEntry* aEntry, uint32_t aLoadType,
@@ -987,7 +989,7 @@ class nsDocShell final : public nsDocLoader,
       const mozilla::dom::LoadingSessionHistoryInfo& aEntry, uint32_t aLoadType,
       bool aUserActivation);
   nsresult LoadHistoryEntry(nsDocShellLoadState* aLoadState, uint32_t aLoadType,
-                            bool aReloadingActiveEntry);
+                            bool aLoadingCurrentEntry);
   nsresult GetHttpChannel(nsIChannel* aChannel, nsIHttpChannel** aReturn);
   nsresult ConfirmRepost(bool* aRepost);
   nsresult GetPromptAndStringBundle(nsIPrompt** aPrompt,
@@ -1074,7 +1076,8 @@ class nsDocShell final : public nsDocLoader,
 
   // Sets the active entry to the current loading entry. aPersist is used in the
   // case a new session history entry is added to the session history.
-  void MoveLoadingToActiveEntry(bool aPersist);
+  // aExpired is true if the relevant nsIChannel has its cache token expired.
+  void MoveLoadingToActiveEntry(bool aPersist, bool aExpired);
 
   void ActivenessMaybeChanged();
 
@@ -1087,7 +1090,7 @@ class nsDocShell final : public nsDocLoader,
   bool ShouldOpenInBlankTarget(const nsAString& aOriginalTarget,
                                nsIURI* aLinkURI, nsIContent* aContent);
 
-  void RecordSingleChannelId();
+  void RecordSingleChannelId(bool aStartRequest, nsIRequest* aRequest);
 
   void SetChannelToDisconnectOnPageHide(uint64_t aChannelId) {
     MOZ_ASSERT(mChannelToDisconnectOnPageHide == 0);
@@ -1259,6 +1262,7 @@ class nsDocShell final : public nsDocLoader,
 
   // See WindowGlobalParent::mSingleChannelId.
   mozilla::Maybe<uint64_t> mSingleChannelId;
+  uint32_t mRequestForBlockingFromBFCacheCount = 0;
 
   uint64_t mChannelToDisconnectOnPageHide;
 

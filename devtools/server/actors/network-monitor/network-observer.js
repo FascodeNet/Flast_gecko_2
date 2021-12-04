@@ -106,9 +106,13 @@ function matchRequest(channel, filters) {
   }
 
   if (filters.window) {
+    let win = NetworkHelper.getWindowForRequest(channel);
+    if (filters.matchExactWindow) {
+      return win == filters.window;
+    }
+
     // Since frames support, this.window may not be the top level content
     // frame, so that we can't only compare with win.top.
-    let win = NetworkHelper.getWindowForRequest(channel);
     while (win) {
       if (win == filters.window) {
         return true;
@@ -118,12 +122,15 @@ function matchRequest(channel, filters) {
       }
       win = win.parent;
     }
+    return false;
   }
 
   if (filters.browserId) {
     const topFrame = NetworkHelper.getTopFrameForRequest(channel);
-    // topFrame is typically null for some chrome requests like favicons
-    if (topFrame && topFrame.browsingContext.browserId == filters.browserId) {
+    // `topFrame` is typically null for some chrome requests like favicons
+    // And its `browsingContext` attribute might be null if the request happened
+    // while the tab is being closed.
+    if (topFrame?.browsingContext?.browserId == filters.browserId) {
       return true;
     }
 
@@ -153,6 +160,9 @@ exports.matchRequest = matchRequest;
  *        Object with the filters to use for network requests:
  *        - window (nsIDOMWindow): filter network requests by the associated
  *          window object.
+ *        - matchExactWindow (Boolean): only has effect when `window` is provided too.
+ *        When set to true, only requests associated with this specific window will be returned.
+ *        When false, the requests from parent windows will be retrieved.
  *        - browserId (number): filter requests by their top frame's Browser Element.
  *        Filters are optional. If any of these filters match the request is
  *        logged (OR is applied). If no filter is provided then all requests are

@@ -51,6 +51,7 @@
 #include "mozilla/dom/WebAuthnTransactionParent.h"
 #include "mozilla/dom/cache/ActorUtils.h"
 #include "mozilla/dom/indexedDB/ActorsParent.h"
+#include "mozilla/dom/locks/LockManagerParent.h"
 #include "mozilla/dom/localstorage/ActorsParent.h"
 #include "mozilla/dom/network/UDPSocketParent.h"
 #include "mozilla/dom/quota/ActorsParent.h"
@@ -68,7 +69,10 @@
 #include "mozilla/media/MediaParent.h"
 #include "mozilla/net/BackgroundDataBridgeParent.h"
 #include "mozilla/net/HttpBackgroundChannelParent.h"
+#include "mozilla/net/HttpConnectionMgrParent.h"
+#include "mozilla/net/WebSocketConnectionParent.h"
 #include "mozilla/psm/VerifySSLServerCertParent.h"
+#include "nsIHttpChannelInternal.h"
 #include "nsIPrincipal.h"
 #include "nsNetUtil.h"
 #include "nsProxyRelease.h"
@@ -1440,6 +1444,13 @@ bool BackgroundParentImpl::DeallocPMediaTransportParent(
   return true;
 }
 
+already_AddRefed<dom::locks::PLockManagerParent>
+BackgroundParentImpl::AllocPLockManagerParent(
+    const ContentPrincipalInfo& aPrincipalInfo, const nsID& aClientId) {
+  return MakeAndAddRef<mozilla::dom::locks::LockManagerParent>(aPrincipalInfo,
+                                                               aClientId);
+}
+
 PParentToChildStreamParent*
 BackgroundParentImpl::SendPParentToChildStreamConstructor(
     PParentToChildStreamParent* aActor) {
@@ -1450,6 +1461,27 @@ PFileDescriptorSetParent*
 BackgroundParentImpl::SendPFileDescriptorSetConstructor(
     const FileDescriptor& aFD) {
   return PBackgroundParent::SendPFileDescriptorSetConstructor(aFD);
+}
+
+already_AddRefed<mozilla::net::PWebSocketConnectionParent>
+BackgroundParentImpl::AllocPWebSocketConnectionParent(
+    const uint32_t& aListenerId) {
+  Maybe<nsCOMPtr<nsIHttpUpgradeListener>> listener =
+      net::HttpConnectionMgrParent::GetAndRemoveHttpUpgradeListener(
+          aListenerId);
+  if (!listener) {
+    return nullptr;
+  }
+
+  RefPtr<mozilla::net::WebSocketConnectionParent> actor =
+      new mozilla::net::WebSocketConnectionParent(*listener);
+  return actor.forget();
+}
+
+mozilla::ipc::IPCResult
+BackgroundParentImpl::RecvPWebSocketConnectionConstructor(
+    PWebSocketConnectionParent* actor, const uint32_t& aListenerId) {
+  return IPC_OK();
 }
 
 }  // namespace mozilla::ipc

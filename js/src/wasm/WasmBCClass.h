@@ -24,7 +24,6 @@
 
 #include "wasm/WasmBCDefs.h"
 #include "wasm/WasmBCFrame.h"
-#include "wasm/WasmBCMemory.h"
 #include "wasm/WasmBCRegDefs.h"
 #include "wasm/WasmBCStk.h"
 
@@ -228,6 +227,9 @@ struct BaseCompiler final {
   //
   // Compilation state.
 
+  // Decoder for this function, used for misc error reporting.
+  Decoder& decoder_;
+
   // Opcode reader.
   BaseOpIter iter_;
 
@@ -318,7 +320,10 @@ struct BaseCompiler final {
 
   inline const FuncType& funcType() const;
   inline const TypeIdDesc& funcTypeId() const;
+  inline bool usesMemory() const;
   inline bool usesSharedMemory() const;
+  inline bool isMem32() const;
+  inline bool isMem64() const;
 
   // The casts are used by some of the ScratchRegister implementations.
   operator MacroAssembler&() const { return masm; }
@@ -431,18 +436,19 @@ struct BaseCompiler final {
   inline void freeV128(RegV128 r);
 #endif
 
-  inline void free(RegI32 r);
-  inline void free(RegI64 r);
-  inline void free(RegF32 r);
-  inline void free(RegF64 r);
-#ifdef ENABLE_WASM_SIMD
-  inline void free(RegV128 r);
-#endif
+  template <typename RegType>
+  inline void free(RegType r);
 
   // Free r if it is not invalid.
   inline void maybeFree(RegI32 r);
   inline void maybeFree(RegI64 r);
+  inline void maybeFree(RegF32 r);
   inline void maybeFree(RegF64 r);
+  inline void maybeFree(RegRef r);
+  inline void maybeFree(RegPtr r);
+#ifdef ENABLE_WASM_SIMD
+  inline void maybeFree(RegV128 r);
+#endif
 
   // On 64-bit systems, `except` must equal r and this is a no-op.  On 32-bit
   // systems, `except` must equal the high or low part of a pair and the other
@@ -452,15 +458,20 @@ struct BaseCompiler final {
   // Return the 32-bit low part of the 64-bit register, do not free anything.
   inline RegI32 fromI64(RegI64 r);
 
+  // If r is valid, return fromI64(r), otherwise an invalid RegI32.
+  inline RegI32 maybeFromI64(RegI64 r);
+
 #ifdef JS_PUNBOX64
   // On 64-bit systems, reinterpret r as 64-bit.
   inline RegI64 fromI32(RegI32 r);
 #endif
 
   // Widen r to 64 bits; this may allocate another register to form a pair.
+  // Note this does not generate code for sign/zero extension.
   inline RegI64 widenI32(RegI32 r);
 
-  // Narrow r to 32 bits; this may free part of a pair.
+  // Narrow r to 32 bits; this may free part of a pair.  Note this does not
+  // generate code to canonicalize the value on 64-bit systems.
   inline RegI32 narrowI64(RegI64 r);
   inline RegI32 narrowRef(RegRef r);
 
@@ -684,6 +695,7 @@ struct BaseCompiler final {
 
   // Constant poppers will return true and pop the value if the stack top is a
   // constant of the appropriate type; otherwise pop nothing and return false.
+  [[nodiscard]] inline bool hasConst() const;
   [[nodiscard]] inline bool popConst(int32_t* c);
   [[nodiscard]] inline bool popConst(int64_t* c);
   [[nodiscard]] inline bool peekConst(int32_t* c);
@@ -734,8 +746,9 @@ struct BaseCompiler final {
   // register.
   inline void peekRefAt(uint32_t depth, RegRef dest);
 
-  // DOCUMENTME
-  [[nodiscard]] inline bool peekLocalI32(uint32_t* local);
+  // Peek at the value on the top of the stack and return true if it is a Local
+  // of any type.
+  [[nodiscard]] inline bool peekLocal(uint32_t* local);
 
   ////////////////////////////////////////////////////////////////////////////
   //
@@ -781,8 +794,8 @@ struct BaseCompiler final {
   // hot enough to warrant inlining at the outermost level.
 
   inline void needResultRegisters(ResultType type, ResultRegKind which);
-#ifdef JS_CODEGEN_X64
-  inline void maskResultRegisters(ResultType type);
+#ifdef JS_64BIT
+  inline void widenInt32ResultRegisters(ResultType type);
 #endif
   inline void freeResultRegisters(ResultType type, ResultRegKind which);
   inline void needIntegerResultRegisters(ResultType type);
@@ -873,6 +886,7 @@ struct BaseCompiler final {
   inline Control& controlItem();
   inline Control& controlItem(uint32_t relativeDepth);
   inline Control& controlOutermost();
+  inline LabelKind controlKind(uint32_t relativeDepth);
 
   ////////////////////////////////////////////////////////////
   //
@@ -939,11 +953,15 @@ struct BaseCompiler final {
   inline void moveI32(RegI32 src, RegI32 dest);
   inline void moveI64(RegI64 src, RegI64 dest);
   inline void moveRef(RegRef src, RegRef dest);
+  inline void movePtr(RegPtr src, RegPtr dest);
   inline void moveF64(RegF64 src, RegF64 dest);
   inline void moveF32(RegF32 src, RegF32 dest);
 #ifdef ENABLE_WASM_SIMD
   inline void moveV128(RegV128 src, RegV128 dest);
 #endif
+
+  template <typename RegType>
+  inline void move(RegType src, RegType dest);
 
   //////////////////////////////////////////////////////////////////////
   //
@@ -966,15 +984,15 @@ struct BaseCompiler final {
   [[nodiscard]] bool addInterruptCheck();
 
   // Check that the value is not zero, trap if it is.
-  void checkDivideByZeroI32(RegI32 rhs);
-  void checkDivideByZeroI64(RegI64 r);
+  void checkDivideByZero(RegI32 rhs);
+  void checkDivideByZero(RegI64 r);
 
   // Check that a signed division will not overflow, trap or flush-to-zero if it
   // will according to `zeroOnOverflow`.
-  void checkDivideSignedOverflowI32(RegI32 rhs, RegI32 srcDest, Label* done,
-                                    bool zeroOnOverflow);
-  void checkDivideSignedOverflowI64(RegI64 rhs, RegI64 srcDest, Label* done,
-                                    bool zeroOnOverflow);
+  void checkDivideSignedOverflow(RegI32 rhs, RegI32 srcDest, Label* done,
+                                 bool zeroOnOverflow);
+  void checkDivideSignedOverflow(RegI64 rhs, RegI64 srcDest, Label* done,
+                                 bool zeroOnOverflow);
 
   // Emit a jump table to be used by tableSwitch()
   void jumpTable(const LabelVector& labels, Label* theTable);
@@ -1007,16 +1025,26 @@ struct BaseCompiler final {
   inline void branchTo(Assembler::Condition c, RegRef lhs, ImmWord rhs,
                        Label* l);
 
+#ifdef JS_CODEGEN_X86
+  // Store r in tls scratch storage after first loading the tls from the frame
+  // into the regForTls.  regForTls must be neither of the registers in r.
+  void stashI64(RegPtr regForTls, RegI64 r);
+
+  // Load r from the tls scratch storage after first loading the tls from the
+  // frame into the regForTls.  regForTls can be one of the registers in r.
+  void unstashI64(RegPtr regForTls, RegI64 r);
+#endif
+
   //////////////////////////////////////////////////////////////////////
   //
   // Code generators for actual operations.
 
-#ifndef RABALDR_INT_DIV_I64_CALLOUT
-  void quotientI64(RegI64 rhs, RegI64 srcDest, RegI64 reserved,
-                   IsUnsigned isUnsigned, bool isConst, int64_t c);
-  void remainderI64(RegI64 rhs, RegI64 srcDest, RegI64 reserved,
-                    IsUnsigned isUnsigned, bool isConst, int64_t c);
-#endif
+  template <typename RegType, typename IntType>
+  void quotientOrRemainder(RegType rs, RegType rsd, RegType reserved,
+                           IsUnsigned isUnsigned, ZeroOnOverflow zeroOnOverflow,
+                           bool isConst, IntType c,
+                           void (*operate)(MacroAssembler&, RegType, RegType,
+                                           RegType, IsUnsigned));
 
   [[nodiscard]] bool truncateF32ToI32(RegF32 src, RegI32 dest,
                                       TruncFlags flags);
@@ -1050,63 +1078,107 @@ struct BaseCompiler final {
   void bceCheckLocal(MemoryAccessDesc* access, AccessCheck* check,
                      uint32_t local);
   void bceLocalIsUpdated(uint32_t local);
-  void prepareMemoryAccess(MemoryAccessDesc* access, AccessCheck* check,
-                           RegI32 tls, RegI32 ptr);
 
-#if defined(JS_CODEGEN_X64) || defined(JS_CODEGEN_ARM) ||      \
-    defined(JS_CODEGEN_ARM64) || defined(JS_CODEGEN_MIPS32) || \
-    defined(JS_CODEGEN_MIPS64)
+  // Fold offsets into ptr and bounds check as necessary.  The tls will be valid
+  // in cases where it's needed.
+  template <typename RegIndexType>
+  void prepareMemoryAccess(MemoryAccessDesc* access, AccessCheck* check,
+                           RegPtr tls, RegIndexType ptr);
+
+  void branchAddNoOverflow(uint64_t offset, RegI32 ptr, Label* ok);
+  void branchTestLowZero(RegI32 ptr, Imm32 mask, Label* ok);
+  void boundsCheck4GBOrLargerAccess(RegPtr tls, RegI32 ptr, Label* ok);
+  void boundsCheckBelow4GBAccess(RegPtr tls, RegI32 ptr, Label* ok);
+
+  void branchAddNoOverflow(uint64_t offset, RegI64 ptr, Label* ok);
+  void branchTestLowZero(RegI64 ptr, Imm32 mask, Label* ok);
+  void boundsCheck4GBOrLargerAccess(RegPtr tls, RegI64 ptr, Label* ok);
+  void boundsCheckBelow4GBAccess(RegPtr tls, RegI64 ptr, Label* ok);
+
+#if defined(RABALDR_HAS_HEAPREG)
+  template <typename RegIndexType>
   BaseIndex prepareAtomicMemoryAccess(MemoryAccessDesc* access,
-                                      AccessCheck* check, RegI32 tls,
-                                      RegI32 ptr);
-#elif defined(JS_CODEGEN_X86)
-  // Some consumers depend on the address not retaining tls, as tls may be the
-  // scratch register.
-  Address prepareAtomicMemoryAccess(MemoryAccessDesc* access,
-                                    AccessCheck* check, RegI32 tls, RegI32 ptr);
+                                      AccessCheck* check, RegPtr tls,
+                                      RegIndexType ptr);
 #else
+  // Some consumers depend on the returned Address not incorporating tls, as tls
+  // may be the scratch register.
+  template <typename RegIndexType>
   Address prepareAtomicMemoryAccess(MemoryAccessDesc* access,
-                                    AccessCheck* check, RegI32 tls, RegI32 ptr);
+                                    AccessCheck* check, RegPtr tls,
+                                    RegIndexType ptr);
 #endif
+
+  template <typename RegIndexType>
   void computeEffectiveAddress(MemoryAccessDesc* access);
+
   [[nodiscard]] bool needTlsForAccess(const AccessCheck& check);
 
   // ptr and dest may be the same iff dest is I32.
   // This may destroy ptr even if ptr and dest are not the same.
-  [[nodiscard]] bool load(MemoryAccessDesc* access, AccessCheck* check,
-                          RegI32 tls, RegI32 ptr, AnyReg dest, RegI32 temp);
+  void executeLoad(MemoryAccessDesc* access, AccessCheck* check, RegPtr tls,
+                   RegI32 ptr, AnyReg dest, RegI32 temp);
+  void load(MemoryAccessDesc* access, AccessCheck* check, RegPtr tls,
+            RegI32 ptr, AnyReg dest, RegI32 temp);
+#ifdef ENABLE_WASM_MEMORY64
+  void load(MemoryAccessDesc* access, AccessCheck* check, RegPtr tls,
+            RegI64 ptr, AnyReg dest, RegI64 temp);
+#endif
+
+  template <typename RegType>
+  void doLoadCommon(MemoryAccessDesc* access, AccessCheck check, ValType type);
+
+  void loadCommon(MemoryAccessDesc* access, AccessCheck check, ValType type);
 
   // ptr and src must not be the same register.
   // This may destroy ptr and src.
-  [[nodiscard]] bool store(MemoryAccessDesc* access, AccessCheck* check,
-                           RegI32 tls, RegI32 ptr, AnyReg src, RegI32 temp);
+  void executeStore(MemoryAccessDesc* access, AccessCheck* check, RegPtr tls,
+                    RegI32 ptr, AnyReg src, RegI32 temp);
+  void store(MemoryAccessDesc* access, AccessCheck* check, RegPtr tls,
+             RegI32 ptr, AnyReg src, RegI32 temp);
+#ifdef ENABLE_WASM_MEMORY64
+  void store(MemoryAccessDesc* access, AccessCheck* check, RegPtr tls,
+             RegI64 ptr, AnyReg src, RegI64 temp);
+#endif
 
-  template <typename T>
-  void atomicRMW32(const MemoryAccessDesc& access, T srcAddr, AtomicOp op,
-                   RegI32 rv, RegI32 rd, const AtomicRMW32Temps& temps);
+  template <typename RegType>
+  void doStoreCommon(MemoryAccessDesc* access, AccessCheck check,
+                     ValType resultType);
 
-  // On x86, V is Address.  On other platforms, it is Register64.
-  // T is BaseIndex or Address.
-  template <typename T, typename V>
-  void atomicRMW64(const MemoryAccessDesc& access, const T& srcAddr,
-                   AtomicOp op, V value, Register64 temp, Register64 rd);
+  void storeCommon(MemoryAccessDesc* access, AccessCheck check,
+                   ValType resultType);
 
-  template <typename T>
-  void atomicCmpXchg32(const MemoryAccessDesc& access, T srcAddr,
-                       RegI32 rexpect, RegI32 rnew, RegI32 rd,
-                       const AtomicCmpXchg32Temps& temps);
+  void atomicLoad(MemoryAccessDesc* access, ValType type);
+#if !defined(JS_64BIT)
+  template <typename RegIndexType>
+  void atomicLoad64(MemoryAccessDesc* desc);
+#endif
 
-  template <typename T>
-  void atomicXchg32(const MemoryAccessDesc& access, T srcAddr, RegI32 rv,
-                    RegI32 rd, const AtomicXchg32Temps& temps);
+  void atomicStore(MemoryAccessDesc* access, ValType type);
 
-  bool atomicCmpXchg(MemoryAccessDesc* access, ValType type);
-  bool atomicLoad(MemoryAccessDesc* access, ValType type);
-  bool atomicRMW(MemoryAccessDesc* access, ValType type, AtomicOp op);
-  bool atomicStore(MemoryAccessDesc* access, ValType type);
-  bool atomicXchg(MemoryAccessDesc* desc, ValType type);
+  void atomicRMW(MemoryAccessDesc* access, ValType type, AtomicOp op);
+  template <typename RegIndexType>
+  void atomicRMW32(MemoryAccessDesc* access, ValType type, AtomicOp op);
+  template <typename RegIndexType>
+  void atomicRMW64(MemoryAccessDesc* access, ValType type, AtomicOp op);
 
-  RegI32 popMemory32Access(MemoryAccessDesc* access, AccessCheck* check);
+  void atomicXchg(MemoryAccessDesc* desc, ValType type);
+  template <typename RegIndexType>
+  void atomicXchg64(MemoryAccessDesc* access, WantResult wantResult);
+  template <typename RegIndexType>
+  void atomicXchg32(MemoryAccessDesc* access, ValType type);
+
+  void atomicCmpXchg(MemoryAccessDesc* access, ValType type);
+  template <typename RegIndexType>
+  void atomicCmpXchg32(MemoryAccessDesc* access, ValType type);
+  template <typename RegIndexType>
+  void atomicCmpXchg64(MemoryAccessDesc* access, ValType type);
+
+  template <typename RegType>
+  RegType popConstMemoryAccess(MemoryAccessDesc* access, AccessCheck* check);
+  template <typename RegType>
+  RegType popMemoryAccess(MemoryAccessDesc* access, AccessCheck* check);
+
   void pushHeapBase();
 
   ////////////////////////////////////////////////////////////////////////////
@@ -1119,10 +1191,12 @@ struct BaseCompiler final {
   // operation being targeted.
 
   RegI32 needRotate64Temp();
-  void pop2xI32ForMulDivI32(RegI32* r0, RegI32* r1, RegI32* reserved);
-  void pop2xI64ForMulI64(RegI64* r0, RegI64* r1, RegI32* temp,
-                         RegI64* reserved);
-  void pop2xI64ForDivI64(RegI64* r0, RegI64* r1, RegI64* reserved);
+  void popAndAllocateForDivAndRemI32(RegI32* r0, RegI32* r1, RegI32* reserved);
+  void popAndAllocateForMulI64(RegI64* r0, RegI64* r1, RegI32* temp);
+#ifndef RABALDR_INT_DIV_I64_CALLOUT
+  void popAndAllocateForDivAndRemI64(RegI64* r0, RegI64* r1, RegI64* reserved,
+                                     IsRemainder isRemainder);
+#endif
   RegI32 popI32RhsForShift();
   RegI32 popI32RhsForShiftI64();
   RegI64 popI64RhsForShift();
@@ -1148,6 +1222,9 @@ struct BaseCompiler final {
   // Abstracted helper for throwing, used for throw, rethrow, and rethrowing
   // at the end of a series of catch blocks (if none matched the exception).
   [[nodiscard]] bool throwFrom(RegRef exn, uint32_t lineOrBytecode);
+
+  // Load a pending exception object from the TlsData.
+  void loadPendingException(Register dest);
 #endif
 
   ////////////////////////////////////////////////////////////
@@ -1251,15 +1328,11 @@ struct BaseCompiler final {
   [[nodiscard]] bool emitTeeLocal();
   [[nodiscard]] bool emitGetGlobal();
   [[nodiscard]] bool emitSetGlobal();
-  [[nodiscard]] RegI32 maybeLoadTlsForAccess(const AccessCheck& check);
-  [[nodiscard]] RegI32 maybeLoadTlsForAccess(const AccessCheck& check,
-                                             RegI32 specific);
+  [[nodiscard]] RegPtr maybeLoadTlsForAccess(const AccessCheck& check);
+  [[nodiscard]] RegPtr maybeLoadTlsForAccess(const AccessCheck& check,
+                                             RegPtr specific);
   [[nodiscard]] bool emitLoad(ValType type, Scalar::Type viewType);
-  [[nodiscard]] bool loadCommon(MemoryAccessDesc* access, AccessCheck check,
-                                ValType type);
   [[nodiscard]] bool emitStore(ValType resultType, Scalar::Type viewType);
-  [[nodiscard]] bool storeCommon(MemoryAccessDesc* access, AccessCheck check,
-                                 ValType resultType);
   [[nodiscard]] bool emitSelect(bool typed);
 
   template <bool isSetLocal>
@@ -1367,7 +1440,6 @@ struct BaseCompiler final {
   [[nodiscard]] inline bool emitInstanceCallOp(
       const SymbolicAddressSignature& fn, R reader);
 
-  void emitMultiplyI32();
   void emitMultiplyI64();
   void emitQuotientI32();
   void emitQuotientU32();
@@ -1433,19 +1505,22 @@ struct BaseCompiler final {
                                    AtomicOp op);
   [[nodiscard]] bool emitAtomicStore(ValType type, Scalar::Type viewType);
   [[nodiscard]] bool emitWait(ValType type, uint32_t byteSize);
+  [[nodiscard]] bool atomicWait(ValType type, MemoryAccessDesc* access,
+                                uint32_t lineOrBytecode);
   [[nodiscard]] bool emitWake();
+  [[nodiscard]] bool atomicWake(MemoryAccessDesc* access,
+                                uint32_t lineOrBytecode);
   [[nodiscard]] bool emitFence();
   [[nodiscard]] bool emitAtomicXchg(ValType type, Scalar::Type viewType);
-  void emitAtomicXchg64(MemoryAccessDesc* access, WantResult wantResult);
   [[nodiscard]] bool emitMemInit();
   [[nodiscard]] bool emitMemCopy();
-  [[nodiscard]] bool emitMemCopyCall(uint32_t lineOrBytecode);
-  [[nodiscard]] bool emitMemCopyInline();
+  [[nodiscard]] bool memCopyCall(uint32_t lineOrBytecode);
+  void memCopyInlineM32();
   [[nodiscard]] bool emitTableCopy();
   [[nodiscard]] bool emitDataOrElemDrop(bool isData);
   [[nodiscard]] bool emitMemFill();
-  [[nodiscard]] bool emitMemFillCall(uint32_t lineOrBytecode);
-  [[nodiscard]] bool emitMemFillInline();
+  [[nodiscard]] bool memFillCall(uint32_t lineOrBytecode);
+  void memFillInlineM32();
   [[nodiscard]] bool emitTableInit();
   [[nodiscard]] bool emitTableFill();
   [[nodiscard]] bool emitTableGet();
@@ -1487,12 +1562,11 @@ struct BaseCompiler final {
 #ifdef ENABLE_WASM_SIMD
   void emitVectorAndNot();
 
-  [[nodiscard]] bool loadSplat(MemoryAccessDesc* access);
-  [[nodiscard]] bool loadZero(MemoryAccessDesc* access);
-  [[nodiscard]] bool loadExtend(MemoryAccessDesc* access,
-                                Scalar::Type viewType);
-  [[nodiscard]] bool loadLane(MemoryAccessDesc* access, uint32_t laneIndex);
-  [[nodiscard]] bool storeLane(MemoryAccessDesc* access, uint32_t laneIndex);
+  void loadSplat(MemoryAccessDesc* access);
+  void loadZero(MemoryAccessDesc* access);
+  void loadExtend(MemoryAccessDesc* access, Scalar::Type viewType);
+  void loadLane(MemoryAccessDesc* access, uint32_t laneIndex);
+  void storeLane(MemoryAccessDesc* access, uint32_t laneIndex);
 
   [[nodiscard]] bool emitLoadSplat(Scalar::Type viewType);
   [[nodiscard]] bool emitLoadZero(Scalar::Type viewType);
@@ -1500,6 +1574,7 @@ struct BaseCompiler final {
   [[nodiscard]] bool emitLoadLane(uint32_t laneSize);
   [[nodiscard]] bool emitStoreLane(uint32_t laneSize);
   [[nodiscard]] bool emitVectorShuffle();
+  [[nodiscard]] bool emitVectorLaneSelect();
 #  if defined(JS_CODEGEN_X86) || defined(JS_CODEGEN_X64)
   [[nodiscard]] bool emitVectorShiftRightI64x2();
 #  endif

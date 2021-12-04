@@ -1727,6 +1727,60 @@ describe("ASRouter", () => {
     });
   });
 
+  describe("#reachEvent", () => {
+    let experimentAPIStub;
+    let messageGroups = ["cfr", "moments-page", "infobar", "spotlight"];
+    beforeEach(() => {
+      let getExperimentStub = sandbox.stub();
+      let getAllBranchesStub = sandbox.stub();
+      messageGroups.forEach(feature => {
+        getExperimentStub.withArgs({ featureId: feature }).returns({
+          slug: `slug-${feature}`,
+          branch: {
+            slug: `branch-${feature}`,
+            features: [{ featureId: feature, value: null }],
+            [feature]: { value: { id: "unit-test" } },
+          },
+        });
+        getAllBranchesStub.withArgs(`slug-${feature}`).resolves([
+          {
+            slug: `other-branch-${feature}`,
+            [feature]: { value: { trigger: "unit-test" } },
+          },
+        ]);
+      });
+      experimentAPIStub = {
+        ready: sandbox.stub().resolves(),
+        getExperiment: getExperimentStub,
+        getAllBranches: getAllBranchesStub,
+      };
+      globals.set("ExperimentAPI", experimentAPIStub);
+    });
+    afterEach(() => {
+      sandbox.restore();
+    });
+    it("should tag `forReachEvent`/`forExposureEvent` for all the expected message types", async () => {
+      // This should match the `providers.messaging-experiments`
+      let response = await MessageLoaderUtils.loadMessagesForProvider({
+        type: "remote-experiments",
+        messageGroups,
+      });
+
+      assert.calledOnce(experimentAPIStub.ready);
+      // 1 message for reach 1 for expose
+      assert.property(response, "messages");
+      assert.lengthOf(response.messages, messageGroups.length * 2);
+      assert.lengthOf(
+        response.messages.filter(m => m.forReachEvent),
+        messageGroups.length
+      );
+      assert.lengthOf(
+        response.messages.filter(m => m.forExposureEvent),
+        messageGroups.length
+      );
+    });
+  });
+
   describe("#sendTriggerMessage", () => {
     it("should pass the trigger to ASRouterTargeting when sending trigger message", async () => {
       await Router.setState({
@@ -2591,9 +2645,8 @@ describe("ASRouter", () => {
       const enrollment = {
         branch: {
           slug: "branch01",
-          feature: {
+          asrouter: {
             featureId: "asrouter",
-            enabled: true,
             value: { id: "id01", trigger: { id: "openURL" } },
           },
         },
@@ -2613,10 +2666,9 @@ describe("ASRouter", () => {
       const enrollment = {
         branch: {
           slug: "branch01",
-          feature: {
+          asrouter: {
             featureId: "asrouter",
-            enabled: false,
-            value: { id: "id01", trigger: { id: "openURL" } },
+            value: {},
           },
         },
       };
@@ -2636,9 +2688,8 @@ describe("ASRouter", () => {
         slug: "exp01",
         branch: {
           slug: "branch01",
-          feature: {
+          cfr: {
             featureId: "cfr",
-            enabled: true,
             value: { id: "id01", trigger: { id: "openURL" } },
           },
         },
@@ -2649,18 +2700,16 @@ describe("ASRouter", () => {
         enrollment.branch,
         {
           slug: "branch02",
-          feature: {
+          cfr: {
             featureId: "cfr",
-            enabled: true,
             value: { id: "id02", trigger: { id: "openURL" } },
           },
         },
         {
           // This branch should not be loaded as it doesn't have the trigger
           slug: "branch03",
-          feature: {
+          cfr: {
             featureId: "cfr",
-            enabled: true,
             value: { id: "id03" },
           },
         },
@@ -2687,10 +2736,9 @@ describe("ASRouter", () => {
         slug: "exp01",
         branch: {
           slug: "branch01",
-          feature: {
+          cfr: {
             featureId: "cfr",
-            enabled: false,
-            value: { id: "id01", trigger: { id: "openURL" } },
+            value: {},
           },
         },
       };
@@ -2700,18 +2748,16 @@ describe("ASRouter", () => {
         enrollment.branch,
         {
           slug: "branch02",
-          feature: {
+          cfr: {
             featureId: "cfr",
-            enabled: true,
             value: { id: "id02", trigger: { id: "openURL" } },
           },
         },
         {
           // This branch should not be loaded as it doesn't have the trigger
           slug: "branch03",
-          feature: {
+          cfr: {
             featureId: "cfr",
-            enabled: true,
             value: { id: "id03" },
           },
         },
@@ -2742,6 +2788,24 @@ describe("ASRouter", () => {
         .resolves([{ id: "message_1" }]);
       spy = sandbox.spy();
       global.Downloader.prototype.download = spy;
+    });
+    it("should be called with the expected dir path", async () => {
+      const dlSpy = sandbox.spy(global, "Downloader");
+
+      sandbox
+        .stub(global.Services.locale, "appLocaleAsBCP47")
+        .get(() => "en-US");
+      sandbox.stub(global.RemoteL10n, "isLocaleSupported").returns(true);
+
+      await MessageLoaderUtils._remoteSettingsLoader(provider, {});
+
+      assert.calledWith(
+        dlSpy,
+        "main",
+        "ms-language-packs",
+        "browser",
+        "newtab"
+      );
     });
     it("should allow fetch for known locales", async () => {
       sandbox

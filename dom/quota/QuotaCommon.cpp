@@ -130,9 +130,10 @@ Result<nsCOMPtr<nsIFile>, nsresult> QM_NewLocalFile(const nsAString& aPath) {
   MOZ_ASSERT(gUseDOSDevicePathSyntax != -1);
 
   if (gUseDOSDevicePathSyntax) {
-    QM_TRY_INSPECT(const auto& winFile,
-                   ToResultGet<nsCOMPtr<nsILocalFileWin>>(
-                       MOZ_SELECT_OVERLOAD(do_QueryInterface), file));
+    QM_TRY_INSPECT(
+        const auto& winFile,
+        MOZ_TO_RESULT_GET_TYPED(nsCOMPtr<nsILocalFileWin>,
+                                MOZ_SELECT_OVERLOAD(do_QueryInterface), file));
 
     MOZ_ASSERT(winFile);
     winFile->SetUseDOSDevicePathSyntax(true);
@@ -162,7 +163,7 @@ Result<nsCOMPtr<nsIFile>, nsresult> CloneFileAndAppend(
   QM_TRY_UNWRAP(auto resultFile, MOZ_TO_RESULT_INVOKE_TYPED(nsCOMPtr<nsIFile>,
                                                             aDirectory, Clone));
 
-  QM_TRY(resultFile->Append(aPathElement));
+  QM_TRY(MOZ_TO_RESULT(resultFile->Append(aPathElement)));
 
   return resultFile;
 }

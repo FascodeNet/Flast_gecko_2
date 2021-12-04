@@ -116,6 +116,7 @@ const PREFERENCES_PANES = [
   "paneSync",
   "paneContainers",
   "paneExperimental",
+  "paneMoreFromMozilla",
 ];
 
 const IGNORABLE_EVENTS = new WeakMap();
@@ -431,7 +432,7 @@ let BrowserUsageTelemetry = {
     this._setupAfterRestore();
     this._inited = true;
 
-    Services.prefs.addObserver("browser.tabs.drawInTitlebar", this);
+    Services.prefs.addObserver("browser.tabs.inTitlebar", this);
 
     this._recordUITelemetry();
 
@@ -494,12 +495,10 @@ let BrowserUsageTelemetry = {
         break;
       case "nsPref:changed":
         switch (data) {
-          case "browser.tabs.drawInTitlebar":
+          case "browser.tabs.inTitlebar":
             this._recordWidgetChange(
               "titlebar",
-              Services.prefs.getBoolPref("browser.tabs.drawInTitlebar")
-                ? "off"
-                : "on",
+              Services.appinfo.drawInTitlebar ? "off" : "on",
               "pref"
             );
             break;
@@ -601,12 +600,7 @@ let BrowserUsageTelemetry = {
     widgetMap.set("menu-toolbar", menuBarHidden ? "off" : "on");
 
     // Drawing in the titlebar means not showing the titlebar, hence the negation.
-    widgetMap.set(
-      "titlebar",
-      Services.prefs.getBoolPref("browser.tabs.drawInTitlebar", true)
-        ? "off"
-        : "on"
-    );
+    widgetMap.set("titlebar", Services.appinfo.drawInTitlebar ? "off" : "on");
 
     for (let area of CustomizableUI.areas) {
       if (!(area in BROWSER_UI_CONTAINER_IDS)) {
@@ -829,7 +823,7 @@ let BrowserUsageTelemetry = {
     let source = this._getWidgetContainer(node);
 
     if (item && source) {
-      let scalar = `browser.ui.interaction.${source.replace("-", "_")}`;
+      let scalar = `browser.ui.interaction.${source.replace(/-/g, "_")}`;
       Services.telemetry.keyedScalarAdd(scalar, telemetryId(item), 1);
       if (SET_USAGECOUNT_PREF_BUTTONS.includes(item)) {
         let pref = `browser.engagement.${item}.used-count`;

@@ -270,7 +270,7 @@ static sk_sp<SkImage> GetSkImageForSurface(SourceSurface* aSurface,
                   map.mData, map.mStride);
   sk_sp<SkImage> image = SkImage::MakeFromRaster(pixmap, releaseProc, surf);
   if (!image) {
-    ReleaseTemporarySurface(nullptr, surf);
+    releaseProc(map.mData, surf);
     gfxDebug() << "Failed making Skia raster image for temporary surface";
   }
 
@@ -573,13 +573,25 @@ static void SetPaintPattern(SkPaint& aPaint, const Pattern& aPattern,
 
       if (!pat.mSamplingRect.IsEmpty()) {
         image = ExtractSubset(image, pat.mSamplingRect);
+        if (!image) {
+          aPaint.setColor(SK_ColorTRANSPARENT);
+          break;
+        }
         mat.preTranslate(pat.mSamplingRect.X(), pat.mSamplingRect.Y());
       }
 
       SkTileMode xTile = ExtendModeToTileMode(pat.mExtendMode, Axis::X_AXIS);
       SkTileMode yTile = ExtendModeToTileMode(pat.mExtendMode, Axis::Y_AXIS);
 
-      aPaint.setShader(image->makeShader(xTile, yTile, &mat));
+      sk_sp<SkShader> shader = image->makeShader(xTile, yTile, &mat);
+      if (shader) {
+        aPaint.setShader(shader);
+      } else {
+        gfxDebug() << "Failed creating Skia surface shader: x-tile="
+                   << (int)xTile << " y-tile=" << (int)yTile
+                   << " matrix=" << (mat.isFinite() ? "finite" : "non-finite");
+        aPaint.setColor(SK_ColorTRANSPARENT);
+      }
 
       if (pat.mSamplingFilter == SamplingFilter::POINT) {
         aPaint.setFilterQuality(kNone_SkFilterQuality);

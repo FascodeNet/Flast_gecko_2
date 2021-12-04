@@ -666,7 +666,7 @@ static void CollectImageURLsForProperty(nsCSSPropertyID aProp,
 
   switch (aProp) {
     case eCSSProperty_cursor:
-      for (auto& image : aStyle.StyleUI()->mCursor.images.AsSpan()) {
+      for (auto& image : aStyle.StyleUI()->Cursor().images.AsSpan()) {
         AddImageURL(image.image, aURLs);
       }
       break;
@@ -1865,6 +1865,11 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetTextDecoration() {
         getPropertyValue(eCSSProperty_text_decoration_line));
   }
 
+  if (!textReset->mTextDecorationThickness.IsAuto()) {
+    valueList->AppendCSSValue(
+        getPropertyValue(eCSSProperty_text_decoration_thickness));
+  }
+
   if (textReset->mTextDecorationStyle != NS_STYLE_TEXT_DECORATION_STYLE_SOLID) {
     valueList->AppendCSSValue(
         getPropertyValue(eCSSProperty_text_decoration_style));
@@ -1874,11 +1879,6 @@ already_AddRefed<CSSValue> nsComputedDOMStyle::DoGetTextDecoration() {
   RefPtr<nsROCSSPrimitiveValue> val = new nsROCSSPrimitiveValue;
   SetValueFromComplexColor(val, StyleTextReset()->mTextDecorationColor);
   valueList->AppendCSSValue(val.forget());
-
-  if (!textReset->mTextDecorationThickness.IsAuto()) {
-    valueList->AppendCSSValue(
-        getPropertyValue(eCSSProperty_text_decoration_thickness));
-  }
 
   return valueList.forget();
 }
@@ -2252,8 +2252,8 @@ static void SetValueToExtremumLength(nsROCSSPrimitiveValue* aValue,
       return aValue->SetString("min-content");
     case nsIFrame::ExtremumLength::MozAvailable:
       return aValue->SetString("-moz-available");
-    case nsIFrame::ExtremumLength::MozFitContent:
-      return aValue->SetString("-moz-fit-content");
+    case nsIFrame::ExtremumLength::FitContent:
+      return aValue->SetString("fit-content");
     case nsIFrame::ExtremumLength::FitContentFunction:
       MOZ_ASSERT_UNREACHABLE("fit-content() should be handled separately");
   }
@@ -2269,7 +2269,7 @@ void nsComputedDOMStyle::SetValueFromFitContentFunction(
   nsAutoString fitContentStr;
   fitContentStr.AppendLiteral("fit-content(");
   fitContentStr.Append(argumentStr);
-  fitContentStr.Append(char16_t(')'));
+  fitContentStr.Append(u')');
   aValue->SetString(fitContentStr);
 }
 

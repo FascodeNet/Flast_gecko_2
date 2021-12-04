@@ -106,13 +106,7 @@ export interface State {
   recordingState: RecordingState;
   recordingUnexpectedlyStopped: boolean;
   isSupportedPlatform: boolean | null;
-  interval: number;
-  entries: number;
-  features: string[];
-  threads: string[];
-  objdirs: string[];
-  presetName: string;
-  profilerViewMode: ProfilerViewMode | undefined;
+  recordingSettings: RecordingSettings;
   initializedValues: InitializedValues | null;
   promptEnvRestart: null | string;
 }
@@ -176,8 +170,6 @@ export type ReceiveProfile = (
   getSymbolTableCallback: GetSymbolTableCallback
 ) => void;
 
-export type SetRecordingSettings = (settings: RecordingSettings) => void;
-
 /**
  * This is the type signature for a function to restart the browser with a given
  * environment variable. Currently only implemented for the popup.
@@ -191,10 +183,7 @@ export type RestartBrowserWithEnvironmentVariable = (
  * This is the type signature for the event listener that's called once the
  * profile has been obtained.
  */
-export type OnProfileReceived = (
-  profile: MinimallyTypedGeckoProfile,
-  profilerViewMode: ProfilerViewMode | undefined
-) => void;
+export type OnProfileReceived = (profile: MinimallyTypedGeckoProfile) => void;
 
 /**
  * This is the type signature for a function to query the browser for an
@@ -233,8 +222,6 @@ export interface RecordingSettings {
 export type Reducer<S> = (state: S | undefined, action: Action) => S;
 
 export interface InitializedValues {
-  // A function to set the recording settings.
-  setRecordingSettings: SetRecordingSettings;
   // The current list of presets, loaded in from a JSM.
   presets: Presets;
   // Determine the current page context.
@@ -305,25 +292,25 @@ export type Action =
   | {
       type: "INITIALIZE_STORE";
       isSupportedPlatform: boolean;
-      setRecordingSettings: SetRecordingSettings;
       presets: Presets;
       pageContext: PageContext;
       openRemoteDevTools?: () => void;
-      recordingSettingsFromPreferences: RecordingSettings;
       supportedFeatures: string[];
     }
   | {
       type: "CHANGE_PRESET";
       presetName: string;
       preset: PresetDefinition | undefined;
+    }
+  | {
+      type: "UPDATE_SETTINGS_FROM_PREFERENCES";
+      recordingSettingsFromPreferences: RecordingSettings;
     };
 
 export interface InitializeStoreValues {
   isSupportedPlatform: boolean;
-  setRecordingSettings: SetRecordingSettings;
   presets: Presets;
   pageContext: PageContext;
-  recordingSettings: RecordingSettings;
   supportedFeatures: string[];
   openRemoteDevTools?: () => void;
 }
@@ -402,6 +389,26 @@ export interface PerformancePref {
   PopupFeatureFlag: "devtools.performance.popup.feature-flag";
 }
 
+/* The next 2 types bring some duplication from gecko.d.ts, but this is simpler
+ * this way. */
+
+/**
+ * This is a function called by a preference observer.
+ */
+export type PrefObserverFunction = (
+  aSubject: nsIPrefBranch,
+  aTopic: "nsPref:changed",
+  aData: string
+) => unknown;
+
+/**
+ * This is the type of an observer we can pass to Service.prefs.addObserver and
+ * Service.prefs.removeObserver.
+ */
+export type PrefObserver =
+  | PrefObserverFunction
+  | { observe: PrefObserverFunction };
+
 /**
  * Scale a number value.
  */
@@ -423,14 +430,22 @@ export interface ScaleFunctions {
 export type ProfilerViewMode = "full" | "active-tab" | "origins";
 
 export interface PresetDefinition {
-  label: string;
-  description: string;
   entries: number;
   interval: number;
   features: string[];
   threads: string[];
   duration: number;
   profilerViewMode?: ProfilerViewMode;
+  l10nIds: {
+    popup: {
+      label: string;
+      description: string;
+    };
+    devtools: {
+      label: string;
+      description: string;
+    };
+  };
 }
 
 export interface Presets {

@@ -39,19 +39,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#if defined(_WIN32) || defined(_WIN64)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif  // NOMINMAX
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
-
 #include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "jxl/encode.h"
 #include "lib/jxl/base/compiler_specific.h"
 #include "lib/jxl/color_encoding_internal.h"
 #include "lib/jxl/color_management.h"
@@ -63,24 +56,43 @@
 #include "png.h" /* original (unpatched) libpng is ok */
 
 namespace jxl {
+namespace extras {
 
 namespace {
+
+constexpr bool isAbc(char c) {
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
 #define notabc(c) ((c) < 65 || (c) > 122 || ((c) > 90 && (c) < 97))
 
-#define id_IHDR 0x52444849
-#define id_acTL 0x4C546361
-#define id_fcTL 0x4C546366
-#define id_IDAT 0x54414449
-#define id_fdAT 0x54416466
-#define id_IEND 0x444E4549
+constexpr uint32_t kId_IHDR = 0x52444849;
+constexpr uint32_t kId_acTL = 0x4C546361;
+constexpr uint32_t kId_fcTL = 0x4C546366;
+constexpr uint32_t kId_IDAT = 0x54414449;
+constexpr uint32_t kId_fdAT = 0x54416466;
+constexpr uint32_t kId_IEND = 0x444E4549;
 
 struct CHUNK {
   unsigned char* p;
   unsigned int size;
 };
+
 struct APNGFrame {
   unsigned char *p, **rows;
   unsigned int w, h, delay_num, delay_den;
+};
+
+struct Reader {
+  const uint8_t* next;
+  const uint8_t* last;
+  bool Read(void* data, size_t len) {
+    size_t cap = last - next;
+    size_t to_copy = std::min(cap, len);
+    memcpy(data, next, to_copy);
+    next += to_copy;
+    return (len == to_copy);
+  }
+  bool Eof() { return next == last; }
 };
 
 const unsigned long cMaxPNGSize = 1000000UL;
@@ -102,11 +114,11 @@ void row_fn(png_structp png_ptr, png_bytep new_row, png_uint_32 row_num,
   png_progressive_combine_row(png_ptr, frame->rows[row_num], new_row);
 }
 
-inline unsigned int read_chunk(FILE* f, CHUNK* pChunk) {
+inline unsigned int read_chunk(Reader* r, CHUNK* pChunk) {
   unsigned char len[4];
   pChunk->size = 0;
   pChunk->p = 0;
-  if (fread(&len, 4, 1, f) == 1) {
+  if (r->Read(&len, 4)) {
     const auto size = png_get_uint_32(len);
     // Check first, to avoid overflow.
     if (size > kMaxPNGChunkSize) {
@@ -116,8 +128,9 @@ inline unsigned int read_chunk(FILE* f, CHUNK* pChunk) {
     pChunk->size = size + 12;
     pChunk->p = new unsigned char[pChunk->size];
     memcpy(pChunk->p, len, 4);
-    if (fread(pChunk->p + 4, pChunk->size - 4, 1, f) == 1)
+    if (r->Read(pChunk->p + 4, pChunk->size - 4)) {
       return *(unsigned int*)(pChunk->p + 4);
+    }
   }
   return 0;
 }
@@ -179,29 +192,13 @@ int processing_finish(png_structp png_ptr, png_infop info_ptr) {
   return 0;
 }
 
-#if defined(_WIN32) || defined(_WIN64)
-FILE* fmemopen(void* buf, size_t size, const char* mode) {
-  char temp[999];
-  if (!GetTempPath(sizeof(temp), temp)) return nullptr;
-
-  char pathname[999];
-  if (!GetTempFileName(temp, "jpegxl", 0, pathname)) return nullptr;
-
-  FILE* f = fopen(pathname, "wb");
-  if (f == nullptr) return nullptr;
-  fwrite(buf, 1, size, f);
-  JXL_CHECK(fclose(f) == 0);
-
-  return fopen(pathname, mode);
-}
-
-#endif
-
 }  // namespace
 
-Status DecodeImageAPNG(Span<const uint8_t> bytes, ThreadPool* pool,
-                       CodecInOut* io) {
-  FILE* f;
+Status DecodeImageAPNG(const Span<const uint8_t> bytes,
+                       const ColorHints& color_hints,
+                       const SizeConstraints& constraints,
+                       PackedPixelFile* ppf) {
+  Reader r;
   unsigned int id, i, j, w, h, w0, h0, x0, y0;
   unsigned int delay_num, delay_den, dop, bop, rowbytes, imagesize;
   unsigned char sig[8];
@@ -216,38 +213,48 @@ Status DecodeImageAPNG(Span<const uint8_t> bytes, ThreadPool* pool,
   bool all_dispose_bg = true;
   APNGFrame frameRaw = {};
 
-  if (!(f = fmemopen((void*)bytes.data(), bytes.size(), "rb"))) {
-    return JXL_FAILURE("Failed to fmemopen");
-  }
+  r = {bytes.data(), bytes.data() + bytes.size()};
   // Not an aPNG => not an error
   unsigned char png_signature[8] = {137, 80, 78, 71, 13, 10, 26, 10};
-  if (fread(sig, 1, 8, f) != 8 || memcmp(sig, png_signature, 8) != 0) {
-    fclose(f);
+  if (!r.Read(sig, 8) || memcmp(sig, png_signature, 8) != 0) {
     return false;
   }
-  id = read_chunk(f, &chunkIHDR);
+  id = read_chunk(&r, &chunkIHDR);
 
-  io->frames.clear();
-  io->dec_pixels = 0;
-  io->metadata.m.SetUintSamples(8);
-  io->metadata.m.SetAlphaBits(8);
-  io->metadata.m.color_encoding =
-      ColorEncoding::SRGB();  // todo: get data from png metadata
-  (void)io->dec_hints.Foreach(
-      [](const std::string& key, const std::string& /*value*/) {
-        JXL_WARNING("APNG decoder ignoring %s hint", key.c_str());
-        return true;
-      });
+  // todo: get data from png metadata
+  JxlColorEncodingSetToSRGB(&ppf->color_encoding, /*is_gray=*/false);
+  JXL_RETURN_IF_ERROR(ApplyColorHints(color_hints, /*color_already_set=*/true,
+                                      /*is_gray=*/false, ppf));
+
+  // Only 8-bit supported.
+  ppf->info.bits_per_sample = 8;
+  ppf->info.exponent_bits_per_sample = 0;
+  ppf->info.alpha_bits = 8;
+  ppf->info.alpha_exponent_bits = 0;
+
+  ppf->info.num_color_channels = 3;  // RGBA
+  ppf->info.orientation = JXL_ORIENT_IDENTITY;
+
+  const JxlPixelFormat format{
+      /*num_channels=*/4,
+      /*data_type=*/JXL_TYPE_UINT8,
+      /*endianness=*/JXL_BIG_ENDIAN,
+      /*align=*/0,
+  };
+  ppf->frames.clear();
 
   bool errorstate = true;
-  if (id == id_IHDR && chunkIHDR.size == 25) {
+  if (id == kId_IHDR && chunkIHDR.size == 25) {
     w0 = w = png_get_uint_32(chunkIHDR.p + 8);
     h0 = h = png_get_uint_32(chunkIHDR.p + 12);
 
     if (w > cMaxPNGSize || h > cMaxPNGSize) {
-      fclose(f);
       return false;
     }
+
+    ppf->info.xsize = w;
+    ppf->info.ysize = h;
+    JXL_RETURN_IF_ERROR(VerifyDimensions(&constraints, w, h));
 
     x0 = 0;
     y0 = 0;
@@ -265,24 +272,28 @@ Status DecodeImageAPNG(Span<const uint8_t> bytes, ThreadPool* pool,
     if (!processing_start(png_ptr, info_ptr, (void*)&frameRaw, hasInfo,
                           chunkIHDR, chunksInfo)) {
       bool last_base_was_none = true;
-      while (!feof(f)) {
-        id = read_chunk(f, &chunk);
+      while (!r.Eof()) {
+        id = read_chunk(&r, &chunk);
         if (!id) break;
         JXL_ASSERT(chunk.p != nullptr);
 
-        if (id == id_acTL && !hasInfo && !isAnimated) {
+        if (id == kId_acTL && !hasInfo && !isAnimated) {
           isAnimated = true;
           skipFirst = true;
-          io->metadata.m.have_animation = true;
-          io->metadata.m.animation.tps_numerator = 1000;
-        } else if (id == id_IEND ||
-                   (id == id_fcTL && (!hasInfo || isAnimated))) {
+          ppf->info.have_animation = true;
+          ppf->info.animation.tps_numerator = 1000;
+          ppf->info.animation.tps_denominator = 1;
+        } else if (id == kId_IEND ||
+                   (id == kId_fcTL && (!hasInfo || isAnimated))) {
           if (hasInfo) {
             if (!processing_finish(png_ptr, info_ptr)) {
-              ImageBundle bundle(&io->metadata.m);
-              bundle.duration = delay_num * 1000 / delay_den;
-              bundle.origin.x0 = x0;
-              bundle.origin.y0 = y0;
+              // Allocates the frame buffer.
+              ppf->frames.emplace_back(w0, h0, format);
+              auto* frame = &ppf->frames.back();
+
+              frame->frame_info.duration = delay_num * 1000 / delay_den;
+              frame->x0 = x0;
+              frame->y0 = y0;
               // TODO(veluca): this could in principle be implemented.
               if (last_base_was_none && !all_dispose_bg &&
                   (x0 != 0 || y0 != 0 || w0 != w || h0 != h || bop != 0)) {
@@ -292,54 +303,32 @@ Status DecodeImageAPNG(Span<const uint8_t> bytes, ThreadPool* pool,
               }
               switch (dop) {
                 case 0:
-                  bundle.use_for_next_frame = true;
+                  frame->use_for_next_frame = true;
                   last_base_was_none = false;
                   all_dispose_bg = false;
                   break;
                 case 2:
-                  bundle.use_for_next_frame = false;
+                  frame->use_for_next_frame = false;
                   all_dispose_bg = false;
                   break;
                 default:
-                  bundle.use_for_next_frame = false;
+                  frame->use_for_next_frame = false;
                   last_base_was_none = true;
               }
-              bundle.blend = bop != 0;
-              io->dec_pixels += w0 * h0;
+              frame->blend = bop != 0;
 
-              Image3F sub_frame(w0, h0);
-              ImageF sub_frame_alpha(w0, h0);
               for (size_t y = 0; y < h0; ++y) {
-                float* const JXL_RESTRICT row_r = sub_frame.PlaneRow(0, y);
-                float* const JXL_RESTRICT row_g = sub_frame.PlaneRow(1, y);
-                float* const JXL_RESTRICT row_b = sub_frame.PlaneRow(2, y);
-                float* const JXL_RESTRICT row_alpha = sub_frame_alpha.Row(y);
-                uint8_t* const f = frameRaw.rows[y];
-                for (size_t x = 0; x < w0; ++x) {
-                  if (f[4 * x + 3] == 0) {
-                    row_alpha[x] = 0;
-                    row_r[x] = 0;
-                    row_g[x] = 0;
-                    row_b[x] = 0;
-                    continue;
-                  }
-                  row_r[x] = f[4 * x + 0] * (1.f / 255);
-                  row_g[x] = f[4 * x + 1] * (1.f / 255);
-                  row_b[x] = f[4 * x + 2] * (1.f / 255);
-                  row_alpha[x] = f[4 * x + 3] * (1.f / 255);
-                }
+                memcpy(static_cast<uint8_t*>(frame->color.pixels()) +
+                           frame->color.stride * y,
+                       frameRaw.rows[y], 4 * w0);
               }
-              bundle.SetFromImage(std::move(sub_frame), ColorEncoding::SRGB());
-              bundle.SetAlpha(std::move(sub_frame_alpha),
-                              /*alpha_is_premultiplied=*/false);
-              io->frames.push_back(std::move(bundle));
             } else {
               delete[] chunk.p;
               break;
             }
           }
 
-          if (id == id_IEND) {
+          if (id == kId_IEND) {
             errorstate = false;
             break;
           }
@@ -352,6 +341,8 @@ Status DecodeImageAPNG(Span<const uint8_t> bytes, ThreadPool* pool,
           delay_den = png_get_uint_16(chunk.p + 30);
           dop = chunk.p[32];
           bop = chunk.p[33];
+
+          if (!delay_den) delay_den = 100;
 
           if (w0 > cMaxPNGSize || h0 > cMaxPNGSize || x0 > cMaxPNGSize ||
               y0 > cMaxPNGSize || x0 + w0 > w || y0 + h0 > h || dop > 2 ||
@@ -370,25 +361,25 @@ Status DecodeImageAPNG(Span<const uint8_t> bytes, ThreadPool* pool,
           } else
             skipFirst = false;
 
-          if (io->frames.size() == (skipFirst ? 1 : 0)) {
+          if (ppf->frames.size() == (skipFirst ? 1 : 0)) {
             bop = 0;
             if (dop == 2) dop = 1;
           }
-        } else if (id == id_IDAT) {
+        } else if (id == kId_IDAT) {
           hasInfo = true;
           if (processing_data(png_ptr, info_ptr, chunk.p, chunk.size)) {
             delete[] chunk.p;
             break;
           }
-        } else if (id == id_fdAT && isAnimated) {
+        } else if (id == kId_fdAT && isAnimated) {
           png_save_uint_32(chunk.p + 4, chunk.size - 16);
           memcpy(chunk.p + 8, "IDAT", 4);
           if (processing_data(png_ptr, info_ptr, chunk.p + 4, chunk.size - 4)) {
             delete[] chunk.p;
             break;
           }
-        } else if (notabc(chunk.p[4]) || notabc(chunk.p[5]) ||
-                   notabc(chunk.p[6]) || notabc(chunk.p[7])) {
+        } else if (!isAbc(chunk.p[4]) || !isAbc(chunk.p[5]) ||
+                   !isAbc(chunk.p[6]) || !isAbc(chunk.p[7])) {
           delete[] chunk.p;
           break;
         } else if (!hasInfo) {
@@ -411,11 +402,9 @@ Status DecodeImageAPNG(Span<const uint8_t> bytes, ThreadPool* pool,
   chunksInfo.clear();
   delete[] chunkIHDR.p;
 
-  fclose(f);
-
   if (errorstate) return false;
-  SetIntensityTarget(io);
   return true;
 }
 
+}  // namespace extras
 }  // namespace jxl

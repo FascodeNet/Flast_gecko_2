@@ -16,10 +16,13 @@ HeadlessLookAndFeel::HeadlessLookAndFeel() {}
 
 HeadlessLookAndFeel::~HeadlessLookAndFeel() = default;
 
-nsresult HeadlessLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
+nsresult HeadlessLookAndFeel::NativeGetColor(ColorID aID, ColorScheme aScheme,
                                              nscolor& aColor) {
   // For headless mode, we use GetStandinForNativeColor for everything we can,
   // and hardcoded values for everything else.
+  //
+  // TODO(emilio): We should probably just move these to
+  // GetStandinForNativeColor.
 
   nsresult res = NS_OK;
 
@@ -54,7 +57,7 @@ nsresult HeadlessLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
     case ColorID::MozEventreerow:
       aColor = NS_RGB(0xff, 0xff, 0xff);
       break;
-    case ColorID::MozMacButtonactivetext:
+    case ColorID::MozButtonactivetext:
     case ColorID::MozMacDefaultbuttontext:
       aColor = NS_RGB(0xff, 0xff, 0xff);
       break;
@@ -114,7 +117,7 @@ nsresult HeadlessLookAndFeel::NativeGetColor(ColorID aID, ColorScheme,
       aColor = NS_RGB(0xff, 0xff, 0xff);
       break;
     default:
-      aColor = GetStandinForNativeColor(aID);
+      aColor = GetStandinForNativeColor(aID, aScheme);
       break;
   }
 
@@ -206,11 +209,6 @@ nsresult HeadlessLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
       aResult = 0;
       res = NS_ERROR_FAILURE;
       break;
-    case IntID::MacGraphiteTheme:
-    case IntID::MacBigSurTheme:
-      aResult = 0;
-      res = NS_ERROR_NOT_IMPLEMENTED;
-      break;
     case IntID::AlertNotificationOrigin:
       aResult = NS_ALERT_TOP;
       break;
@@ -229,7 +227,6 @@ nsresult HeadlessLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
     case IntID::MenuBarDrag:
       aResult = 0;
       break;
-    case IntID::WindowsThemeIdentifier:
     case IntID::OperatingSystemVersionIdentifier:
       aResult = 0;
       res = NS_ERROR_NOT_IMPLEMENTED;
@@ -259,8 +256,6 @@ nsresult HeadlessLookAndFeel::NativeGetInt(IntID aID, int32_t& aResult) {
       aResult = 1;
       break;
     case IntID::GTKCSDAvailable:
-    case IntID::GTKCSDHideTitlebarByDefault:
-    case IntID::GTKCSDTransparentBackground:
       aResult = 0;
       break;
     case IntID::GTKCSDMinimizeButton:

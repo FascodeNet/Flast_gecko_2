@@ -478,7 +478,6 @@ JSObject* InitRestParameter(JSContext* cx, uint32_t length, Value* rest,
                                   Handle<LexicalScope*> scope);
 [[nodiscard]] bool PushClassBodyEnv(JSContext* cx, BaselineFrame* frame,
                                     Handle<ClassBodyScope*> scope);
-[[nodiscard]] bool PopLexicalEnv(JSContext* cx, BaselineFrame* frame);
 [[nodiscard]] bool DebugLeaveThenPopLexicalEnv(JSContext* cx,
                                                BaselineFrame* frame,
                                                jsbytecode* pc);
@@ -565,7 +564,7 @@ bool SetNativeDataPropertyPure(JSContext* cx, JSObject* obj, PropertyName* name,
 bool ObjectHasGetterSetterPure(JSContext* cx, JSObject* objArg, jsid id,
                                GetterSetter* getterSetter);
 
-JSString* TypeOfObject(JSObject* obj, JSRuntime* rt);
+JSString* TypeOfNameObject(JSObject* obj, JSRuntime* rt);
 
 bool GetPrototypeOf(JSContext* cx, HandleObject target,
                     MutableHandleValue rval);

@@ -331,6 +331,7 @@ struct GMPCapabilityData
 
 struct L10nFileSourceDescriptor {
   nsCString name;
+  nsCString metasource;
   nsCString[] locales;
   nsCString prePath;
   nsCString[] index;
@@ -1014,7 +1015,7 @@ parent:
                                                                 nsString aName);
 
     async GetLoadingSessionHistoryInfoFromParent(MaybeDiscardedBrowsingContext aContext)
-        returns (LoadingSessionHistoryInfo? aLoadingInfo, int32_t aRequestedIndex, int32_t aLength);
+        returns (LoadingSessionHistoryInfo? aLoadingInfo);
 
     async RemoveFromBFCache(MaybeDiscardedBrowsingContext aContext);
 
@@ -1602,6 +1603,10 @@ parent:
 
     async StoreUserInteractionAsPermission(Principal aPrincipal);
 
+    async AsyncShouldAllowAccessFor(MaybeDiscardedBrowsingContext aContext,
+                                    Principal aPrincipal)
+          returns (bool allowed, uint32_t rejectReason);
+
    /**
     * When media element's controlled state changed in the content process, we
     * have to notify the chrome process in order to update the status of the
@@ -1715,7 +1720,8 @@ parent:
 
     async HistoryCommit(MaybeDiscardedBrowsingContext aContext,
                         uint64_t aLoadID, nsID aChangeID, uint32_t aLoadType,
-                        bool aPersist, bool aCloneEntryChildren);
+                        bool aPersist, bool aCloneEntryChildren,
+                        bool aChannelExpired);
 
     async HistoryGo(MaybeDiscardedBrowsingContext aContext, int32_t aOffset,
                     uint64_t aHistoryEpoch, bool aRequireUserInteraction,
@@ -1789,13 +1795,15 @@ both:
     async CreateBrowsingContext(uint64_t aGroupId, BrowsingContextInitializer aInit);
 
     /**
-     * Discards the passed-in BrowsingContext. If the BrowsingContext has
-     * already been discarded, this message does nothing.
-     * The response promise is fulfilled when the process has flagged the
-     * BrowsingContext as discarded.
+     * If aDoDiscard is true, discards the passed-in BrowsingContext. If the
+     * BrowsingContext has already been discarded, this message does nothing.
+     * If the receiver is the parent process, resolves when all content
+     * processes have flagged the BrowsingContext as discarded, and if the
+     * receiver is a child process, resolves when that child process has flagged
+     * the BrowsingContext as discarded.
      */
-    async DiscardBrowsingContext(MaybeDiscardedBrowsingContext aContext)
-            returns (bool unused);
+    async DiscardBrowsingContext(MaybeDiscardedBrowsingContext aContext, bool aDoDiscard)
+            returns (uint64_t unused);
 
     async AdjustWindowFocus(MaybeDiscardedBrowsingContext aContext,
                             bool aIsVisible, uint64_t aActionId);

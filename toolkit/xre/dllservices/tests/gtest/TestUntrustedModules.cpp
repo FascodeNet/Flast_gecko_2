@@ -90,47 +90,51 @@ class UntrustedModulesCollector {
     mData.clear();
     int pendingQueries = 0;
 
-    EXPECT_TRUE(SpinEventLoopUntil([this, &pendingQueries, &aChecker, &rv]() {
-      // Some of expected loaded modules are still missing
-      // after kMaximumPendingQueries queries were submitted.
-      // Giving up here to avoid an infinite loop.
-      if (pendingQueries >= kMaximumPendingQueries) {
-        rv = NS_ERROR_ABORT;
-        return true;
-      }
+    EXPECT_TRUE(SpinEventLoopUntil(
+        "xre:UntrustedModulesCollector"_ns,
+        [this, &pendingQueries, &aChecker, &rv]() {
+          // Some of expected loaded modules are still missing
+          // after kMaximumPendingQueries queries were submitted.
+          // Giving up here to avoid an infinite loop.
+          if (pendingQueries >= kMaximumPendingQueries) {
+            rv = NS_ERROR_ABORT;
+            return true;
+          }
 
-      ++pendingQueries;
+          ++pendingQueries;
 
-      RefPtr<DllServices> dllSvc(DllServices::Get());
-      dllSvc->GetUntrustedModulesData()->Then(
-          GetMainThreadSerialEventTarget(), __func__,
-          [this, &pendingQueries,
-           &aChecker](Maybe<UntrustedModulesData>&& aResult) {
-            EXPECT_GT(pendingQueries, 0);
-            --pendingQueries;
+          RefPtr<DllServices> dllSvc(DllServices::Get());
+          dllSvc->GetUntrustedModulesData()->Then(
+              GetMainThreadSerialEventTarget(), __func__,
+              [this, &pendingQueries,
+               &aChecker](Maybe<UntrustedModulesData>&& aResult) {
+                EXPECT_GT(pendingQueries, 0);
+                --pendingQueries;
 
-            if (aResult.isSome()) {
-              wprintf(L"Received data. (pendingQueries=%d)\n", pendingQueries);
-              for (const auto& evt : aResult.ref().mEvents) {
-                aChecker.Decrement(evt.mRequestedDllName);
-              }
-              EXPECT_TRUE(mData.emplaceBack(std::move(aResult.ref())));
-            }
-          },
-          [&pendingQueries, &rv](nsresult aReason) {
-            EXPECT_GT(pendingQueries, 0);
-            --pendingQueries;
+                if (aResult.isSome()) {
+                  wprintf(L"Received data. (pendingQueries=%d)\n",
+                          pendingQueries);
+                  for (const auto& evt : aResult.ref().mEvents) {
+                    aChecker.Decrement(evt.mRequestedDllName);
+                  }
+                  EXPECT_TRUE(mData.emplaceBack(std::move(aResult.ref())));
+                }
+              },
+              [&pendingQueries, &rv](nsresult aReason) {
+                EXPECT_GT(pendingQueries, 0);
+                --pendingQueries;
 
-            wprintf(L"GetUntrustedModulesData() failed - %08x\n", aReason);
-            EXPECT_TRUE(false);
-            rv = aReason;
-          });
+                wprintf(L"GetUntrustedModulesData() failed - %08x\n", aReason);
+                EXPECT_TRUE(false);
+                rv = aReason;
+              });
 
-      // Keep calling GetUntrustedModulesData() until we meet the condition.
-      return aChecker.IsDone();
-    }));
+          // Keep calling GetUntrustedModulesData() until we meet the condition.
+          return aChecker.IsDone();
+        }));
 
     EXPECT_TRUE(SpinEventLoopUntil(
+        "xre:UntrustedModulesCollector(pendingQueries)"_ns,
         [&pendingQueries]() { return pendingQueries <= 0; }));
 
     return rv;
@@ -281,10 +285,17 @@ void UntrustedModulesFixture::ValidateUntrustedModules(
     moduleSet.PutEntry(module);
   }
 
+  size_t numBlockedEvents = 0;
   for (const auto& evt : aData.mEvents) {
     const nsDependentSubstring leafName =
         nt::GetLeafName(evt.mModule->mResolvedNtName);
     const nsAutoString leafNameStr(leafName.Data(), leafName.Length());
+    const ModuleLoadInfo::Status loadStatus =
+        static_cast<ModuleLoadInfo::Status>(evt.mLoadStatus);
+    if (loadStatus == ModuleLoadInfo::Status::Blocked) {
+      ++numBlockedEvents;
+    }
+
     size_t match;
     if (BinarySearchIf(
             kKnownModules, 0, ArrayLength(kKnownModules),
@@ -292,8 +303,7 @@ void UntrustedModulesFixture::ValidateUntrustedModules(
               return _wcsicmp(leafNameStr.get(), aVal.mName);
             },
             &match)) {
-      EXPECT_EQ(evt.mLoadStatus,
-                static_cast<uint32_t>(kKnownModules[match].mStatus));
+      EXPECT_EQ(loadStatus, kKnownModules[match].mStatus);
     } else {
       EXPECT_EQ(evt.mLoadStatus, 0);
     }
@@ -317,7 +327,12 @@ void UntrustedModulesFixture::ValidateUntrustedModules(
   // No check for the mXULLoadDurationMS field because the field has a value
   // in CCov build GTest, but it is empty in non-CCov build (bug 1681936).
   EXPECT_GT(aData.mEvents.length(), 0);
-  EXPECT_GT(aData.mStacks.GetModuleCount(), 0);
+  if (numBlockedEvents == aData.mEvents.length()) {
+    // If all loading events were blocked, the stacks are empty.
+    EXPECT_EQ(aData.mStacks.GetModuleCount(), 0);
+  } else {
+    EXPECT_GT(aData.mStacks.GetModuleCount(), 0);
+  }
   EXPECT_EQ(aData.mSanitizationFailures, 0);
   EXPECT_EQ(aData.mTrustTestFailures, 0);
 }

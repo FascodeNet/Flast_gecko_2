@@ -69,6 +69,11 @@ ChromeUtils.defineModuleGetter(
   "pktTelemetry",
   "chrome://pocket/content/pktTelemetry.jsm"
 );
+ChromeUtils.defineModuleGetter(
+  this,
+  "ExperimentAPI",
+  "resource://nimbus/ExperimentAPI.jsm"
+);
 
 const POCKET_ONSAVERECS_PREF = "extensions.pocket.onSaveRecs";
 const POCKET_ONSAVERECS_LOCLES_PREF = "extensions.pocket.onSaveRecs.locales";
@@ -106,6 +111,7 @@ var pktUI = (function() {
       POCKET_ONSAVERECS_LOCLES_PREF,
       ""
     );
+
     pocketHomePref = Services.prefs.getBoolPref(POCKET_HOME_PREF);
   }
   initPrefs();
@@ -149,10 +155,19 @@ var pktUI = (function() {
   function showSignUp() {
     getFirefoxAccountSignedInUser(function(userdata) {
       let sizes = initialPanelSize.signup.control;
+      const experiment = ExperimentAPI.getExperiment({
+        featureId: "pocketNewtab",
+      });
+      let utmCampaign = experiment?.slug || `firefox_door_hanger_menu`;
+      let utmSource = experiment?.branch?.slug || `control`;
 
       showPanel(
         "about:pocket-signup?pockethost=" +
           Services.prefs.getCharPref("extensions.pocket.site") +
+          "&utmCampaign=" +
+          utmCampaign +
+          "&utmSource=" +
+          utmSource +
           "&locale=" +
           getUILocale(),
         sizes
@@ -570,7 +585,8 @@ var pktUIMessaging = (function() {
    */
   function sendMessageToPanel(messageId, payload) {
     var panelFrame = pktUI.getPanelFrame();
-    if (!isPocketPanelFrameValid(panelFrame)) {
+    if (!panelFrame) {
+      console.warn("Pocket panel frame is undefined");
       return;
     }
 
@@ -589,41 +605,6 @@ var pktUIMessaging = (function() {
   function sendErrorMessageToPanel(messageId, error) {
     var errorResponse = { status: "error", error };
     sendMessageToPanel(messageId, errorResponse);
-  }
-
-  /**
-   * Validation
-   */
-
-  function isPocketPanelFrameValid(panelFrame) {
-    // Check if panel is available if not throw a warning and bailout.
-    // We likely try to send to a panel that is not visible anymore
-    if (typeof panelFrame === "undefined") {
-      console.warn("Pocket panel frame is undefined");
-      return false;
-    }
-
-    var contentWindow = panelFrame.contentWindow;
-    if (typeof contentWindow == "undefined") {
-      console.warn("Pocket panel frame content window is undefined");
-      return false;
-    }
-
-    var doc = contentWindow.document;
-    if (typeof doc === "undefined") {
-      console.warn("Pocket panel frame content window document is undefined");
-      return false;
-    }
-
-    var documentElement = doc.documentElement;
-    if (typeof documentElement === "undefined") {
-      console.warn(
-        "Pocket panel frame content window document document element is undefined"
-      );
-      return false;
-    }
-
-    return true;
   }
 
   /**

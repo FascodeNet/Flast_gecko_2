@@ -107,7 +107,6 @@ const ErrorCodes = {
   NS_ERROR_REDIRECT_LOOP: 0x804b001f,
   NS_ERROR_ENTITY_CHANGED: 0x804b0020,
   NS_ERROR_UNSAFE_CONTENT_TYPE: 0x804b004a,
-  NS_ERROR_REMOTE_XUL: 0x804b004b,
   NS_ERROR_LOAD_SHOWED_ERRORPAGE: 0x804b004d,
   NS_ERROR_DOCSHELL_DYING: 0x804b004e,
   NS_ERROR_FTP_LOGIN: 0x804b0015,
@@ -638,6 +637,27 @@ exports.getChannelBrowsingContextID = function(channel) {
 };
 
 /**
+ * Get the innerWindowId for the channel.
+ *
+ * @param {*} channel
+ * @returns {number}
+ */
+exports.getChannelInnerWindowId = function(channel) {
+  if (channel.loadInfo.innerWindowId) {
+    return channel.loadInfo.innerWindowId;
+  }
+  // At least WebSocket channel aren't having a browsingContextID set on their loadInfo
+  // We fallback on top frame element, which works, but will be wrong for WebSocket
+  // in same-process iframes...
+  const topFrame = NetworkHelper.getTopFrameForRequest(channel);
+  // topFrame is typically null for some chrome requests like favicons
+  if (topFrame?.browsingContext?.currentWindowGlobal) {
+    return topFrame.browsingContext.currentWindowGlobal.innerWindowId;
+  }
+  return null;
+};
+
+/**
  * Does this channel represent a Preload request.
  *
  * @param {*} channel
@@ -679,6 +699,7 @@ exports.createNetworkEvent = function(
   event.method = channel.requestMethod;
   event.channelId = channel.channelId;
   event.browsingContextID = this.getChannelBrowsingContextID(channel);
+  event.innerWindowId = this.getChannelInnerWindowId(channel);
   event.url = channel.URI.spec;
   event.private = channel.isChannelPrivate;
   event.headersSize = extraStringData ? extraStringData.length : 0;

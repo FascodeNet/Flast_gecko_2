@@ -167,6 +167,7 @@ const AVAILABLE_SHIMS = [
     bug: "1713698",
     file: "apstag.js",
     matches: ["*://c.amazon-adsystem.com/aax2/apstag.js"],
+    onlyIfBlockedByETP: true,
   },
   {
     id: "BmAuth",
@@ -346,9 +347,9 @@ const AVAILABLE_SHIMS = [
     bug: "1713685",
     file: "google-publisher-tags.js",
     matches: [
-      "*://www.googletagservices.com/tag/js/gpt.js",
-      "*://securepubads.g.doubleclick.net/tag/js/gpt.js",
-      "*://securepubads.g.doubleclick.net/gpt/pubads_impl_*.js",
+      "*://www.googletagservices.com/tag/js/gpt.js*",
+      "*://securepubads.g.doubleclick.net/tag/js/gpt.js*",
+      "*://securepubads.g.doubleclick.net/gpt/pubads_impl_*.js*",
     ],
     onlyIfBlockedByETP: true,
   },
@@ -444,6 +445,21 @@ const AVAILABLE_SHIMS = [
     onlyIfBlockedByETP: true,
   },
   {
+    id: "StackBlitz",
+    platform: "all",
+    name: "StackBlitz",
+    bug: "1668408",
+    onlyIfDFPIActive: true,
+    contentScripts: [
+      {
+        js: "stackblitz.js",
+        matches: ["*://*.stackblitz.com/*", "*://*.stackblitz.io/*"],
+        runAt: "document_start",
+        allFrames: true,
+      },
+    ],
+  },
+  {
     id: "Vidible",
     branch: ["nightly"],
     platform: "all",
@@ -468,6 +484,47 @@ const AVAILABLE_SHIMS = [
       "*://videos.vidible.tv/prod/*.webm*",
       "*://videos.vidible.tv/prod/*.ts*",
     ],
+  },
+  {
+    id: "Hamropatro",
+    platform: "desktop",
+    name: "Hamropatro",
+    bug: "1660446",
+    contentScripts: [
+      {
+        js: "hamropatro.js",
+        matches: ["*://we.hamropatro.com/login*"],
+        runAt: "document_start",
+      },
+    ],
+    onlyIfDFPIActive: true,
+  },
+  {
+    id: "Kinja",
+    platform: "desktop",
+    name: "Kinja",
+    bug: "1656171",
+    contentScripts: [
+      {
+        js: "kinja.js",
+        matches: [
+          "*://www.avclub.com/*",
+          "*://deadspin.com/*",
+          "*://gizmodo.com/*",
+          "*://jalopnik.com/*",
+          "*://jezebel.com/*",
+          "*://kotaku.com/*",
+          "*://lifehacker.com/*",
+          "*://www.theonion.com/*",
+          "*://www.theroot.com/*",
+          "*://thetakeout.com/*",
+          "*://theinventory.com/*",
+        ],
+        runAt: "document_start",
+        allFrames: true,
+      },
+    ],
+    onlyIfDFPIActive: true,
   },
 ];
 

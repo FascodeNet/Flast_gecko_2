@@ -10,6 +10,7 @@
 
 #include "builtin/ModuleObject.h"
 #include "gc/Policy.h"
+#include "js/Exception.h"
 #include "js/friend/ErrorMessages.h"  // js::GetErrorMessage, JSMSG_*
 #include "js/friend/StackLimits.h"    // js::AutoCheckRecursionLimit
 #include "js/friend/WindowProxy.h"    // js::IsWindow, js::IsWindowProxy
@@ -1014,9 +1015,8 @@ BlockLexicalEnvironmentObject* BlockLexicalEnvironmentObject::clone(
     return nullptr;
   }
 
-  // We can't assert that the clone has the same shape, because it could
-  // have been reshaped by ReshapeForShadowedProp.
-  MOZ_ASSERT(env->slotSpan() == copy->slotSpan());
+  MOZ_ASSERT(env->shape() == copy->shape());
+
   for (uint32_t i = JSSLOT_FREE(&class_); i < copy->slotSpan(); i++) {
     copy->setSlot(i, env->getSlot(i));
   }
@@ -1429,11 +1429,8 @@ bool MissingEnvironmentKey::match(MissingEnvironmentKey ek1,
   return ek1.frame_ == ek2.frame_ && ek1.scope_ == ek2.scope_;
 }
 
-bool LiveEnvironmentVal::needsSweep() {
-  if (scope_) {
-    MOZ_ALWAYS_FALSE(IsAboutToBeFinalized(&scope_));
-  }
-  return false;
+bool LiveEnvironmentVal::traceWeak(JSTracer* trc) {
+  return TraceWeakEdge(trc, &scope_, "LiveEnvironmentVal::scope_");
 }
 
 // Live EnvironmentIter values may be added to DebugEnvironments::liveEnvs, as
@@ -2465,37 +2462,41 @@ DebugEnvironments::~DebugEnvironments() { MOZ_ASSERT(missingEnvs.empty()); }
 
 void DebugEnvironments::trace(JSTracer* trc) { proxiedEnvs.trace(trc); }
 
-void DebugEnvironments::sweep() {
+void DebugEnvironments::traceWeak(JSTracer* trc) {
   /*
    * missingEnvs points to debug envs weakly so that debug envs can be
    * released more eagerly.
    */
   for (MissingEnvironmentMap::Enum e(missingEnvs); !e.empty(); e.popFront()) {
-    if (IsAboutToBeFinalized(&e.front().value())) {
+    auto result =
+        TraceWeakEdge(trc, &e.front().value(), "MissingEnvironmentMap value");
+    if (result.isDead()) {
       /*
-       * Note that onPopCall, onPopVar, and onPopLexical rely on
-       * missingEnvs to find environment objects that we synthesized for
-       * the debugger's sake, and clean up the synthetic environment
-       * objects' entries in liveEnvs. So if we remove an entry from
-       * missingEnvs here, we must also remove the corresponding
-       * liveEnvs entry.
+       * Note that onPopCall, onPopVar, and onPopLexical rely on missingEnvs to
+       * find environment objects that we synthesized for the debugger's sake,
+       * and clean up the synthetic environment objects' entries in liveEnvs.
+       * So if we remove an entry from missingEnvs here, we must also remove the
+       * corresponding liveEnvs entry.
        *
        * Since the DebugEnvironmentProxy is the only thing using its environment
-       * object, and the DSO is about to be finalized, you might assume
-       * that the synthetic SO is also about to be finalized too, and thus
-       * the loop below will take care of things. But complex GC behavior
-       * means that marks are only conservative approximations of
-       * liveness; we should assume that anything could be marked.
+       * object, and the DSO is about to be finalized, you might assume that the
+       * synthetic SO is also about to be finalized too, and thus the loop below
+       * will take care of things. But complex GC behavior means that marks are
+       * only conservative approximations of liveness; we should assume that
+       * anything could be marked.
        *
-       * Thus, we must explicitly remove the entries from both liveEnvs
-       * and missingEnvs here.
+       * Thus, we must explicitly remove the entries from both liveEnvs and
+       * missingEnvs here.
        */
-      liveEnvs.remove(&e.front().value().unbarrieredGet()->environment());
+      liveEnvs.remove(&result.initialTarget()->environment());
       e.removeFront();
     } else {
       MissingEnvironmentKey key = e.front().key();
-      if (IsForwarded(key.scope())) {
-        key.updateScope(Forwarded(key.scope()));
+      Scope* scope = key.scope();
+      MOZ_ALWAYS_TRUE(TraceManuallyBarrieredWeakEdge(
+          trc, &scope, "MissingEnvironmentKey scope"));
+      if (scope != key.scope()) {
+        key.updateScope(scope);
         e.rekeyFront(key);
       }
     }
@@ -2505,7 +2506,7 @@ void DebugEnvironments::sweep() {
    * Scopes can be finalized when a debugger-synthesized EnvironmentObject is
    * no longer reachable via its DebugEnvironmentProxy.
    */
-  liveEnvs.sweep();
+  liveEnvs.traceWeak(trc);
 }
 
 void DebugEnvironments::finish() { proxiedEnvs.clear(); }
@@ -2663,6 +2664,10 @@ void DebugEnvironments::takeFrameSnapshot(
    * invariants since DebugEnvironmentProxy::maybeSnapshot can already be
    * nullptr.
    */
+
+  // Because this can be called during exception unwinding, save the exception
+  // state and restore it when we're done.
+  JS::AutoSaveExceptionState ases(cx);
 
   JSScript* script = frame.script();
 
@@ -4003,16 +4008,6 @@ static bool RemoveReferencedNames(JSContext* cx, HandleScript script,
       case JSOp::SetName:
       case JSOp::StrictSetName:
         name = script->getName(loc.toRawBytecode());
-        break;
-
-      case JSOp::GetGName:
-      case JSOp::SetGName:
-      case JSOp::StrictSetGName:
-        if (script->hasNonSyntacticScope()) {
-          name = script->getName(loc.toRawBytecode());
-        } else {
-          name = nullptr;
-        }
         break;
 
       case JSOp::GetAliasedVar:

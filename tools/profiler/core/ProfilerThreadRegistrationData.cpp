@@ -49,7 +49,7 @@ static void profiler_add_js_marker(const char* aMarkerName,
 }
 
 static void profiler_add_js_allocation_marker(JS::RecordAllocationInfo&& info) {
-  if (!profiler_can_accept_markers()) {
+  if (!profiler_thread_is_being_profiled()) {
     return;
   }
 
@@ -68,15 +68,11 @@ static void profiler_add_js_allocation_marker(JS::RecordAllocationInfo&& info) {
         aWriter.StringProperty("className", aClassName);
       }
       if (aTypeName.Length() != 0) {
-        aWriter.StringProperty(
-            "typeName",
-            NS_ConvertUTF16toUTF8(aTypeName.Data(), aTypeName.Length()));
+        aWriter.StringProperty("typeName", NS_ConvertUTF16toUTF8(aTypeName));
       }
       if (aDescriptiveTypeName.Length() != 0) {
-        aWriter.StringProperty(
-            "descriptiveTypeName",
-            NS_ConvertUTF16toUTF8(aDescriptiveTypeName.Data(),
-                                  aDescriptiveTypeName.Length()));
+        aWriter.StringProperty("descriptiveTypeName",
+                               NS_ConvertUTF16toUTF8(aDescriptiveTypeName));
       }
       aWriter.StringProperty("coarseType", aCoarseType);
       aWriter.IntProperty("size", aSize);

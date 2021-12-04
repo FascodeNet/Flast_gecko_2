@@ -11,6 +11,7 @@
 #include "unicode/ucol.h"
 
 #include "mozilla/intl/ICU4CGlue.h"
+#include "mozilla/intl/ICUError.h"
 #include "mozilla/Result.h"
 #include "mozilla/Span.h"
 
@@ -37,35 +38,38 @@ class Collator final {
 
   ~Collator();
 
+  /**
+   * Get a sort key with the provided UTF-16 string, and store the sort key into
+   * the provided buffer of byte array.
+   * Every sort key ends with 0x00, and the terminating 0x00 byte is counted
+   * when calculating the length of buffer. For the purpose of other byte
+   * values, check the "Special Byte Values" document from ICU.
+   *
+   * https://icu.unicode.org/design/collation/bytes
+   */
   template <typename B>
   ICUResult GetSortKey(Span<const char16_t> aString, B& aBuffer) const {
-    static_assert(std::is_same_v<typename B::CharType, uint8_t>,
-                  "Expected a uint8_t* buffer.");
-    // Do not use FillBufferWithICUCall, as this API does not report the
-    // U_BUFFER_OVERFLOW_ERROR. The return value is always the number of bytes
-    // needed, regardless of whether the result buffer was big enough.
-    UErrorCode status = U_ZERO_ERROR;
-    int32_t length =
-        ucol_getSortKey(mCollator.GetConst(), aString.data(),
-                        static_cast<int32_t>(aString.size()), nullptr, 0);
-    if (U_FAILURE(status) || length == 0) {
-      // If the length is 0, and internal error occurred according to the docs.
-      return Err(ICUError::InternalError);
-    }
-
-    if (!aBuffer.reserve(length)) {
-      return Err(ICUError::OutOfMemory);
-    }
-
-    length = ucol_getSortKey(mCollator.GetConst(), aString.data(),
-                             aString.size(), aBuffer.data(), length);
-
-    if (U_FAILURE(status) || length == 0) {
-      return Err(ICUError::InternalError);
-    }
-
-    aBuffer.written(length);
-    return Ok();
+    return FillBufferWithICUCall(
+        aBuffer,
+        [this, aString](uint8_t* target, int32_t length, UErrorCode* status) {
+          // ucol_getSortKey doesn't use the error code to report
+          // U_BUFFER_OVERFLOW_ERROR, instead it uses the return value to
+          // indicate the desired length to store the key. So we update the
+          // UErrorCode accordingly to let FillBufferWithICUCall resize the
+          // buffer.
+          int32_t len = ucol_getSortKey(mCollator.GetConst(), aString.data(),
+                                        static_cast<int32_t>(aString.size()),
+                                        target, length);
+          if (len == 0) {
+            // Returns 0 means there's an internal error.
+            *status = U_INTERNAL_PROGRAM_ERROR;
+          } else if (len > length) {
+            *status = U_BUFFER_OVERFLOW_ERROR;
+          } else {
+            *status = U_ZERO_ERROR;
+          }
+          return len;
+        });
   }
 
   int32_t CompareStrings(Span<const char16_t> aSource,
@@ -135,10 +139,27 @@ class Collator final {
                        const Maybe<Options&> aPrevOptions = Nothing());
 
   /**
+   * Return the case first option of this collator.
+   */
+  Result<CaseFirst, ICUError> GetCaseFirst() const;
+
+  /**
    * Map keywords to their BCP 47 equivalents.
    */
   static SpanResult<char> KeywordValueToBcp47Extension(const char* aKeyword,
                                                        int32_t aLength);
+
+  enum class CommonlyUsed : bool {
+    /**
+     * Select all possible values, even when not commonly used by a locale.
+     */
+    No,
+
+    /**
+     * Only select the values which are commonly used by a locale.
+     */
+    Yes,
+  };
 
   using Bcp47ExtEnumeration =
       Enumeration<char, SpanResult<char>,
@@ -153,8 +174,32 @@ class Collator final {
    * The collation extensions can be found here:
    * http://cldr.unicode.org/core-spec/#Key_Type_Definitions
    */
-  static Result<Bcp47ExtEnumeration, InternalError>
-  GetBcp47KeywordValuesForLocale(const char* aLocale);
+  static Result<Bcp47ExtEnumeration, ICUError> GetBcp47KeywordValuesForLocale(
+      const char* aLocale, CommonlyUsed aCommonlyUsed = CommonlyUsed::No);
+
+  /**
+   * Returns an iterator over all possible collator locale extensions.
+   * These extensions can be used in BCP 47 locales. For instance this
+   * iterator could return "phonebk" and could be appled to the German locale
+   * "de" as "de-co-phonebk" for a phonebook-style collation.
+   *
+   * The collation extensions can be found here:
+   * http://cldr.unicode.org/core-spec/#Key_Type_Definitions
+   */
+  static Result<Bcp47ExtEnumeration, ICUError> GetBcp47KeywordValues();
+
+  /**
+   * Returns an iterator over all supported collator locales.
+   *
+   * The returned strings are ICU locale identifiers and NOT BCP 47 language
+   * tags.
+   *
+   * Also see <https://unicode-org.github.io/icu/userguide/locale>.
+   */
+  static auto GetAvailableLocales() {
+    return AvailableLocalesEnumeration<ucol_countAvailable,
+                                       ucol_getAvailable>();
+  }
 
  private:
   /**

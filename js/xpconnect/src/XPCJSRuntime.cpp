@@ -13,6 +13,7 @@
 
 #include "xpcprivate.h"
 #include "xpcpublic.h"
+#include "XPCMaps.h"
 #include "XPCWrapper.h"
 #include "XPCJSMemoryReporter.h"
 #include "XrayWrapper.h"
@@ -63,6 +64,7 @@
 #include "mozilla/dom/GeneratedAtomList.h"
 #include "mozilla/dom/BindingUtils.h"
 #include "mozilla/dom/Element.h"
+#include "mozilla/dom/FetchUtil.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
@@ -695,7 +697,7 @@ void XPCJSRuntime::TraceNativeBlackRoots(JSTracer* trc) {
     }
   }
 
-  dom::TraceBlackJS(trc, nsIXPConnect::XPConnect()->GetIsShuttingDown());
+  dom::TraceBlackJS(trc);
 }
 
 void XPCJSRuntime::TraceAdditionalNativeGrayRoots(JSTracer* trc) {
@@ -739,8 +741,8 @@ void XPCJSRuntime::PrepareForForgetSkippable() {
   }
 }
 
-void XPCJSRuntime::BeginCycleCollectionCallback() {
-  nsJSContext::BeginCycleCollectionCallback();
+void XPCJSRuntime::BeginCycleCollectionCallback(CCReason aReason) {
+  nsJSContext::BeginCycleCollectionCallback(aReason);
 
   nsCOMPtr<nsIObserverService> obs = mozilla::services::GetObserverService();
   if (obs) {
@@ -800,9 +802,12 @@ void XPCJSRuntime::GCSliceCallback(JSContext* cx, JS::GCProgress progress,
 void XPCJSRuntime::DoCycleCollectionCallback(JSContext* cx) {
   // The GC has detected that a CC at this point would collect a tremendous
   // amount of garbage that is being revivified unnecessarily.
-  NS_DispatchToCurrentThread(
-      NS_NewRunnableFunction("XPCJSRuntime::DoCycleCollectionCallback",
-                             []() { nsJSContext::CycleCollectNow(nullptr); }));
+  //
+  // The GC_WAITING reason is a little overloaded here, but we want to do
+  // a CC to allow Realms to be collected when they are referenced by a cycle.
+  NS_DispatchToCurrentThread(NS_NewRunnableFunction(
+      "XPCJSRuntime::DoCycleCollectionCallback",
+      []() { nsJSContext::CycleCollectNow(CCReason::GC_WAITING, nullptr); }));
 
   XPCJSRuntime* self = nsXPConnect::GetRuntimeInstance();
   if (!self) {
@@ -895,25 +900,20 @@ void XPCJSRuntime::FinalizeCallback(JSFreeOp* fop, JSFinalizeStatus status,
       XPCWrappedNativeScope::SweepAllWrappedNativeTearOffs();
 
       // Now we need to kill the 'Dying' XPCWrappedNativeProtos.
-      // We transfered these native objects to this table when their
-      // JSObject's were finalized. We did not destroy them immediately
-      // at that point because the ordering of JS finalization is not
-      // deterministic and we did not yet know if any wrappers that
-      // might still be referencing the protos where still yet to be
-      // finalized and destroyed. We *do* know that the protos'
-      // JSObjects would not have been finalized if there were any
-      // wrappers that referenced the proto but where not themselves
-      // slated for finalization in this gc cycle. So... at this point
-      // we know that any and all wrappers that might have been
-      // referencing the protos in the dying list are themselves dead.
-      // So, we can safely delete all the protos in the list.
-
-      for (auto i = self->mDyingWrappedNativeProtoMap->Iter(); !i.Done();
-           i.Next()) {
-        auto* entry = static_cast<XPCWrappedNativeProtoMap::Entry*>(i.Get());
-        delete static_cast<const XPCWrappedNativeProto*>(entry->key);
-        i.Remove();
-      }
+      //
+      // We transferred these native objects to this list when their JSObjects
+      // were finalized. We did not destroy them immediately at that point
+      // because the ordering of JS finalization is not deterministic and we did
+      // not yet know if any wrappers that might still be referencing the protos
+      // were still yet to be finalized and destroyed. We *do* know that the
+      // protos' JSObjects would not have been finalized if there were any
+      // wrappers that referenced the proto but were not themselves slated for
+      // finalization in this gc cycle.
+      //
+      // At this point we know that any and all wrappers that might have been
+      // referencing the protos in the dying list are themselves dead. So, we
+      // can safely delete all the protos in the list.
+      self->mDyingWrappedNativeProtos.clear();
 
       MOZ_ASSERT(self->mGCIsRunning, "bad state");
       self->mGCIsRunning = false;
@@ -1113,8 +1113,6 @@ void XPCJSRuntime::Shutdown(JSContext* cx) {
   mClassInfo2NativeSetMap = nullptr;
 
   mNativeSetMap = nullptr;
-
-  mDyingWrappedNativeProtoMap = nullptr;
 
   // Prevent ~LinkedList assertion failures if we leaked things.
   mWrappedNativeScopes.clear();
@@ -1732,21 +1730,20 @@ static void ReportClassStats(const ClassInfo& classInfo, const nsACString& path,
                  "wasm/asm.js array buffer elements allocated outside both the "
                  "malloc heap and the GC heap.");
   }
+  if (classInfo.objectsNonHeapElementsWasmShared > 0) {
+    REPORT_BYTES(
+        path + "objects/non-heap/elements/wasm-shared"_ns, KIND_NONHEAP,
+        classInfo.objectsNonHeapElementsWasmShared,
+        "wasm/asm.js array buffer elements allocated outside both the "
+        "malloc heap and the GC heap. These elements are shared between "
+        "one or more runtimes; the reported size is divided by the "
+        "buffer's refcount.");
+  }
 
   if (classInfo.objectsNonHeapCodeWasm > 0) {
     REPORT_BYTES(path + "objects/non-heap/code/wasm"_ns, KIND_NONHEAP,
                  classInfo.objectsNonHeapCodeWasm,
                  "AOT-compiled wasm/asm.js code.");
-  }
-
-  // Although wasm guard pages aren't committed in memory they can be very
-  // large and contribute greatly to vsize and so are worth reporting.
-  if (classInfo.wasmGuardPages > 0) {
-    REPORT_BYTES(
-        "wasm-guard-pages"_ns, KIND_OTHER, classInfo.wasmGuardPages,
-        "Guard pages mapped after the end of wasm memories, reserved for "
-        "optimization tricks, but not committed and thus never contributing"
-        " to RSS, only vsize.");
   }
 }
 
@@ -2330,6 +2327,16 @@ void JSReporter::CollectReports(WindowPaths* windowPaths,
   REPORT_BYTES("wasm-runtime"_ns, KIND_OTHER, rtStats.runtime.wasmRuntime,
                "The memory used for wasm runtime bookkeeping.");
 
+  // Although wasm guard pages aren't committed in memory they can be very
+  // large and contribute greatly to vsize and so are worth reporting.
+  if (rtStats.runtime.wasmGuardPages > 0) {
+    REPORT_BYTES(
+        "wasm-guard-pages"_ns, KIND_OTHER, rtStats.runtime.wasmGuardPages,
+        "Guard pages mapped after the end of wasm memories, reserved for "
+        "optimization tricks, but not committed and thus never contributing"
+        " to RSS, only vsize.");
+  }
+
   // Report the numbers for memory outside of realms.
 
   REPORT_BYTES("js-main-runtime/gc-heap/unused-chunks"_ns, KIND_OTHER,
@@ -2492,6 +2499,7 @@ void JSReporter::CollectReports(WindowPaths* windowPaths,
       "Used regexpshared cells.");
 
   MOZ_ASSERT(gcThingTotal == rtStats.gcHeapGCThings);
+  (void)gcThingTotal;
 
   // Report xpconnect.
 
@@ -2577,6 +2585,12 @@ static void AccumulateTelemetryCallback(int id, uint32_t sample,
       break;
     case JS_TELEMETRY_GC_BUDGET_MS_2:
       Telemetry::Accumulate(Telemetry::GC_BUDGET_MS_2, sample);
+      break;
+    case JS_TELEMETRY_GC_BUDGET_WAS_INCREASED:
+      Telemetry::Accumulate(Telemetry::GC_BUDGET_WAS_INCREASED, sample);
+      break;
+    case JS_TELEMETRY_GC_SLICE_WAS_LONG:
+      Telemetry::Accumulate(Telemetry::GC_SLICE_WAS_LONG, sample);
       break;
     case JS_TELEMETRY_GC_BUDGET_OVERRUN:
       Telemetry::Accumulate(Telemetry::GC_BUDGET_OVERRUN, sample);
@@ -2883,8 +2897,6 @@ XPCJSRuntime::XPCJSRuntime(JSContext* aCx)
       mClassInfo2NativeSetMap(mozilla::MakeUnique<ClassInfo2NativeSetMap>()),
       mNativeSetMap(mozilla::MakeUnique<NativeSetMap>()),
       mWrappedNativeScopes(),
-      mDyingWrappedNativeProtoMap(
-          mozilla::MakeUnique<XPCWrappedNativeProtoMap>()),
       mGCIsRunning(false),
       mNativesToReleaseArray(),
       mDoingFinalization(false),
@@ -3011,7 +3023,10 @@ void XPCJSRuntime::Initialize(JSContext* cx) {
   JS::SetXrayJitInfo(&gXrayJitInfo);
   JS::SetProcessLargeAllocationFailureCallback(
       OnLargeAllocationFailureCallback);
+
+  // The WasmAltDataType is build by the JS engine from the build id.
   JS::SetProcessBuildIdOp(GetBuildId);
+  FetchUtil::InitWasmAltDataType();
 
   // The JS engine needs to keep the source code around in order to implement
   // Function.prototype.toSource(). It'd be nice to not have to do this for
@@ -3143,9 +3158,8 @@ void XPCJSRuntime::DebugDump(int16_t depth) {
   // iterate sets...
   if (depth && mNativeSetMap->Count()) {
     XPC_LOG_INDENT();
-    for (auto i = mNativeSetMap->Iter(); !i.Done(); i.Next()) {
-      auto* entry = static_cast<NativeSetMap::Entry*>(i.Get());
-      entry->key_value->DebugDump(depth);
+    for (auto i = mNativeSetMap->Iter(); !i.done(); i.next()) {
+      i.get()->DebugDump(depth);
     }
     XPC_LOG_OUTDENT();
   }

@@ -245,7 +245,7 @@ dom::Element* nsIContent::GetEditingHost() {
   }
 
   // If this is in designMode, we should return <body>
-  if (doc->HasFlag(NODE_IS_EDITABLE) && !IsInShadowTree()) {
+  if (IsInDesignMode() && !IsInShadowTree()) {
     return doc->GetBodyElement();
   }
 
@@ -1043,6 +1043,10 @@ void nsIContent::SetAssignedSlot(HTMLSlotElement* aSlot) {
   MOZ_ASSERT(aSlot || GetExistingExtendedContentSlots());
   ExtendedContentSlots()->mAssignedSlot = aSlot;
 }
+
+#ifdef MOZ_DOM_LIST
+void nsIContent::Dump() { List(); }
+#endif
 
 void FragmentOrElement::GetTextContentInternal(nsAString& aTextContent,
                                                OOMReporter& aError) {

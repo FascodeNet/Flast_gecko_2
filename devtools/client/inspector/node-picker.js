@@ -96,9 +96,12 @@ class NodePicker extends EventEmitter {
    * picking mode and remove all event listeners associated with node picking.
    *
    * @param {InspectorFront} inspectorFront
+   * @param {Boolean} isDestroyCodePath
+   *        Optional. If true, we assume that's when the toolbox closes
+   *        and we should avoid doing any RDP request.
    * @return {Promise}
    */
-  async _onInspectorFrontDestroyed(inspectorFront) {
+  async _onInspectorFrontDestroyed(inspectorFront, { isDestroyCodepath } = {}) {
     this._currentInspectorFronts.delete(inspectorFront);
 
     const { walker } = inspectorFront;
@@ -110,7 +113,12 @@ class NodePicker extends EventEmitter {
     walker.off("picker-node-picked", this._onPicked);
     walker.off("picker-node-previewed", this._onPreviewed);
     walker.off("picker-node-canceled", this._onCanceled);
-    await walker.cancelPick();
+    // Only do a RDP request if we stop the node picker from a user action.
+    // Avoid doing one when we close the toolbox, in this scenario
+    // the walker actor on the server side will automatically cancel the node picking.
+    if (!isDestroyCodepath) {
+      await walker.cancelPick();
+    }
   }
 
   /**
@@ -159,8 +167,12 @@ class NodePicker extends EventEmitter {
   /**
    * Stop the element picker. Note that the picker is automatically stopped when
    * an element is picked.
+   *
+   * @param {Boolean} isDestroyCodePath
+   *        Optional. If true, we assume that's when the toolbox closes
+   *        and we should avoid doing any RDP request.
    */
-  async stop() {
+  async stop({ isDestroyCodepath } = {}) {
     if (!this.isPicking) {
       return;
     }
@@ -173,12 +185,21 @@ class NodePicker extends EventEmitter {
     );
 
     for (const inspectorFront of this._currentInspectorFronts) {
-      await this._onInspectorFrontDestroyed(inspectorFront);
+      await this._onInspectorFrontDestroyed(inspectorFront, {
+        isDestroyCodepath,
+      });
     }
 
     this._currentInspectorFronts.clear();
 
     this.emit("picker-stopped");
+  }
+
+  destroy() {
+    // Do not await for stop as the isDestroy argument will make this method synchronous
+    // and we want to avoid having an async destroy
+    this.stop({ isDestroyCodepath: true });
+    this.targetCommand = null;
   }
 
   /**
@@ -197,6 +218,20 @@ class NodePicker extends EventEmitter {
    */
   _onHovered(data) {
     this.emit("picker-node-hovered", data.node);
+
+    // @backward-compat { version 94 } The clearPickerSupport trait was added in 94 and
+    // can be removed when it hits release.
+    if (!data.node.walkerFront.traits.clearPickerSupport) {
+      return;
+    }
+
+    // We're going to cleanup references for all the other walkers, so that if we hover
+    // back the same node, we will receive a new `picker-node-hovered` event.
+    for (const inspectorFront of this._currentInspectorFronts) {
+      if (inspectorFront.walker !== data.node.walkerFront) {
+        inspectorFront.walker.clearPicker();
+      }
+    }
   }
 
   /**

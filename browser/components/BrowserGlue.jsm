@@ -17,6 +17,8 @@ const { AppConstants } = ChromeUtils.import(
   "resource://gre/modules/AppConstants.jsm"
 );
 
+Cu.importGlobalProperties(["Glean"]);
+
 XPCOMUtils.defineLazyModuleGetters(this, {
   AboutNewTab: "resource:///modules/AboutNewTab.jsm",
   ActorManagerParent: "resource://gre/modules/ActorManagerParent.jsm",
@@ -35,6 +37,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserUsageTelemetry: "resource:///modules/BrowserUsageTelemetry.jsm",
   BrowserUIUtils: "resource:///modules/BrowserUIUtils.jsm",
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
+  BuiltInThemes: "resource:///modules/BuiltInThemes.jsm",
   ContextualIdentityService:
     "resource://gre/modules/ContextualIdentityService.jsm",
   Corroborate: "resource://gre/modules/Corroborate.jsm",
@@ -57,7 +60,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   NewTabUtils: "resource://gre/modules/NewTabUtils.jsm",
   NimbusFeatures: "resource://nimbus/ExperimentAPI.jsm",
   Normandy: "resource://normandy/Normandy.jsm",
-  OS: "resource://gre/modules/osfile.jsm",
   OsEnvironment: "resource://gre/modules/OsEnvironment.jsm",
   PageActions: "resource:///modules/PageActions.jsm",
   PageThumbs: "resource://gre/modules/PageThumbs.jsm",
@@ -82,6 +84,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   SearchSERPTelemetry: "resource:///modules/SearchSERPTelemetry.jsm",
   SessionStartup: "resource:///modules/sessionstore/SessionStartup.jsm",
   SessionStore: "resource:///modules/sessionstore/SessionStore.jsm",
+  ShortcutUtils: "resource://gre/modules/ShortcutUtils.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
   TabUnloader: "resource:///modules/TabUnloader.jsm",
   TelemetryUtils: "resource://gre/modules/TelemetryUtils.jsm",
@@ -122,6 +125,8 @@ XPCOMUtils.defineLazyServiceGetters(this, {
 });
 
 const PREF_PDFJS_ISDEFAULT_CACHE_STATE = "pdfjs.enabledCache.state";
+const PREF_DFPI_ENABLED_BY_DEFAULT =
+  "privacy.restrict3rdpartystorage.rollout.enabledByDefault";
 
 /**
  * Fission-compatible JSProcess implementations.
@@ -307,7 +312,9 @@ let JSWINDOWACTORS = {
       events: {
         DOMContentLoaded: {},
         pageshow: { mozSystemGroup: true },
-        pagehide: { mozSystemGroup: true },
+        // Don't try to create the actor if only the pagehide event fires.
+        // This can happen with the initial about:blank documents.
+        pagehide: { mozSystemGroup: true, createActor: false },
       },
     },
     messageManagerGroups: ["browsers"],
@@ -392,22 +399,6 @@ let JSWINDOWACTORS = {
     },
 
     allFrames: true,
-  },
-
-  // Collects description and icon information from meta tags.
-  ContentMeta: {
-    parent: {
-      moduleURI: "resource:///actors/ContentMetaParent.jsm",
-    },
-
-    child: {
-      moduleURI: "resource:///actors/ContentMetaChild.jsm",
-      events: {
-        DOMMetaAdded: {},
-      },
-    },
-
-    messageManagerGroups: ["browsers"],
   },
 
   ContentSearch: {
@@ -753,6 +744,7 @@ let JSWINDOWACTORS = {
   let startTime = Cu.now();
   if (
     AppConstants.platform == "macosx" ||
+    Services.startup.wasSilentlyStarted ||
     !Services.prefs.getBoolPref("browser.startup.blankWindow", false)
   ) {
     return;
@@ -793,10 +785,7 @@ let JSWINDOWACTORS = {
   );
 
   // Hide the titlebar if the actual browser window will draw in it.
-  let hiddenTitlebar = Services.prefs.getBoolPref(
-    "browser.tabs.drawInTitlebar",
-    win.matchMedia("(-moz-gtk-csd-hide-titlebar-by-default)").matches
-  );
+  let hiddenTitlebar = Services.appinfo.drawInTitlebar;
   if (hiddenTitlebar) {
     win.windowUtils.setChromeMargin(0, 2, 2, 2);
   }
@@ -908,9 +897,6 @@ const BOOKMARKS_BACKUP_IDLE_TIME_SEC = 8 * 60;
 // Minimum interval between backups.  We try to not create more than one backup
 // per interval.
 const BOOKMARKS_BACKUP_MIN_INTERVAL_DAYS = 1;
-// Maximum interval between backups.  If the last backup is older than these
-// days we will try to create a new one more aggressively.
-const BOOKMARKS_BACKUP_MAX_INTERVAL_DAYS = 3;
 // Seconds of idle time before the late idle tasks will be scheduled.
 const LATE_TASKS_IDLE_TIME_SEC = 20;
 // Time after we stop tracking startup crashes.
@@ -1091,7 +1077,8 @@ BrowserGlue.prototype = {
         } else if (data == "force-distribution-customization") {
           this._distributionCustomizer.applyCustomizations();
           // To apply distribution bookmarks use "places-init-complete".
-        } else if (data == "force-places-init") {
+        } else if (data == "test-force-places-init") {
+          this._placesInitialized = false;
           this._initPlaces(false);
         } else if (data == "mock-alerts-service") {
           Object.defineProperty(this, "AlertsService", {
@@ -1103,6 +1090,8 @@ BrowserGlue.prototype = {
           }
         } else if (data == "add-breaches-sync-handler") {
           this._addBreachesSyncHandler();
+        } else if (data == "new-window-restriction-telemetry") {
+          this._collectNewWindowRestrictionTelemetry();
         }
         break;
       case "initial-migration-will-import-default-bookmarks":
@@ -1239,9 +1228,6 @@ BrowserGlue.prototype = {
     if (AppConstants.platform == "win") {
       JawsScreenReaderVersionCheck.init();
     }
-
-    // This value is to limit collecting Places telemetry once per session.
-    this._placesTelemetryGathered = false;
   },
 
   // cleanup (called on application shutdown)
@@ -1275,7 +1261,7 @@ BrowserGlue.prototype = {
         this,
         this._bookmarksBackupIdleTime
       );
-      delete this._bookmarksBackupIdleTime;
+      this._bookmarksBackupIdleTime = null;
     }
     if (this._lateTasksIdleObserver) {
       this._userIdleService.removeIdleObserver(
@@ -1318,6 +1304,10 @@ BrowserGlue.prototype = {
       this._matchCBCategory
     );
     Services.prefs.removeObserver(
+      "privacy.partition.network_state.ocsp_cache",
+      this._matchCBCategory
+    );
+    Services.prefs.removeObserver(
       ContentBlockingCategoriesPrefs.PREF_CB_CATEGORY,
       this._updateCBCategory
     );
@@ -1328,6 +1318,10 @@ BrowserGlue.prototype = {
     Services.prefs.removeObserver(
       "browser.contentblocking.features.strict",
       this._setPrefExpectationsAndUpdate
+    );
+    Services.prefs.removeObserver(
+      PREF_DFPI_ENABLED_BY_DEFAULT,
+      this._setDefaultCookieBehavior
     );
   },
 
@@ -1361,53 +1355,7 @@ BrowserGlue.prototype = {
 
     SessionStore.init();
 
-    AddonManager.maybeInstallBuiltinAddon(
-      "firefox-compact-light@mozilla.org",
-      "1.2",
-      "resource://builtin-themes/light/"
-    );
-    AddonManager.maybeInstallBuiltinAddon(
-      "firefox-compact-dark@mozilla.org",
-      "1.2",
-      "resource://builtin-themes/dark/"
-    );
-
-    AddonManager.maybeInstallBuiltinAddon(
-      "firefox-alpenglow@mozilla.org",
-      "1.4",
-      "resource://builtin-themes/alpenglow/"
-    );
-
-    if (
-      AppConstants.NIGHTLY_BUILD &&
-      Services.prefs.getBoolPref(
-        "browser.theme.temporary.monochromatic.enabled",
-        false
-      )
-    ) {
-      // Temporarily install a prototype monochromatic theme for UX iteration.
-      // We uninstall it during shutdown so it does not persist if the pref is
-      // disabled.
-      const kMonochromaticThemeID = "firefox-monochromatic-purple@mozilla.org";
-      AddonManager.maybeInstallBuiltinAddon(
-        kMonochromaticThemeID,
-        "1.0",
-        "resource://builtin-themes/monochromatic-purple/"
-      );
-      AsyncShutdown.profileChangeTeardown.addBlocker(
-        "Uninstall Prototype Monochromatic Theme",
-        async () => {
-          try {
-            let addon = await AddonManager.getAddonByID(kMonochromaticThemeID);
-            await addon.uninstall();
-          } catch (e) {
-            Cu.reportError(
-              "Failed to uninstall firefox-monochromatic-purple on shutdown"
-            );
-          }
-        }
-      );
-    }
+    BuiltInThemes.maybeInstallActiveBuiltInTheme();
 
     if (AppConstants.MOZ_NORMANDY) {
       Normandy.init();
@@ -1557,10 +1505,12 @@ BrowserGlue.prototype = {
     ];
 
     win.gNotificationBox.appendNotification(
-      message,
       "reset-profile-notification",
-      "chrome://global/skin/icons/help.svg",
-      win.gNotificationBox.PRIORITY_INFO_LOW,
+      {
+        label: message,
+        image: "chrome://global/skin/icons/question-64.png",
+        priority: win.gNotificationBox.PRIORITY_INFO_LOW,
+      },
       buttons
     );
   },
@@ -1589,10 +1539,11 @@ BrowserGlue.prototype = {
     ];
 
     win.gNotificationBox.appendNotification(
-      message,
       "unsigned-addons-disabled",
-      "",
-      win.gNotificationBox.PRIORITY_WARNING_MEDIUM,
+      {
+        label: message,
+        priority: win.gNotificationBox.PRIORITY_WARNING_MEDIUM,
+      },
       buttons
     );
   },
@@ -1642,7 +1593,7 @@ BrowserGlue.prototype = {
 
     ProcessHangMonitor.init();
 
-    UrlbarPrefs.updateFirefoxSuggestScenario();
+    UrlbarPrefs.updateFirefoxSuggestScenario(true);
 
     // A channel for "remote troubleshooting" code...
     let channel = new WebChannel(
@@ -1730,18 +1681,13 @@ BrowserGlue.prototype = {
 
     this._collectStartupConditionsTelemetry();
 
-    if (!this._placesTelemetryGathered && TelemetryUtils.isTelemetryEnabled) {
-      this._placesTelemetryGathered = true;
-      // Collect Places telemetry on the first idle.
-      Services.tm.idleDispatchToMainThread(() => {
-        PlacesDBUtils.telemetry();
-      });
-    }
-
     // Set the default favicon size for UI views that use the page-icon protocol.
     PlacesUtils.favicons.setDefaultIconURIPreferredSize(
       16 * aWindow.devicePixelRatio
     );
+    // _setDefaultCookieBehavior needs to run before other functions that modify
+    // privacy preferences such as _setPrefExpectationsAndUpdate and _matchCBCategory
+    this._setDefaultCookieBehavior();
     this._setPrefExpectationsAndUpdate();
     this._matchCBCategory();
 
@@ -1763,6 +1709,10 @@ BrowserGlue.prototype = {
       this._matchCBCategory
     );
     Services.prefs.addObserver(
+      "privacy.partition.network_state.ocsp_cache",
+      this._matchCBCategory
+    );
+    Services.prefs.addObserver(
       ContentBlockingCategoriesPrefs.PREF_CB_CATEGORY,
       this._updateCBCategory
     );
@@ -1778,6 +1728,10 @@ BrowserGlue.prototype = {
       "browser.contentblocking.features.strict",
       this._setPrefExpectationsAndUpdate
     );
+    Services.prefs.addObserver(
+      PREF_DFPI_ENABLED_BY_DEFAULT,
+      this._setDefaultCookieBehavior
+    );
   },
 
   _updateAutoplayPref() {
@@ -1788,6 +1742,57 @@ BrowserGlue.prototype = {
     const labels = { 0: "allow", 1: "blockAudible", 5: "blockAll" };
     if (blocked in labels) {
       telemetry.add(labels[blocked]);
+    }
+  },
+
+  // For the initial rollout of dFPI, set the default cookieBehavior based on the pref
+  // set during onboarding when the user chooses to enable protections or not.
+  _setDefaultCookieBehavior() {
+    if (!Services.prefs.prefHasUserValue(PREF_DFPI_ENABLED_BY_DEFAULT)) {
+      Services.telemetry.scalarSet("privacy.dfpi_rollout_enabledByDefault", 2);
+      return;
+    }
+    let dFPIEnabled = Services.prefs.getBoolPref(PREF_DFPI_ENABLED_BY_DEFAULT);
+
+    let defaultPrefs = Services.prefs.getDefaultBranch("");
+    defaultPrefs.setIntPref(
+      "network.cookie.cookieBehavior",
+      dFPIEnabled
+        ? Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN
+        : Ci.nsICookieService.BEHAVIOR_REJECT_TRACKER
+    );
+
+    Services.telemetry.scalarSet(
+      "privacy.dfpi_rollout_enabledByDefault",
+      dFPIEnabled ? 1 : 0
+    );
+
+    if (dFPIEnabled) {
+      Services.prefs.setStringPref(
+        "browser.search.param.google_channel_us",
+        "tus7"
+      );
+      Services.prefs.setStringPref(
+        "browser.search.param.google_channel_row",
+        "trow7"
+      );
+      Services.prefs.setStringPref(
+        "browser.search.param.bing_ptag",
+        "MOZZ0000000031"
+      );
+    } else {
+      Services.prefs.setStringPref(
+        "browser.search.param.google_channel_us",
+        "xus7"
+      );
+      Services.prefs.setStringPref(
+        "browser.search.param.google_channel_row",
+        "xrow7"
+      );
+      Services.prefs.setStringPref(
+        "browser.search.param.bing_ptag",
+        "MOZZ0000000032"
+      );
     }
   },
 
@@ -1944,44 +1949,57 @@ BrowserGlue.prototype = {
    * Application shutdown handler.
    */
   _onQuitApplicationGranted() {
-    // This pref must be set here because SessionStore will use its value
-    // on quit-application.
-    this._setPrefToSaveSession();
+    let tasks = [
+      // This pref must be set here because SessionStore will use its value
+      // on quit-application.
+      () => this._setPrefToSaveSession(),
 
-    // Call trackStartupCrashEnd here in case the delayed call on startup hasn't
-    // yet occurred (see trackStartupCrashEnd caller in browser.js).
-    try {
-      Services.startup.trackStartupCrashEnd();
-    } catch (e) {
-      Cu.reportError(
-        "Could not end startup crash tracking in quit-application-granted: " + e
-      );
-    }
+      // Call trackStartupCrashEnd here in case the delayed call on startup hasn't
+      // yet occurred (see trackStartupCrashEnd caller in browser.js).
+      () => Services.startup.trackStartupCrashEnd(),
 
-    if (this._bookmarksBackupIdleTime) {
-      this._userIdleService.removeIdleObserver(
-        this,
-        this._bookmarksBackupIdleTime
-      );
-      delete this._bookmarksBackupIdleTime;
-    }
+      () => {
+        if (this._bookmarksBackupIdleTime) {
+          this._userIdleService.removeIdleObserver(
+            this,
+            this._bookmarksBackupIdleTime
+          );
+          this._bookmarksBackupIdleTime = null;
+        }
+      },
 
-    for (let mod of Object.values(initializedModules)) {
-      if (mod.uninit) {
-        mod.uninit();
+      () => BrowserUsageTelemetry.uninit(),
+      () => SearchSERPTelemetry.uninit(),
+      () => Interactions.uninit(),
+      () => PageDataService.uninit(),
+      () => PageThumbs.uninit(),
+      () => NewTabUtils.uninit(),
+      () => Normandy.uninit(),
+      () => RFPHelper.uninit(),
+      () => ASRouterNewTabHook.destroy(),
+    ];
+
+    tasks.push(
+      ...Object.values(initializedModules)
+        .filter(m => m.uninit)
+        .map(m => () => m.uninit())
+    );
+
+    for (let task of tasks) {
+      try {
+        task();
+      } catch (ex) {
+        console.error(`Error during quit-application-granted: ${ex}`);
+        if (Cu.isInAutomation) {
+          // This usually happens after the test harness is done collecting
+          // test errors, thus we can't easily add a failure to it. The only
+          // noticeable solution we have is crashing.
+          Cc["@mozilla.org/xpcom/debug;1"]
+            .getService(Ci.nsIDebug2)
+            .abort(ex.filename, ex.lineNumber);
+        }
       }
     }
-
-    BrowserUsageTelemetry.uninit();
-    SearchSERPTelemetry.uninit();
-    Interactions.uninit();
-    PageDataService.uninit();
-    PageThumbs.uninit();
-    NewTabUtils.uninit();
-
-    Normandy.uninit();
-    RFPHelper.uninit();
-    ASRouterNewTabHook.destroy();
   },
 
   // Set up a listener to enable/disable the screenshots extension
@@ -2053,6 +2071,25 @@ BrowserGlue.prototype = {
     };
     Services.prefs.addObserver(PREF, _checkTranslationsPref);
     _checkTranslationsPref();
+  },
+
+  async _setupSearchDetection() {
+    // There is no pref for this add-on because it shouldn't be disabled.
+    const ID = "addons-search-detection@mozilla.com";
+
+    let addon = await AddonManager.getAddonByID(ID);
+
+    // first time install of addon and install on firefox update
+    addon =
+      (await AddonManager.maybeInstallBuiltinAddon(
+        ID,
+        "2.0.0",
+        "resource://builtin-addons/search-detection/"
+      )) || addon;
+
+    if (!addon.isActive) {
+      addon.enable();
+    }
   },
 
   _monitorHTTPSOnlyPref() {
@@ -2180,6 +2217,39 @@ BrowserGlue.prototype = {
     Services.wm.addListener(windowListener);
   },
 
+  _monitorGPCPref() {
+    const FEATURE_PREF_ENABLED = "privacy.globalprivacycontrol.enabled";
+    const FUNCTIONALITY_PREF_ENABLED =
+      "privacy.globalprivacycontrol.functionality.enabled";
+    const PREF_WAS_ENABLED = "privacy.globalprivacycontrol.was_ever_enabled";
+    const _checkGPCPref = async () => {
+      const feature_enabled = Services.prefs.getBoolPref(
+        FEATURE_PREF_ENABLED,
+        false
+      );
+      const functionality_enabled = Services.prefs.getBoolPref(
+        FUNCTIONALITY_PREF_ENABLED,
+        false
+      );
+      const was_enabled = Services.prefs.getBoolPref(PREF_WAS_ENABLED, false);
+      let value = 0;
+      if (feature_enabled && functionality_enabled) {
+        value = 1;
+        Services.prefs.setBoolPref(PREF_WAS_ENABLED, true);
+      } else if (was_enabled) {
+        value = 2;
+      }
+      Services.telemetry.scalarSet(
+        "security.global_privacy_control_enabled",
+        value
+      );
+    };
+
+    Services.prefs.addObserver(FEATURE_PREF_ENABLED, _checkGPCPref);
+    Services.prefs.addObserver(FUNCTIONALITY_PREF_ENABLED, _checkGPCPref);
+    _checkGPCPref();
+  },
+
   // All initial windows have opened.
   _onWindowsRestored: function BG__onWindowsRestored() {
     if (this._windowsWereRestored) {
@@ -2232,6 +2302,7 @@ BrowserGlue.prototype = {
     }
 
     Sanitizer.onStartup();
+    this._maybeShowRestoreSessionInfoBar();
     this._scheduleStartupIdleTasks();
     this._lateTasksIdleObserver = (idleService, topic, data) => {
       if (topic == "idle") {
@@ -2253,9 +2324,12 @@ BrowserGlue.prototype = {
     this._monitorHTTPSOnlyPref();
     this._monitorIonPref();
     this._monitorIonStudies();
+    this._setupSearchDetection();
+
     if (AppConstants.NIGHTLY_BUILD) {
       this._monitorTranslationsPref();
     }
+    this._monitorGPCPref();
   },
 
   /**
@@ -2302,6 +2376,13 @@ BrowserGlue.prototype = {
           // We postponed loading bookmarks toolbar content until startup
           // has finished, so we can start loading it now:
           PlacesUIUtils.unblockToolbars();
+        },
+      },
+
+      {
+        condition: TelemetryUtils.isTelemetryEnabled,
+        task: () => {
+          PlacesDBUtils.telemetry().catch(console.error);
         },
       },
 
@@ -2405,6 +2486,14 @@ BrowserGlue.prototype = {
             "os.environment.launch_method",
             classification
           );
+        },
+      },
+
+      // Install built-in themes. We already installed the active built-in
+      // theme, if any, before UI startup.
+      {
+        task: async () => {
+          await BuiltInThemes.ensureBuiltInThemes();
         },
       },
 
@@ -2622,6 +2711,12 @@ BrowserGlue.prototype = {
         },
       },
 
+      {
+        task: () => {
+          this._collectNewWindowRestrictionTelemetry();
+        },
+      },
+
       // WebDriver components (Remote Agent and Marionette) need to be
       // initialized as very last step.
       {
@@ -2812,6 +2907,11 @@ BrowserGlue.prototype = {
       return;
     }
 
+    // browser.warnOnQuit is a hidden global boolean to override all quit prompts.
+    if (!Services.prefs.getBoolPref("browser.warnOnQuit")) {
+      return;
+    }
+
     var windowcount = 0;
     var pagecount = 0;
     let pinnedcount = 0;
@@ -2830,7 +2930,21 @@ BrowserGlue.prototype = {
       }
     }
 
-    if (pagecount < 2) {
+    // No windows open so no need for a warning.
+    if (!windowcount) {
+      return;
+    }
+
+    // browser.warnOnQuitShortcut is checked when quitting using the shortcut key.
+    // The warning will appear even when only one window/tab is open. For other
+    // methods of quitting, the warning only appears when there is more than one
+    // window or tab open.
+    let shouldWarnForShortcut =
+      this._quitSource == "shortcut" &&
+      Services.prefs.getBoolPref("browser.warnOnQuitShortcut");
+    let shouldWarnForTabs =
+      pagecount >= 2 && Services.prefs.getBoolPref("browser.tabs.warnOnClose");
+    if (!shouldWarnForTabs && !shouldWarnForShortcut) {
       return;
     }
 
@@ -2838,83 +2952,68 @@ BrowserGlue.prototype = {
       aQuitType = "quit";
     }
 
-    // browser.warnOnQuit is a hidden global boolean to override all quit prompts
-    if (!Services.prefs.getBoolPref("browser.warnOnQuit")) {
-      return;
-    }
-
-    // If we're going to automatically restore the session, only warn if the user asked for that.
-    let sessionWillBeRestored =
-      Services.prefs.getIntPref("browser.startup.page") == 3 ||
-      Services.prefs.getBoolPref("browser.sessionstore.resume_session_once");
-    // In the sessionWillBeRestored case, we only check the sessionstore-specific pref:
-    if (sessionWillBeRestored) {
-      if (
-        !Services.prefs.getBoolPref("browser.sessionstore.warnOnQuit", false)
-      ) {
-        return;
-      }
-      // Otherwise, we check browser.tabs.warnOnClose
-    } else if (!Services.prefs.getBoolPref("browser.tabs.warnOnClose")) {
-      return;
-    }
-
     let win = BrowserWindowTracker.getTopWindow();
 
     // Our prompt for quitting is most important, so replace others.
     win.gDialogBox.replaceDialogIfOpen();
 
-    let warningMessage;
+    let title, buttonLabel;
     // More than 1 window. Compose our own message.
     if (windowcount > 1) {
-      let tabSubstring = gTabbrowserBundle.GetStringFromName(
-        "tabs.closeWarningMultipleWindowsTabSnippet"
-      );
-      tabSubstring = PluralForm.get(pagecount, tabSubstring).replace(
-        /#1/,
-        pagecount
-      );
+      title = gTabbrowserBundle.GetStringFromName("tabs.closeWindowsTitle");
+      title = PluralForm.get(windowcount, title).replace(/#1/, windowcount);
 
-      let stringID = sessionWillBeRestored
-        ? "tabs.closeWarningMultipleWindowsSessionRestore3"
-        : "tabs.closeWarningMultipleWindows2";
-      let windowString = gTabbrowserBundle.GetStringFromName(stringID);
-      windowString = PluralForm.get(windowcount, windowString).replace(
-        /#1/,
-        windowcount
+      buttonLabel =
+        AppConstants.platform == "win"
+          ? "tabs.closeWindowsButtonWin"
+          : "tabs.closeWindowsButton";
+      buttonLabel = gTabbrowserBundle.GetStringFromName(buttonLabel);
+    } else if (shouldWarnForShortcut) {
+      let productName = gBrandBundle.GetStringFromName("brandShorterName");
+      title = gTabbrowserBundle.formatStringFromName(
+        "tabs.closeTabsWithKeyTitle",
+        [productName]
       );
-      warningMessage = windowString.replace(/%(?:1\$)?S/i, tabSubstring);
+      buttonLabel = gTabbrowserBundle.formatStringFromName(
+        "tabs.closeTabsWithKeyButton",
+        [productName]
+      );
     } else {
-      let stringID = sessionWillBeRestored
-        ? "tabs.closeWarningMultipleTabsSessionRestore"
-        : "tabs.closeWarningMultipleTabs";
-      warningMessage = gTabbrowserBundle.GetStringFromName(stringID);
-      warningMessage = PluralForm.get(pagecount, warningMessage).replace(
-        "#1",
-        pagecount
+      title = gTabbrowserBundle.GetStringFromName("tabs.closeTabsTitle");
+      title = PluralForm.get(pagecount, title).replace("#1", pagecount);
+      buttonLabel = gTabbrowserBundle.GetStringFromName(
+        "tabs.closeButtonMultiple"
+      );
+    }
+
+    // The checkbox label is different depending on whether the shortcut
+    // was used to quit or not.
+    let checkboxLabel;
+    if (shouldWarnForShortcut) {
+      let quitKeyElement = win.document.getElementById("key_quitApplication");
+      let quitKey = ShortcutUtils.prettifyShortcut(quitKeyElement);
+
+      checkboxLabel = gTabbrowserBundle.formatStringFromName(
+        "tabs.closeTabsWithKeyConfirmCheckbox",
+        [quitKey]
+      );
+    } else {
+      checkboxLabel = gTabbrowserBundle.GetStringFromName(
+        "tabs.closeTabsConfirmCheckbox"
       );
     }
 
     let warnOnClose = { value: true };
-    let titleId =
-      AppConstants.platform == "win"
-        ? "tabs.closeTabsAndQuitTitleWin"
-        : "tabs.closeTabsAndQuitTitle";
     let flags =
       Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_0 +
       Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1;
-    // Only display the checkbox in the non-sessionrestore case.
-    let checkboxLabel = !sessionWillBeRestored
-      ? gTabbrowserBundle.GetStringFromName("tabs.closeWarningPrompt")
-      : null;
-
     // buttonPressed will be 0 for closing, 1 for cancel (don't close/quit)
     let buttonPressed = Services.prompt.confirmEx(
       win,
-      gTabbrowserBundle.GetStringFromName(titleId),
-      warningMessage,
+      title,
+      null,
       flags,
-      gTabbrowserBundle.GetStringFromName("tabs.closeButtonMultiple"),
+      buttonLabel,
       null,
       null,
       checkboxLabel,
@@ -2922,9 +3021,10 @@ BrowserGlue.prototype = {
     );
     Services.telemetry.setEventRecordingEnabled("close_tab_warning", true);
     let warnCheckbox = warnOnClose.value ? "checked" : "unchecked";
-    if (!checkboxLabel) {
-      warnCheckbox = "not-present";
-    }
+
+    let sessionWillBeRestored =
+      Services.prefs.getIntPref("browser.startup.page") == 3 ||
+      Services.prefs.getBoolPref("browser.sessionstore.resume_session_once");
     Services.telemetry.recordEvent(
       "close_tab_warning",
       "shown",
@@ -2940,13 +3040,18 @@ BrowserGlue.prototype = {
       }
     );
 
-    this._quitSource = "unknown";
-
     // If the user has unticked the box, and has confirmed closing, stop showing
     // the warning.
-    if (!sessionWillBeRestored && buttonPressed == 0 && !warnOnClose.value) {
-      Services.prefs.setBoolPref("browser.tabs.warnOnClose", false);
+    if (buttonPressed == 0 && !warnOnClose.value) {
+      if (shouldWarnForShortcut) {
+        Services.prefs.setBoolPref("browser.warnOnQuitShortcut", false);
+      } else {
+        Services.prefs.setBoolPref("browser.tabs.warnOnClose", false);
+      }
     }
+
+    this._quitSource = "unknown";
+
     aCancelQuit.data = buttonPressed != 0;
   },
 
@@ -2967,6 +3072,11 @@ BrowserGlue.prototype = {
    *   bookmarks.
    */
   _initPlaces: function BG__initPlaces(aInitialMigrationPerformed) {
+    if (this._placesInitialized) {
+      throw new Error("Cannot initialize Places more than once");
+    }
+    this._placesInitialized = true;
+
     // We must instantiate the history service since it will tell us if we
     // need to import or restore bookmarks due to first-run, corruption or
     // forced migration (due to a major schema change).
@@ -3031,15 +3141,11 @@ BrowserGlue.prototype = {
         }
       } catch (ex) {}
 
-      // This may be reused later, check for "=== undefined" to see if it has
-      // been populated already.
-      let lastBackupFile;
-
       // If the user did not require to restore default bookmarks, or import
       // from bookmarks.html, we will try to restore from JSON
       if (importBookmarks && !restoreDefaultBookmarks && !importBookmarksHTML) {
         // get latest JSON backup
-        lastBackupFile = await PlacesBackups.getMostRecentBackup();
+        let lastBackupFile = await PlacesBackups.getMostRecentBackup();
         if (lastBackupFile) {
           // restore from JSON backup
           await BookmarkJSONUtils.importFromFile(lastBackupFile, {
@@ -3050,7 +3156,7 @@ BrowserGlue.prototype = {
         } else {
           // We have created a new database but we don't have any backup available
           importBookmarks = true;
-          if (await OS.File.exists(BookmarkHTMLUtils.defaultPath)) {
+          if (await IOUtils.exists(BookmarkHTMLUtils.defaultPath)) {
             // If bookmarks.html is available in current profile import it...
             importBookmarksHTML = true;
           } else {
@@ -3078,8 +3184,8 @@ BrowserGlue.prototype = {
         if (restoreDefaultBookmarks) {
           // User wants to restore bookmarks.html file from default profile folder
           bookmarksUrl = "chrome://browser/locale/bookmarks.html";
-        } else if (await OS.File.exists(BookmarkHTMLUtils.defaultPath)) {
-          bookmarksUrl = OS.Path.toFileURI(BookmarkHTMLUtils.defaultPath);
+        } else if (await IOUtils.exists(BookmarkHTMLUtils.defaultPath)) {
+          bookmarksUrl = PathUtils.toFileURI(BookmarkHTMLUtils.defaultPath);
         }
 
         if (bookmarksUrl) {
@@ -3121,46 +3227,14 @@ BrowserGlue.prototype = {
       }
 
       // Initialize bookmark archiving on idle.
-      if (!this._bookmarksBackupIdleTime) {
-        this._bookmarksBackupIdleTime = BOOKMARKS_BACKUP_IDLE_TIME_SEC;
-
-        // If there is no backup, or the last bookmarks backup is too old, use
-        // a more aggressive idle observer.
-        if (lastBackupFile === undefined) {
-          lastBackupFile = await PlacesBackups.getMostRecentBackup();
-        }
-        if (!lastBackupFile) {
-          this._bookmarksBackupIdleTime /= 2;
-        } else {
-          let lastBackupTime = PlacesBackups.getDateForFile(lastBackupFile);
-          let profileLastUse = Services.appinfo.replacedLockTime || Date.now();
-
-          // If there is a backup after the last profile usage date it's fine,
-          // regardless its age.  Otherwise check how old is the last
-          // available backup compared to that session.
-          if (profileLastUse > lastBackupTime) {
-            let backupAge = Math.round(
-              (profileLastUse - lastBackupTime) / 86400000
-            );
-            // Report the age of the last available backup.
-            try {
-              Services.telemetry
-                .getHistogramById("PLACES_BACKUPS_DAYSFROMLAST")
-                .add(backupAge);
-            } catch (ex) {
-              Cu.reportError(new Error("Unable to report telemetry."));
-            }
-
-            if (backupAge > BOOKMARKS_BACKUP_MAX_INTERVAL_DAYS) {
-              this._bookmarksBackupIdleTime /= 2;
-            }
-          }
-        }
-        this._userIdleService.addIdleObserver(
-          this,
-          this._bookmarksBackupIdleTime
-        );
+      // If the last backup has been created before the last browser session,
+      // and is days old, be more aggressive with the idle timer.
+      let idleTime = BOOKMARKS_BACKUP_IDLE_TIME_SEC;
+      if (!(await PlacesBackups.hasRecentBackup())) {
+        idleTime /= 2;
       }
+      this._userIdleService.addIdleObserver(this, idleTime);
+      this._bookmarksBackupIdleTime = idleTime;
 
       if (this._isNewProfile) {
         try {
@@ -3213,7 +3287,6 @@ BrowserGlue.prototype = {
     var placesBundle = Services.strings.createBundle(
       "chrome://browser/locale/places/places.properties"
     );
-    var title = placesBundle.GetStringFromName("lockPrompt.title");
     var text = placesBundle.formatStringFromName("lockPrompt.text", [
       applicationName,
     ]);
@@ -3223,10 +3296,11 @@ BrowserGlue.prototype = {
 
     var notifyBox = win.gBrowser.getNotificationBox();
     var notification = notifyBox.appendNotification(
-      text,
-      title,
-      null,
-      notifyBox.PRIORITY_CRITICAL_MEDIUM,
+      "places-locked",
+      {
+        label: text,
+        priority: win.gNotificationBox.PRIORITY_CRITICAL_MEDIUM,
+      },
       buttons
     );
     notification.persistence = -1; // Until user closes it
@@ -3270,8 +3344,10 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 117;
+    const UI_VERSION = 120;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
+
+    const PROFILE_DIR = Services.dirsvc.get("ProfD", Ci.nsIFile).path;
 
     if (!Services.prefs.prefHasUserValue("browser.migration.version")) {
       // This is a new profile, nothing to migrate.
@@ -3291,10 +3367,9 @@ BrowserGlue.prototype = {
     let xulStore = Services.xulStore;
 
     if (currentUIVersion < 64) {
-      OS.File.remove(
-        OS.Path.join(OS.Constants.Path.profileDir, "directoryLinks.json"),
-        { ignoreAbsent: true }
-      );
+      IOUtils.remove(PathUtils.join(PROFILE_DIR, "directoryLinks.json"), {
+        ignoreAbsent: true,
+      });
     }
 
     if (
@@ -3339,10 +3414,9 @@ BrowserGlue.prototype = {
 
     if (currentUIVersion < 68) {
       // Remove blocklists legacy storage, now relying on IndexedDB.
-      OS.File.remove(
-        OS.Path.join(OS.Constants.Path.profileDir, "kinto.sqlite"),
-        { ignoreAbsent: true }
-      );
+      IOUtils.remove(PathUtils.join(PROFILE_DIR, "kinto.sqlite"), {
+        ignoreAbsent: true,
+      });
     }
 
     if (currentUIVersion < 69) {
@@ -3390,21 +3464,18 @@ BrowserGlue.prototype = {
 
     if (currentUIVersion < 73) {
       // Remove blocklist JSON local dumps in profile.
-      OS.File.removeDir(
-        OS.Path.join(OS.Constants.Path.profileDir, "blocklists"),
-        { ignoreAbsent: true }
-      );
-      OS.File.removeDir(
-        OS.Path.join(OS.Constants.Path.profileDir, "blocklists-preview"),
-        { ignoreAbsent: true }
-      );
+      IOUtils.remove(PathUtils.join(PROFILE_DIR, "blocklists"), {
+        recursive: true,
+        ignoreAbsent: true,
+      });
+      IOUtils.remove(PathUtils.join(PROFILE_DIR, "blocklists-preview"), {
+        recursive: true,
+        ignoreAbsent: true,
+      });
       for (const filename of ["addons.json", "plugins.json", "gfx.json"]) {
         // Some old versions used to dump without subfolders. Clean them while we are at it.
-        const path = OS.Path.join(
-          OS.Constants.Path.profileDir,
-          `blocklists-${filename}`
-        );
-        OS.File.remove(path, { ignoreAbsent: true });
+        const path = PathUtils.join(PROFILE_DIR, `blocklists-${filename}`);
+        IOUtils.remove(path, { ignoreAbsent: true });
       }
     }
 
@@ -3895,7 +3966,73 @@ BrowserGlue.prototype = {
       // 115 (bug 1713322): Move TAIL_SUGGESTION group and rename properties
       // 116 (bug 1717509): Remove HEURISTIC_UNIFIED_COMPLETE group
       // 117 (bug 1710518): Add GENERAL_PARENT group
-      UrlbarPrefs.migrateResultBuckets();
+      UrlbarPrefs.migrateResultGroups();
+    }
+
+    if (currentUIVersion < 119 && AppConstants.NIGHTLY_BUILD) {
+      // Uninstall outdated monochromatic themes for the following UI versions:
+      // 118: Uninstall prototype monochromatic purple theme.
+      // 119 (bug 1732957): Uninstall themes with old IDs.
+      const themeIdsToMigrate = [
+        "firefox-monochromatic-purple@mozilla.org",
+        "firefox-lush-soft@mozilla.org",
+        "firefox-lush-balanced@mozilla.org",
+        "firefox-lush-bold@mozilla.org",
+        "firefox-abstract-soft@mozilla.org",
+        "firefox-abstract-balanced@mozilla.org",
+        "firefox-abstract-bold@mozilla.org",
+        "firefox-elemental-soft@mozilla.org",
+        "firefox-elemental-balanced@mozilla.org",
+        "firefox-elemental-bold@mozilla.org",
+        "firefox-cheers-soft@mozilla.org",
+        "firefox-cheers-balanced@mozilla.org",
+        "firefox-cheers-bold@mozilla.org",
+        "firefox-graffiti-soft@mozilla.org",
+        "firefox-graffiti-balanced@mozilla.org",
+        "firefox-graffiti-bold@mozilla.org",
+        "firefox-foto-soft@mozilla.org",
+        "firefox-foto-balanced@mozilla.org",
+        "firefox-foto-bold@mozilla.org",
+      ];
+      try {
+        for (let id of themeIdsToMigrate) {
+          AddonManager.getAddonByID(id).then(addon => {
+            if (!addon) {
+              // Either the addon wasn't installed, or the call to getAddonByID failed.
+              return;
+            }
+            addon.uninstall().catch(Cu.reportError);
+          }, Cu.reportError);
+        }
+      } catch (error) {
+        Cu.reportError(
+          "Could not access the AddonManager to upgrade the profile. This is most " +
+            "likely because the upgrader is being run from an xpcshell test where " +
+            "the AddonManager is not initialized."
+        );
+      }
+    }
+
+    if (currentUIVersion < 120) {
+      // Migrate old titlebar bool pref to new int-based one.
+      const oldPref = "browser.tabs.drawInTitlebar";
+      const newPref = "browser.tabs.inTitlebar";
+      if (Services.prefs.prefHasUserValue(oldPref)) {
+        // We may have int prefs for builds between bug 1736518 and bug 1739539.
+        const oldPrefType = Services.prefs.getPrefType(oldPref);
+        if (oldPrefType == Services.prefs.PREF_BOOL) {
+          Services.prefs.setIntPref(
+            newPref,
+            Services.prefs.getBoolPref(oldPref) ? 1 : 0
+          );
+        } else {
+          Services.prefs.setIntPref(
+            newPref,
+            Services.prefs.getIntPref(oldPref)
+          );
+        }
+        Services.prefs.clearUserPref(oldPref);
+      }
     }
 
     // Update the migration version.
@@ -3911,12 +4048,9 @@ BrowserGlue.prototype = {
   async _maybeShowDefaultBrowserPrompt() {
     // Highest priority is the upgrade dialog, which can include a "primary
     // browser" request and is limited in various ways, e.g., major upgrades.
-    const dialogVersion = 89;
+    const dialogVersion = 94;
     const dialogVersionPref = "browser.startup.upgradeDialog.version";
     const dialogReason = await (async () => {
-      if (!Services.prefs.getBoolPref("browser.proton.enabled", true)) {
-        return "no-proton";
-      }
       if (!BrowserHandler.majorUpgrade) {
         return "not-major";
       }
@@ -3960,6 +4094,10 @@ BrowserGlue.prototype = {
     // Show the upgrade dialog if allowed and remember the version.
     if (!dialogReason) {
       Services.prefs.setIntPref(dialogVersionPref, dialogVersion);
+
+      // Show Firefox Home behind the upgrade dialog to see theme changes.
+      const { gBrowser } = BrowserWindowTracker.getTopWindow();
+      gBrowser.selectedTab = gBrowser.addTrustedTab("about:home");
       this._showUpgradeDialog();
       return;
     }
@@ -3978,6 +4116,81 @@ BrowserGlue.prototype = {
       id: "defaultBrowserCheck",
       context: { willShowDefaultPrompt: willPrompt, source: "startup" },
     });
+  },
+
+  /**
+   * Only show the infobar when canRestoreLastSession and the pref value == 1
+   */
+  async _maybeShowRestoreSessionInfoBar() {
+    let count = Services.prefs.getIntPref(
+      "browser.startup.couldRestoreSession.count",
+      0
+    );
+    if (count < 0 || count >= 2) {
+      return;
+    }
+    if (count == 0) {
+      // We don't show the infobar right after the update which establishes this pref
+      // Increment the counter so we can consider it next time
+      Services.prefs.setIntPref(
+        "browser.startup.couldRestoreSession.count",
+        ++count
+      );
+      return;
+    }
+
+    const win = BrowserWindowTracker.getTopWindow();
+    // We've restarted at least once; we will show the notification if possible.
+    // We can't do that if there's no session to restore, or this is a private window.
+    if (
+      !SessionStore.canRestoreLastSession ||
+      PrivateBrowsingUtils.isWindowPrivate(win)
+    ) {
+      return;
+    }
+
+    Services.prefs.setIntPref(
+      "browser.startup.couldRestoreSession.count",
+      ++count
+    );
+
+    const messageFragment = win.document.createDocumentFragment();
+    const message = win.document.createElement("span");
+    const icon = win.document.createElement("img");
+    icon.src = "chrome://browser/skin/menu.svg";
+    icon.setAttribute("data-l10n-name", "icon");
+    icon.className = "inline-icon";
+    message.appendChild(icon);
+    messageFragment.appendChild(message);
+    win.document.l10n.setAttributes(
+      message,
+      "restore-session-startup-suggestion-message"
+    );
+
+    const buttons = [
+      {
+        "l10n-id": "restore-session-startup-suggestion-button",
+        primary: true,
+        callback: () => {
+          win.PanelUI.selectAndMarkItem([
+            "appMenu-history-button",
+            "appMenu-restoreSession",
+          ]);
+        },
+      },
+    ];
+
+    const notifyBox = win.gBrowser.getNotificationBox();
+    const notification = notifyBox.appendNotification(
+      "startup-restore-session-suggestion",
+      {
+        label: messageFragment,
+        priority: notifyBox.PRIORITY_INFO_MEDIUM,
+      },
+      buttons
+    );
+    // Don't allow it to be immediately hidden:
+    notification.timeout = Date.now() + 3000;
   },
 
   /**
@@ -4273,10 +4486,11 @@ BrowserGlue.prototype = {
 
     // XXXndeakin is this notification still relevant?
     win.gNotificationBox.appendNotification(
-      message,
       "flash-hang",
-      null,
-      win.gNotificationBox.PRIORITY_INFO_MEDIUM,
+      {
+        label: message,
+        priority: win.gNotificationBox.PRIORITY_INFO_MEDIUM,
+      },
       buttons
     );
   },
@@ -4310,6 +4524,14 @@ BrowserGlue.prototype = {
     }
   },
 
+  _collectNewWindowRestrictionTelemetry() {
+    let restrictionPref = Services.prefs.getIntPref(
+      "browser.link.open_newwindow.restriction",
+      2
+    );
+    Glean.browserLink.openNewwindowRestriction.set(restrictionPref);
+  },
+
   QueryInterface: ChromeUtils.generateQI([
     "nsIObserver",
     "nsISupportsWeakReference",
@@ -4336,6 +4558,7 @@ var ContentBlockingCategoriesPrefs = {
         "privacy.trackingprotection.cryptomining.enabled": null,
         "privacy.annotate_channels.strict_list.enabled": null,
         "network.http.referer.disallowCrossSiteRelaxingDefault": null,
+        "privacy.partition.network_state.ocsp_cache": null,
       },
       standard: {
         "network.cookie.cookieBehavior": null,
@@ -4347,6 +4570,7 @@ var ContentBlockingCategoriesPrefs = {
         "privacy.trackingprotection.cryptomining.enabled": null,
         "privacy.annotate_channels.strict_list.enabled": null,
         "network.http.referer.disallowCrossSiteRelaxingDefault": null,
+        "privacy.partition.network_state.ocsp_cache": null,
       },
     };
     let type = "strict";
@@ -4423,6 +4647,16 @@ var ContentBlockingCategoriesPrefs = {
         case "-rp":
           this.CATEGORY_PREFS[type][
             "network.http.referer.disallowCrossSiteRelaxingDefault"
+          ] = false;
+          break;
+        case "ocsp":
+          this.CATEGORY_PREFS[type][
+            "privacy.partition.network_state.ocsp_cache"
+          ] = true;
+          break;
+        case "-ocsp":
+          this.CATEGORY_PREFS[type][
+            "privacy.partition.network_state.ocsp_cache"
           ] = false;
           break;
         case "cookieBehavior0":
@@ -4531,7 +4765,9 @@ var ContentBlockingCategoriesPrefs = {
     // If there is a custom policy which changes a related pref, then put the user in custom so
     // they still have access to other content blocking prefs, and to keep our default definitions
     // from changing.
-    let policy = Services.policies.getActivePolicies();
+    let policy =
+      Services.policies.status != Ci.nsIEnterprisePolicies.INACTIVE &&
+      Services.policies.getActivePolicies();
     if (policy && (policy.EnableTrackingProtection || policy.Cookies)) {
       Services.prefs.setStringPref(this.PREF_CB_CATEGORY, "custom");
     }
@@ -4728,7 +4964,10 @@ ContentPermissionPrompt.prototype = {
     let userInputHistogram = Services.telemetry.getKeyedHistogramById(
       "PERMISSION_REQUEST_HANDLING_USER_INPUT"
     );
-    userInputHistogram.add(type, request.isHandlingUserInput);
+    userInputHistogram.add(
+      type,
+      request.hasValidTransientUserGestureActivation
+    );
   },
 };
 

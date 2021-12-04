@@ -98,7 +98,7 @@ use api::units::*;
 use crate::image_tiling::{self, Repetition};
 use crate::border::{ensure_no_corner_overlap, BorderRadiusAu};
 use crate::box_shadow::{BLUR_SAMPLE_SCALE, BoxShadowClipSource, BoxShadowCacheKey};
-use crate::spatial_tree::{ROOT_SPATIAL_NODE_INDEX, SpatialTree, SpatialNodeIndex, CoordinateSystemId};
+use crate::spatial_tree::{SpatialTree, SpatialNodeIndex, CoordinateSystemId};
 use crate::ellipse::Ellipse;
 use crate::gpu_cache::GpuCache;
 use crate::gpu_types::{BoxShadowStretchMode};
@@ -553,10 +553,8 @@ impl ClipSpaceConversion {
         //Note: this code is different from `get_relative_transform` in a way that we only try
         // getting the relative transform if it's Local or ScaleOffset,
         // falling back to the world transform otherwise.
-        let clip_spatial_node = &spatial_tree
-            .spatial_nodes[clip_spatial_node_index.0 as usize];
-        let prim_spatial_node = &spatial_tree
-            .spatial_nodes[prim_spatial_node_index.0 as usize];
+        let clip_spatial_node = spatial_tree.get_spatial_node(clip_spatial_node_index);
+        let prim_spatial_node = spatial_tree.get_spatial_node(prim_spatial_node_index);
 
         if prim_spatial_node_index == clip_spatial_node_index {
             ClipSpaceConversion::Local
@@ -818,7 +816,7 @@ impl ClipChainInstance {
             has_non_local_clips: false,
             needs_mask: false,
             pic_clip_rect: PictureRect::zero(),
-            pic_spatial_node_index: ROOT_SPATIAL_NODE_INDEX,
+            pic_spatial_node_index: SpatialNodeIndex::INVALID,
         }
     }
 }
@@ -981,7 +979,7 @@ impl ClipChainStack {
         //           knowing if a reference frame exists in the chain between the
         //           clip's spatial node and the picture cache reference spatial node).
         for clip in maybe_shared_clips {
-            let spatial_node = &spatial_tree.spatial_nodes[clip.spatial_node_index.0 as usize];
+            let spatial_node = spatial_tree.get_spatial_node(clip.spatial_node_index);
             if spatial_node.coordinate_system_id == CoordinateSystemId::root() {
                 shared_clips.push(*clip);
             }
@@ -1228,6 +1226,66 @@ impl ClipStore {
                 conversion,
             });
         }
+    }
+
+    /// Given a clip-chain instance, return a safe rect within the visible region
+    /// that can be assumed to be unaffected by clip radii. Returns None if it
+    /// encounters any complex cases, just handling rounded rects in the same
+    /// coordinate system as the clip-chain for now.
+    pub fn get_inner_rect_for_clip_chain(
+        &self,
+        clip_chain: &ClipChainInstance,
+        clip_data_store: &ClipDataStore,
+        spatial_tree: &SpatialTree,
+    ) -> Option<PictureRect> {
+        let mut inner_rect = clip_chain.pic_clip_rect;
+        let clip_instances = &self
+            .clip_node_instances[clip_chain.clips_range.to_range()];
+
+        for clip_instance in clip_instances {
+            // Don't handle mapping between coord systems for now
+            if !clip_instance.flags.contains(ClipNodeFlags::SAME_COORD_SYSTEM) {
+                return None;
+            }
+
+            let clip_node = &clip_data_store[clip_instance.handle];
+
+            match clip_node.item.kind {
+                // Ignore any clips which are complex or impossible to calculate
+                // inner rects for now
+                ClipItemKind::Rectangle { mode: ClipMode::ClipOut, .. } |
+                ClipItemKind::Image { .. } |
+                ClipItemKind::BoxShadow { .. } |
+                ClipItemKind::RoundedRectangle { mode: ClipMode::ClipOut, .. } => {
+                    return None;
+                }
+                // Normal Clip rects are already handled by the clip-chain pic_clip_rect,
+                // no need to do anything here
+                ClipItemKind::Rectangle { mode: ClipMode::Clip, .. } => {}
+                ClipItemKind::RoundedRectangle { mode: ClipMode::Clip, rect, radius } => {
+                    // Get an inner rect for the rounded-rect clip
+                    let local_inner_rect = match extract_inner_rect_safe(&rect, &radius) {
+                        Some(rect) => rect,
+                        None => return None,
+                    };
+
+                    // Map it from local -> picture space
+                    let mapper = SpaceMapper::new_with_target(
+                        clip_chain.pic_spatial_node_index,
+                        clip_instance.spatial_node_index,
+                        PictureRect::max_rect(),
+                        spatial_tree,
+                    );
+
+                    // Accumulate in to the inner_rect, in case there are multiple rounded-rect clips
+                    if let Some(pic_inner_rect) = mapper.map(&local_inner_rect) {
+                        inner_rect = inner_rect.intersection(&pic_inner_rect).unwrap_or(PictureRect::zero());
+                    }
+                }
+            }
+        }
+
+        Some(inner_rect)
     }
 
     /// The main interface external code uses. Given a local primitive, positioning
@@ -2130,11 +2188,11 @@ fn add_clip_node_to_current_chain(
                 // never used in Gecko, and we aim to remove support in WR for that
                 // in future to simplify the clipping pipeline.
                 let pic_coord_system = spatial_tree
-                    .spatial_nodes[pic_spatial_node_index.0 as usize]
+                    .get_spatial_node(pic_spatial_node_index)
                     .coordinate_system_id;
 
                 let clip_coord_system = spatial_tree
-                    .spatial_nodes[node.spatial_node_index.0 as usize]
+                    .get_spatial_node(node.spatial_node_index)
                     .coordinate_system_id;
 
                 if pic_coord_system == clip_coord_system {

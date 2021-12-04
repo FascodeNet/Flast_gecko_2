@@ -54,12 +54,6 @@ var gIdentityHandler = {
   _state: 0,
 
   /**
-   * RegExp used to decide if an about url should be shown as being part of
-   * the browser UI.
-   */
-  _secureInternalPages: /^(?:accounts|addons|cache|certificate|config|crashes|downloads|license|logins|preferences|protections|rights|sessionrestore|support|welcomeback|ion)(?:[?#]|$)/i,
-
-  /**
    * Whether the established HTTPS connection is considered "broken".
    * This could have several reasons, such as mixed content or weak
    * cryptography. If this is true, _isSecureConnection is false.
@@ -974,7 +968,11 @@ var gIdentityHandler = {
       connection = "file";
     }
 
-    document.getElementById("identity-popup-security-button").disabled = ![
+    let securityButtonNode = document.getElementById(
+      "identity-popup-security-button"
+    );
+
+    let disableSecurityButton = ![
       "not-secure",
       "secure",
       "secure-ev",
@@ -983,6 +981,13 @@ var gIdentityHandler = {
       "net-error-page",
       "https-only-error-page",
     ].includes(connection);
+    if (disableSecurityButton) {
+      securityButtonNode.disabled = true;
+      securityButtonNode.classList.remove("subviewbutton-nav");
+    } else {
+      securityButtonNode.disabled = false;
+      securityButtonNode.classList.add("subviewbutton-nav");
+    }
 
     // Determine the mixed content state.
     let mixedcontent = [];
@@ -1138,9 +1143,17 @@ var gIdentityHandler = {
       this._uriHasHost = false;
     }
 
-    this._isSecureInternalUI =
-      uri.schemeIs("about") && this._secureInternalPages.test(uri.pathQueryRef);
-
+    if (uri.schemeIs("about")) {
+      let module = E10SUtils.getAboutModule(uri);
+      if (module) {
+        let flags = module.getURIFlags(uri);
+        this._isSecureInternalUI = !!(
+          flags & Ci.nsIAboutModule.IS_SECURE_CHROME_UI
+        );
+      }
+    } else {
+      this._isSecureInternalUI = false;
+    }
     this._pageExtensionPolicy = WebExtensionPolicy.getByURI(uri);
 
     // Create a channel for the sole purpose of getting the resolved URI

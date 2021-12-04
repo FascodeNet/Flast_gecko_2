@@ -26,6 +26,7 @@ UNIFIED_SOURCES += [
     "TestID.cpp",
     "TestIDUtils.cpp",
     "TestInputStreamLengthHelper.cpp",
+    "TestJSHolderMap.cpp",
     "TestLogCommandLineHandler.cpp",
     "TestLogging.cpp",
     "TestMemoryPressure.cpp",
@@ -113,6 +114,12 @@ else:
         "TestFilePreferencesUnix.cpp",
     ]
 
+if CONFIG["OS_TARGET"] == "Darwin":
+    UNIFIED_SOURCES += [
+        "TestAvailableMemoryWatcherMac.cpp",
+        "TestMacNSURLEscaping.mm",
+    ]
+
 if (
     CONFIG["WRAP_STL_INCLUDES"]
     and CONFIG["CC_TYPE"] != "clang-cl"
@@ -158,5 +165,3 @@ TEST_HARNESS_FILES.gtest += [
 FINAL_LIBRARY = "xul-gtest"
 
 include("/ipc/chromium/chromium-config.mozbuild")
-
-REQUIRES_UNIFIED_BUILD = True

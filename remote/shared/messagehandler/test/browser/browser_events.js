@@ -3,8 +3,8 @@
 
 "use strict";
 
-const { MessageHandlerRegistry } = ChromeUtils.import(
-  "chrome://remote/content/shared/messagehandler/MessageHandlerRegistry.jsm"
+const { RootMessageHandlerRegistry } = ChromeUtils.import(
+  "chrome://remote/content/shared/messagehandler/RootMessageHandlerRegistry.jsm"
 );
 const { RootMessageHandler } = ChromeUtils.import(
   "chrome://remote/content/shared/messagehandler/RootMessageHandler.jsm"
@@ -21,7 +21,7 @@ const { WindowGlobalMessageHandler } = ChromeUtils.import(
 add_task(async function test_event() {
   const tab = BrowserTestUtils.addTab(
     gBrowser,
-    "http://example.com/document-builder.sjs?html=tab"
+    "https://example.com/document-builder.sjs?html=tab"
   );
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
   const browsingContext = tab.linkedBrowser.browsingContext;
@@ -30,7 +30,7 @@ add_task(async function test_event() {
 
   const onTestEvent = rootMessageHandler.once("message-handler-event");
   // MessageHandlerRegistry should forward all the message-handler-events.
-  const onRegistryEvent = MessageHandlerRegistry.once(
+  const onRegistryEvent = RootMessageHandlerRegistry.once(
     "message-handler-registry-event"
   );
 
@@ -96,7 +96,7 @@ add_task(async function test_root_event() {
 add_task(async function test_windowglobal_in_root_event() {
   const tab = BrowserTestUtils.addTab(
     gBrowser,
-    "http://example.com/document-builder.sjs?html=tab"
+    "https://example.com/document-builder.sjs?html=tab"
   );
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
   const browsingContext = tab.linkedBrowser.browsingContext;
@@ -139,7 +139,7 @@ add_task(async function test_windowglobal_in_root_event() {
 add_task(async function test_event_multisession() {
   const tab = BrowserTestUtils.addTab(
     gBrowser,
-    "http://example.com/document-builder.sjs?html=tab"
+    "https://example.com/document-builder.sjs?html=tab"
   );
   await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
   const browsingContextId = tab.linkedBrowser.browsingContext.id;
@@ -168,7 +168,10 @@ add_task(async function test_event_multisession() {
       registryEvents++;
     }
   };
-  MessageHandlerRegistry.on("message-handler-registry-event", onRegistryEvent);
+  RootMessageHandlerRegistry.on(
+    "message-handler-registry-event",
+    onRegistryEvent
+  );
 
   callTestEmitEvent(root1, browsingContextId);
   callTestEmitEvent(root2, browsingContextId);
@@ -189,7 +192,10 @@ add_task(async function test_event_multisession() {
 
   root1.off("message-handler-event", onRoot1Event);
   root2.off("message-handler-event", onRoot2Event);
-  MessageHandlerRegistry.off("message-handler-registry-event", onRegistryEvent);
+  RootMessageHandlerRegistry.off(
+    "message-handler-registry-event",
+    onRegistryEvent
+  );
   root1.destroy();
   root2.destroy();
   gBrowser.removeTab(tab);

@@ -703,6 +703,16 @@ bool WarpCacheIRTranspiler::emitMegamorphicSetElement(ObjOperandId objId,
   return resumeAfter(ins);
 }
 
+bool WarpCacheIRTranspiler::emitValueToIteratorResult(ValOperandId valId) {
+  MDefinition* val = getOperand(valId);
+
+  auto* ins = MValueToIterator::New(alloc(), val);
+  addEffectful(ins);
+
+  pushResult(ins);
+  return resumeAfter(ins);
+}
+
 bool WarpCacheIRTranspiler::emitGuardIsNotArrayBufferMaybeShared(
     ObjOperandId objId) {
   MDefinition* obj = getOperand(objId);
@@ -753,6 +763,22 @@ bool WarpCacheIRTranspiler::emitGuardDynamicSlotIsSpecificObject(
 
   auto* guard = MGuardObjectIdentity::New(alloc(), unbox, expected,
                                           /* bailOnEquality = */ false);
+  add(guard);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitGuardDynamicSlotIsNotObject(
+    ObjOperandId objId, uint32_t slotOffset) {
+  size_t slotIndex = int32StubField(slotOffset);
+  MDefinition* obj = getOperand(objId);
+
+  auto* slots = MSlots::New(alloc(), obj);
+  add(slots);
+
+  auto* load = MLoadDynamicSlot::New(alloc(), slots, slotIndex);
+  add(load);
+
+  auto* guard = MGuardIsNotObject::New(alloc(), load);
   add(guard);
   return true;
 }
@@ -1365,7 +1391,10 @@ bool WarpCacheIRTranspiler::emitLoadConstantStringResult(uint32_t strOffset) {
 
 bool WarpCacheIRTranspiler::emitLoadTypeOfObjectResult(ObjOperandId objId) {
   MDefinition* obj = getOperand(objId);
-  auto* ins = MTypeOf::New(alloc(), obj);
+  auto* typeOf = MTypeOf::New(alloc(), obj);
+  add(typeOf);
+
+  auto* ins = MTypeOfName::New(alloc(), typeOf);
   add(ins);
   pushResult(ins);
   return true;
@@ -1712,9 +1741,7 @@ bool WarpCacheIRTranspiler::emitLoadDenseElementHoleResult(
   auto* length = MInitializedLength::New(alloc(), elements);
   add(length);
 
-  bool needsHoleCheck = true;
-  auto* load =
-      MLoadElementHole::New(alloc(), elements, index, length, needsHoleCheck);
+  auto* load = MLoadElementHole::New(alloc(), elements, index, length);
   add(load);
 
   pushResult(load);
@@ -2792,10 +2819,10 @@ bool WarpCacheIRTranspiler::emitMathRandomResult(uint32_t rngOffset) {
 #endif
 
   auto* ins = MRandom::New(alloc());
-  add(ins);
+  addEffectful(ins);
 
   pushResult(ins);
-  return true;
+  return resumeAfter(ins);
 }
 
 bool WarpCacheIRTranspiler::emitInt32MinMax(bool isMax, Int32OperandId firstId,

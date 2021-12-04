@@ -292,14 +292,17 @@ ArgumentsObject* ArgumentsObject::createTemplateObject(JSContext* cx,
   return obj;
 }
 
-ArgumentsObject* Realm::maybeArgumentsTemplateObject(bool mapped) const {
-  return mapped ? mappedArgumentsTemplate_ : unmappedArgumentsTemplate_;
+ArgumentsObject* GlobalObject::maybeArgumentsTemplateObject(bool mapped) const {
+  return mapped ? data().mappedArgumentsTemplate
+                : data().unmappedArgumentsTemplate;
 }
 
-ArgumentsObject* Realm::getOrCreateArgumentsTemplateObject(JSContext* cx,
-                                                           bool mapped) {
-  WeakHeapPtr<ArgumentsObject*>& obj =
-      mapped ? mappedArgumentsTemplate_ : unmappedArgumentsTemplate_;
+/* static */
+ArgumentsObject* GlobalObject::getOrCreateArgumentsTemplateObject(JSContext* cx,
+                                                                  bool mapped) {
+  GlobalObjectData& data = cx->global()->data();
+  HeapPtr<ArgumentsObject*>& obj =
+      mapped ? data.mappedArgumentsTemplate : data.unmappedArgumentsTemplate;
 
   ArgumentsObject* templateObj = obj;
   if (templateObj) {
@@ -311,7 +314,7 @@ ArgumentsObject* Realm::getOrCreateArgumentsTemplateObject(JSContext* cx,
     return nullptr;
   }
 
-  obj.set(templateObj);
+  obj.init(templateObj);
   return templateObj;
 }
 
@@ -321,7 +324,7 @@ ArgumentsObject* ArgumentsObject::create(JSContext* cx, HandleFunction callee,
                                          unsigned numActuals, CopyArgs& copy) {
   bool mapped = callee->baseScript()->hasMappedArgsObj();
   ArgumentsObject* templateObj =
-      cx->realm()->getOrCreateArgumentsTemplateObject(cx, mapped);
+      GlobalObject::getOrCreateArgumentsTemplateObject(cx, mapped);
   if (!templateObj) {
     return nullptr;
   }
@@ -637,9 +640,6 @@ bool ArgumentsObject::reifyIterator(JSContext* cx,
 static bool ResolveArgumentsProperty(JSContext* cx,
                                      Handle<ArgumentsObject*> obj, HandleId id,
                                      PropertyFlags flags, bool* resolvedp) {
-  // Note: we don't need to call ReshapeForShadowedProp here because we're just
-  // resolving an existing property instead of defining a new property.
-
   MOZ_ASSERT(id.isInt() || id.isAtom(cx->names().length) ||
              id.isAtom(cx->names().callee));
   MOZ_ASSERT(flags.isCustomDataProperty());

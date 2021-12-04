@@ -31,6 +31,10 @@
   text-shadow: none;
 }
 
+:root[lwtheme-image] #customization-palette .toolbarbutton-1 {
+  fill: currentColor;
+}
+
 #customization-palette {
   padding: 5px 20px 20px;
 }
@@ -143,6 +147,11 @@
 }
 %endif /* defined(XP_MACOSX) || defined(XP_WIN) */
 
+#customization-lwtheme-link {
+  display: flex;
+  align-items: center;
+}
+
 #widget-overflow-fixed-list > toolbarpaletteitem:not([notransition])[place="menu-panel"],
 toolbarpaletteitem:not([notransition])[place="toolbar"] {
   transition: border-width var(--drag-drop-transition-duration) ease-in-out;
@@ -207,9 +216,6 @@ toolbarpaletteitem[place="toolbar"] {
   margin-bottom: 20px;
 }
 
-#customization-palette .toolbarbutton-1 {
-  fill: currentColor;
-}
 
 toolbarpaletteitem[place="palette"]:-moz-focusring,
 toolbarpaletteitem[place="menu-panel"]:-moz-focusring,

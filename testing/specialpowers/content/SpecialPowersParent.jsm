@@ -412,6 +412,7 @@ class SpecialPowersParent extends JSWindowActorParent {
     for (let pref of actions) {
       requiresRefresh =
         requiresRefresh ||
+        pref.name == "layout.css.prefers-color-scheme.content-override" ||
         pref.name.startsWith("ui.") ||
         pref.name.startsWith("browser.display.") ||
         pref.name.startsWith("font.");
@@ -1086,6 +1087,16 @@ class SpecialPowersParent extends JSWindowActorParent {
         case "SPLoadExtension": {
           let id = aMessage.data.id;
           let ext = aMessage.data.ext;
+          if (AppConstants.platform === "android") {
+            // Some extension APIs are partially implemented in Java, and the
+            // interface between the JS and Java side (GeckoViewWebExtension)
+            // expects extensions to be registered with the AddonManager.
+            //
+            // For simplicity, default to using an Addon Manager (if not null).
+            if (ext.useAddonManager === undefined) {
+              ext.useAddonManager = "android-only";
+            }
+          }
           let extension = ExtensionTestCommon.generate(ext);
 
           let resultListener = (...args) => {

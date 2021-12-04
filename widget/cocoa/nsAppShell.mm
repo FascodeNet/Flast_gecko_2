@@ -335,6 +335,11 @@ nsresult nsAppShell::Init() {
   // NSApplicationMain() is running).
   NSAutoreleasePool* localPool = [[NSAutoreleasePool alloc] init];
 
+  char* mozAppNoDock = PR_GetEnv("MOZ_APP_NO_DOCK");
+  if (mozAppNoDock && strcmp(mozAppNoDock, "") != 0) {
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+  }
+
   // mAutoreleasePools is used as a stack of NSAutoreleasePool objects created
   // by |this|.  CFArray is used instead of NSArray because NSArray wants to
   // retain each object you add to it, and you can't retain an
@@ -470,6 +475,29 @@ void nsAppShell::ProcessGeckoEvents(void* aInfo) {
                                            data1:0
                                            data2:0]
              atStart:NO];
+    // Previously we used to send this second event regardless of
+    // self->mRunningEventLoop. However, that was removed in bug 1690687 for
+    // performance reasons. It is still needed for the mRunningEventLoop case
+    // otherwise we'll get in a cycle of sending postEvent followed by the
+    // DummyEvent inserted by nsBaseAppShell::OnProcessNextEvent. This second
+    // event will cause the second call to AcquireFirstMatchingEventInQueue in
+    // nsAppShell::ProcessNextNativeEvent to return true. Which makes
+    // nsBaseAppShell::OnProcessNextEvent call nsAppShell::ProcessNextNativeEvent
+    // again during which it will loop until it sleeps because ProcessGeckoEvents()
+    // won't be called for the DummyEvent.
+    //
+    // This is not a good approach and we should fix things up so that only
+    // one postEvent is needed.
+    [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                        location:NSMakePoint(0, 0)
+                                   modifierFlags:0
+                                       timestamp:0
+                                    windowNumber:0
+                                         context:NULL
+                                         subtype:kEventSubtypeNone
+                                           data1:0
+                                           data2:0]
+             atStart:NO];
   }
 
   if (self->mSuspendNativeCount <= 0) {
@@ -480,18 +508,19 @@ void nsAppShell::ProcessGeckoEvents(void* aInfo) {
     self->mSkippedNativeCallback = true;
   }
 
-  // Still needed to avoid crashes on quit in most Mochitests.
-  [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
-                                      location:NSMakePoint(0, 0)
-                                 modifierFlags:0
-                                     timestamp:0
-                                  windowNumber:0
-                                       context:NULL
-                                       subtype:kEventSubtypeNone
-                                         data1:0
-                                         data2:0]
-           atStart:NO];
-
+  if (self->mTerminated) {
+    // Still needed to avoid crashes on quit in most Mochitests.
+    [NSApp postEvent:[NSEvent otherEventWithType:NSEventTypeApplicationDefined
+                                        location:NSMakePoint(0, 0)
+                                   modifierFlags:0
+                                       timestamp:0
+                                    windowNumber:0
+                                         context:NULL
+                                         subtype:kEventSubtypeNone
+                                           data1:0
+                                           data2:0]
+             atStart:NO];
+  }
   // Normally every call to ScheduleNativeEventCallback() results in
   // exactly one call to ProcessGeckoEvents().  So each Release() here
   // normally balances exactly one AddRef() in ScheduleNativeEventCallback().
@@ -629,7 +658,6 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
   NSRunLoop* currentRunLoop = [NSRunLoop currentRunLoop];
 
   EventQueueRef currentEventQueue = GetCurrentEventQueue();
-  EventTargetRef eventDispatcherTarget = GetEventDispatcherTarget();
 
   if (aMayWait) {
     mozilla::BackgroundHangMonitor().NotifyWait();
@@ -662,6 +690,23 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
         eventProcessed = true;
       }
     } else {
+      // In at least 10.15, AcquireFirstMatchingEventInQueue will move 1
+      // CGEvent from the CGEvent queue into the Carbon event queue. Unfortunately,
+      // once an event has been moved to the Carbon event queue it's no longer a
+      // candidate for coalescing. This means that even if we don't remove the
+      // event from the queue, just calling AcquireFirstMatchingEventInQueue can
+      // cause behaviour change. Prior to bug 1690687 landing, the event that we got
+      // from AcquireFirstMatchingEventInQueue was often our own ApplicationDefined
+      // event. However, once we stopped posting that event on every Gecko
+      // event we're much more likely to get a CGEvent. When we have a high
+      // amount of load on the main thread, we end up alternating between Gecko
+      // events and native events.  Without CGEvent coalescing, the native
+      // event events can accumulate in the Carbon event queue which will
+      // manifest as laggy scrolling.
+#if 1
+      eventProcessed = false;
+      break;
+#else
       // AcquireFirstMatchingEventInQueue() doesn't spin the (native) event
       // loop, though it does queue up any newly available events from the
       // window server.
@@ -696,11 +741,13 @@ bool nsAppShell::ProcessNextNativeEvent(bool aMayWait) {
       // RemoveEventFromQueue() below.
       RetainEvent(currentEvent);
       RemoveEventFromQueue(currentEventQueue, currentEvent);
+      EventTargetRef eventDispatcherTarget = GetEventDispatcherTarget();
       SendEventToEventTarget(currentEvent, eventDispatcherTarget);
       // This call to ReleaseEvent() matches a call to RetainEvent() in
       // AcquireFirstMatchingEventInQueue() above.
       ReleaseEvent(currentEvent);
       eventProcessed = true;
+#endif
     }
   } while (mRunningEventLoop);
 

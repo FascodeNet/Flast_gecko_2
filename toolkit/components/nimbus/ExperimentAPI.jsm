@@ -57,6 +57,36 @@ function parseJSON(value) {
   return null;
 }
 
+function featuresCompat(branch) {
+  if (!branch) {
+    return [];
+  }
+  let { features } = branch;
+  // In <=v1.5.0 of the Nimbus API, experiments had single feature
+  if (!features) {
+    features = [branch.feature];
+  }
+
+  return features;
+}
+
+const experimentBranchAccessor = {
+  get: (target, prop) => {
+    // Offer an API where we can access `branch.feature.*`.
+    // This is a useful shorthand that hides the fact that
+    // even single-feature recipes are still represented
+    // as an array with 1 item
+    if (!(prop in target) && target.features) {
+      return target.features.find(f => f.featureId === prop);
+    } else if (target.feature?.featureId === prop) {
+      // Backwards compatibility for version 1.6.2 and older
+      return target.feature;
+    }
+
+    return target[prop];
+  },
+};
+
 const ExperimentAPI = {
   /**
    * @returns {Promise} Resolves when the API has synchronized to the main store
@@ -93,7 +123,7 @@ const ExperimentAPI = {
       return {
         slug: experimentData.slug,
         active: experimentData.active,
-        branch: this.activateBranch({ slug, featureId }),
+        branch: new Proxy(experimentData.branch, experimentBranchAccessor),
       };
     }
 
@@ -250,7 +280,9 @@ const ExperimentAPI = {
     }
 
     const recipe = await this.getRecipe(slug);
-    return recipe?.branches;
+    return recipe?.branches.map(
+      branch => new Proxy(branch, experimentBranchAccessor)
+    );
   },
 
   recordExposureEvent({ featureId, experimentSlug, branchSlug }) {
@@ -278,11 +310,9 @@ const ExperimentAPI = {
  */
 const NimbusFeatures = {};
 for (let feature in FeatureManifest) {
-  XPCOMUtils.defineLazyGetter(
-    NimbusFeatures,
-    feature,
-    () => new _ExperimentFeature(feature)
-  );
+  XPCOMUtils.defineLazyGetter(NimbusFeatures, feature, () => {
+    return new _ExperimentFeature(feature);
+  });
 }
 
 class _ExperimentFeature {
@@ -295,8 +325,7 @@ class _ExperimentFeature {
         `No manifest entry for ${featureId}. Please add one to toolkit/components/nimbus/FeatureManifest.js`
       );
     }
-    // Prevent the instance from sending multiple exposure events
-    this._sendExposureEventOnce = true;
+    this._didSendExposureEvent = false;
     this._onRemoteReady = null;
     this._waitForRemote = new Promise(
       resolve => (this._onRemoteReady = resolve)
@@ -405,9 +434,13 @@ class _ExperimentFeature {
   isEnabled({ defaultValue = null } = {}) {
     const branch = ExperimentAPI.activateBranch({ featureId: this.featureId });
 
+    let feature = featuresCompat(branch).find(
+      ({ featureId }) => featureId === this.featureId
+    );
+
     // First, try to return an experiment value if it exists.
-    if (isBooleanValueDefined(branch?.feature.enabled)) {
-      return branch.feature.enabled;
+    if (isBooleanValueDefined(feature?.enabled)) {
+      return feature.enabled;
     }
 
     if (isBooleanValueDefined(this.getRemoteConfig()?.enabled)) {
@@ -436,12 +469,15 @@ class _ExperimentFeature {
     // Any user pref will override any other configuration
     let userPrefs = this._getUserPrefsValues();
     const branch = ExperimentAPI.activateBranch({ featureId: this.featureId });
+    const featureValue = featuresCompat(branch).find(
+      ({ featureId }) => featureId === this.featureId
+    )?.value;
 
     return {
       ...this.prefGetters,
       ...defaultValues,
       ...this.getRemoteConfig()?.variables,
-      ...(branch?.feature?.value || null),
+      ...(featureValue || null),
       ...userPrefs,
     };
   }
@@ -465,9 +501,12 @@ class _ExperimentFeature {
     }
 
     // Next, check if an experiment is defined
-    const experimentValue = ExperimentAPI.activateBranch({
+    const branch = ExperimentAPI.activateBranch({
       featureId: this.featureId,
-    })?.feature?.value?.[variable];
+    });
+    const experimentValue = featuresCompat(branch).find(
+      ({ featureId }) => featureId === this.featureId
+    )?.value?.[variable];
 
     if (typeof experimentValue !== "undefined") {
       return experimentValue;
@@ -491,20 +530,23 @@ class _ExperimentFeature {
     return remoteConfig;
   }
 
-  recordExposureEvent() {
-    if (this._sendExposureEventOnce) {
-      let experimentData = ExperimentAPI.getExperiment({
+  recordExposureEvent({ once = false } = {}) {
+    if (once && this._didSendExposureEvent) {
+      return;
+    }
+
+    let experimentData = ExperimentAPI.getExperiment({
+      featureId: this.featureId,
+    });
+
+    // Exposure only sent if user is enrolled in an experiment
+    if (experimentData) {
+      ExperimentAPI.recordExposureEvent({
         featureId: this.featureId,
+        experimentSlug: experimentData.slug,
+        branchSlug: experimentData.branch?.slug,
       });
-      // Exposure only sent if user is enrolled in an experiment
-      if (experimentData) {
-        ExperimentAPI.recordExposureEvent({
-          featureId: this.featureId,
-          experimentSlug: experimentData.slug,
-          branchSlug: experimentData.branch?.slug,
-        });
-        this._sendExposureEventOnce = false;
-      }
+      this._didSendExposureEvent = true;
     }
   }
 

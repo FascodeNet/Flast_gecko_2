@@ -122,8 +122,17 @@ var PointerlockFsWarning = {
     this._timeoutHide.start();
   },
 
-  close() {
-    if (!this._element) {
+  /**
+   * Close the full screen or pointerlock warning.
+   * @param {('fullscreen-warning'|'pointerlock-warning')} elementId - Id of the
+   * warning element to close. If the id does not match the currently shown
+   * warning this is a no-op.
+   */
+  close(elementId) {
+    if (!elementId) {
+      throw new Error("Must pass id of warning element to close");
+    }
+    if (!this._element || this._element.id != elementId) {
       return;
     }
     // Cancel any pending timeout
@@ -245,7 +254,7 @@ var PointerLock = {
   },
 
   exited() {
-    PointerlockFsWarning.close();
+    PointerlockFsWarning.close("pointerlock-warning");
   },
 };
 
@@ -375,17 +384,12 @@ var FullScreen = {
     // don't need that kind of precision in our CSS.
     shiftSize = shiftSize.toFixed(2);
     let toolbox = document.getElementById("navigator-toolbox");
-    let browserEl = document.getElementById("browser");
     if (shiftSize > 0) {
       toolbox.style.setProperty("transform", `translateY(${shiftSize}px)`);
       toolbox.style.setProperty("z-index", "2");
-      toolbox.style.setProperty("position", "relative");
-      browserEl.style.setProperty("position", "relative");
     } else {
       toolbox.style.removeProperty("transform");
       toolbox.style.removeProperty("z-index");
-      toolbox.style.removeProperty("position");
-      browserEl.style.removeProperty("position");
     }
   },
 
@@ -447,7 +451,7 @@ var FullScreen = {
 
     // If we have a current pointerlock warning shown then hide it
     // before transition.
-    PointerlockFsWarning.close();
+    PointerlockFsWarning.close("pointerlock-warning");
 
     // If it is a remote browser, send a message to ask the content
     // to enter fullscreen state. We don't need to do so if it is an
@@ -569,7 +573,7 @@ var FullScreen = {
       true
     );
 
-    PointerlockFsWarning.close();
+    PointerlockFsWarning.close("fullscreen-warning");
     gBrowser.tabContainer.removeEventListener(
       "TabSelect",
       this.exitDomFullScreen
@@ -854,26 +858,6 @@ var FullScreen = {
     }
 
     ToolbarIconColor.inferFromText("fullscreen", aEnterFS);
-
-    // For macOS, we use native full screen, all full screen controls
-    // are hidden, don't bother to touch them. If we don't stop here,
-    // the following code could cause the native full screen button be
-    // shown unexpectedly. See bug 1165570.
-    if (AppConstants.platform == "macosx") {
-      return;
-    }
-
-    var fullscreenctls = document.getElementById("window-controls");
-    var navbar = document.getElementById("nav-bar");
-    var ctlsOnTabbar = window.toolbar.visible;
-    if (fullscreenctls.parentNode == navbar && ctlsOnTabbar) {
-      fullscreenctls.removeAttribute("flex");
-      document.getElementById("TabsToolbar").appendChild(fullscreenctls);
-    } else if (fullscreenctls.parentNode.id == "TabsToolbar" && !ctlsOnTabbar) {
-      fullscreenctls.setAttribute("flex", "1");
-      navbar.appendChild(fullscreenctls);
-    }
-    fullscreenctls.hidden = !aEnterFS;
   },
 };
 

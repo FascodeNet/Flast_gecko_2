@@ -56,6 +56,9 @@ const DevToolsPanel = React.createFactory(
 const ProfilerEventHandling = React.createFactory(
   require("devtools/client/performance-new/components/ProfilerEventHandling")
 );
+const ProfilerPreferenceObserver = React.createFactory(
+  require("devtools/client/performance-new/components/ProfilerPreferenceObserver")
+);
 const createStore = require("devtools/client/shared/redux/create-store");
 const selectors = require("devtools/client/performance-new/store/selectors");
 const reducers = require("devtools/client/performance-new/store/reducers");
@@ -67,11 +70,7 @@ const {
 const { createLocalSymbolicationService } = ChromeUtils.import(
   "resource://devtools/client/performance-new/symbolication.jsm.js"
 );
-const {
-  setRecordingSettings,
-  presets,
-  getRecordingSettings,
-} = ChromeUtils.import(
+const { presets, getProfilerViewModeForCurrentPreset } = ChromeUtils.import(
   "resource://devtools/client/performance-new/popup/background.jsm.js"
 );
 
@@ -123,27 +122,18 @@ async function gInit(perfFront, pageContext, openAboutProfiling) {
   store.dispatch(
     actions.initializeStore({
       isSupportedPlatform,
-      recordingSettings: getRecordingSettings(pageContext, supportedFeatures),
       presets,
       supportedFeatures,
-      pageContext: "devtools",
-
-      // Go ahead and hide the implementation details for the component on how the
-      // preference information is stored
-      /**
-       * @param {RecordingSettings} newRecordingSettings
-       */
-      setRecordingSettings: newRecordingSettings =>
-        setRecordingSettings(pageContext, newRecordingSettings),
+      pageContext,
     })
   );
 
   /**
    * @param {MinimallyTypedGeckoProfile} profile
-   * @param {ProfilerViewMode | undefined} profilerViewMode
    */
-  const onProfileReceived = (profile, profilerViewMode) => {
+  const onProfileReceived = profile => {
     const objdirs = selectors.getObjdirs(store.getState());
+    const profilerViewMode = getProfilerViewModeForCurrentPreset(pageContext);
     const sharedLibraries = sharedLibrariesFromProfile(profile);
     const symbolicationService = createLocalSymbolicationService(
       sharedLibraries,
@@ -168,6 +158,7 @@ async function gInit(perfFront, pageContext, openAboutProfiling) {
           React.Fragment,
           null,
           ProfilerEventHandling({ perfFront }),
+          ProfilerPreferenceObserver(),
           DevToolsPanel({
             perfFront,
             onProfileReceived,
@@ -178,6 +169,8 @@ async function gInit(perfFront, pageContext, openAboutProfiling) {
     ),
     document.querySelector("#root")
   );
+
+  window.addEventListener("unload", () => gDestroy(), { once: true });
 }
 
 function gDestroy() {

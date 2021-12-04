@@ -383,7 +383,15 @@
             oa
           );
         } else {
-          remoteType = E10SUtils.DEFAULT_REMOTE_TYPE;
+          // If we reach here, we don't have the url to load. This means that
+          // `uriToLoad` is most likely a promise which is waiting on SessionStore
+          // initialization. We can't delay setting up the browser here, as that
+          // would mean that `gBrowser.selectedBrowser` might not always exist,
+          // which is the current assumption.
+
+          // In this case we default to the privileged about process as that's
+          // the best guess we can make, and we'll likely need it eventually.
+          remoteType = E10SUtils.PRIVILEGEDABOUT_REMOTE_TYPE;
         }
       }
 
@@ -1239,6 +1247,8 @@
         this._tabAttrModified(oldTab, ["selected"]);
         this._tabAttrModified(newTab, ["selected"]);
 
+        this.readNotificationBox(newBrowser)?.shown();
+
         this._startMultiSelectChange();
         this._multiSelectChangeSelected = true;
         this.clearMultiSelectedTabs();
@@ -1936,12 +1946,12 @@
 
       aBrowser.droppedLinkHandler = oldDroppedLinkHandler;
 
-      // This shouldn't really be necessary (it should always set the same
-      // value as activeness is correctly preserved across remoteness changes).
-      // However, this has the side effect of sending MozLayerTreeReady /
-      // MozLayerTreeCleared events for remote frames, which the tab switcher
-      // depends on.
-      aBrowser.docShellIsActive = this.shouldActivateDocShell(aBrowser);
+      // This shouldn't really be necessary, however, this has the side effect
+      // of sending MozLayerTreeReady / MozLayerTreeCleared events for remote
+      // frames, which the tab switcher depends on.
+      //
+      // eslint-disable-next-line no-self-assign
+      aBrowser.docShellIsActive = aBrowser.docShellIsActive;
 
       // Create a new tab progress listener for the new browser we just injected,
       // since tab progress listeners have logic for handling the initial about:blank
@@ -2583,7 +2593,6 @@
       document
         .getElementById("History:UndoCloseTab")
         .setAttribute("data-l10n-args", JSON.stringify({ tabCount: 1 }));
-      SessionStore.setLastClosedTabCount(window, 1);
 
       // if we're adding tabs, we're past interrupt mode, ditch the owner
       if (this.selectedTab.owner) {
@@ -3132,10 +3141,10 @@
       // solve the problem of windows "obscuring" the prompt.
       // see bug #350299 for more details
       window.focus();
-      let warningMessage = gTabBrowserBundle.GetStringFromName(
-        "tabs.closeWarningMultipleTabs"
+      let warningTitle = gTabBrowserBundle.GetStringFromName(
+        "tabs.closeTabsTitle"
       );
-      warningMessage = PluralForm.get(tabsToClose, warningMessage).replace(
+      warningTitle = PluralForm.get(tabsToClose, warningTitle).replace(
         "#1",
         tabsToClose
       );
@@ -3144,12 +3153,12 @@
         ps.BUTTON_TITLE_CANCEL * ps.BUTTON_POS_1;
       let checkboxLabel =
         aCloseTabs == this.closingTabsEnum.ALL
-          ? gTabBrowserBundle.GetStringFromName("tabs.closeWarningPrompt")
+          ? gTabBrowserBundle.GetStringFromName("tabs.closeTabsConfirmCheckbox")
           : null;
       var buttonPressed = ps.confirmEx(
         window,
-        gTabBrowserBundle.GetStringFromName("tabs.closeTitleTabs"),
-        warningMessage,
+        warningTitle,
+        null,
         flags,
         gTabBrowserBundle.GetStringFromName("tabs.closeButtonMultiple"),
         null,
@@ -3425,7 +3434,7 @@
         return;
       }
 
-      let initialTabCount = tabs.length;
+      SessionStore.resetLastClosedTabCount(window);
       this._clearMultiSelectionLocked = true;
 
       // Guarantee that _clearMultiSelectionLocked lock gets released.
@@ -3437,6 +3446,7 @@
         let aParams = { animate, prewarmed: true };
 
         for (let tab of tabs) {
+          tab._closedInGroup = true;
           if (tab.selected) {
             lastToClose = tab;
             let toBlurTo = this._findTabToBlurTo(lastToClose, tabs);
@@ -3516,6 +3526,10 @@
         // Now run again sequentially the beforeunload listeners that will result in a prompt.
         for (let tab of tabsWithBeforeUnloadPrompt) {
           this.removeTab(tab, aParams);
+          if (!tab.closing) {
+            // If we abort the closing of the tab.
+            tab._closedInGroup = false;
+          }
         }
 
         // Avoid changing the selected browser several times by removing it,
@@ -3529,17 +3543,14 @@
 
       this._clearMultiSelectionLocked = false;
       this.avoidSingleSelectedTab();
-      let closedTabsCount =
-        initialTabCount - tabs.filter(t => t.isConnected && !t.closing).length;
       // Don't use document.l10n.setAttributes because the FTL file is loaded
       // lazily and we won't be able to resolve the string.
-      document
-        .getElementById("History:UndoCloseTab")
-        .setAttribute(
-          "data-l10n-args",
-          JSON.stringify({ tabCount: closedTabsCount })
-        );
-      SessionStore.setLastClosedTabCount(window, closedTabsCount);
+      document.getElementById("History:UndoCloseTab").setAttribute(
+        "data-l10n-args",
+        JSON.stringify({
+          tabCount: SessionStore.getLastClosedTabCount(window),
+        })
+      );
     },
 
     removeCurrentTab(aParams) {
@@ -5060,25 +5071,18 @@
     },
 
     toggleMuteAudioOnMultiSelectedTabs(aTab) {
-      let tabsToToggle;
-      if (aTab.activeMediaBlocked) {
-        tabsToToggle = this.selectedTabs.filter(
-          tab => tab.activeMediaBlocked || tab.linkedBrowser.audioMuted
-        );
-      } else {
-        let tabMuted = aTab.linkedBrowser.audioMuted;
-        tabsToToggle = this.selectedTabs.filter(
-          tab =>
-            // When a user is looking to mute selected tabs, then media-blocked tabs
-            // should not be toggled. Otherwise those media-blocked tabs are going into a
-            // playing and unmuted state.
-            (tab.linkedBrowser.audioMuted == tabMuted &&
-              !tab.activeMediaBlocked) ||
-            (tab.activeMediaBlocked && tabMuted)
-        );
-      }
+      let tabMuted = aTab.linkedBrowser.audioMuted;
+      let tabsToToggle = this.selectedTabs.filter(
+        tab => tab.linkedBrowser.audioMuted == tabMuted
+      );
       for (let tab of tabsToToggle) {
         tab.toggleMuteAudio();
+      }
+    },
+
+    resumeDelayedMediaOnMultiSelectedTabs() {
+      for (let tab of this.selectedTabs) {
+        tab.resumeDelayedMedia();
       }
     },
 
@@ -5527,10 +5531,12 @@
         ];
 
         notificationBox.appendNotification(
-          message,
           "refresh-blocked",
-          "chrome://browser/skin/notification-icons/popup.svg",
-          notificationBox.PRIORITY_INFO_MEDIUM,
+          {
+            label: message,
+            image: "chrome://browser/skin/notification-icons/popup.svg",
+            priority: notificationBox.PRIORITY_INFO_MEDIUM,
+          },
           buttons
         );
       }
@@ -6079,6 +6085,17 @@
         browser.addEventListener("DidChangeBrowserRemoteness", didChange, {
           once: true,
         });
+      });
+
+      this.addEventListener("pageinfo", event => {
+        let browser = event.originalTarget;
+        let tab = this.getTabForBrowser(browser);
+        if (!tab) {
+          return;
+        }
+
+        const { url, description, previewImageURL } = event.detail;
+        this.setPageInfo(url, description, previewImageURL);
       });
     },
 
@@ -6862,6 +6879,14 @@ var TabContextMenu = {
       "context_reloadSelectedTabs"
     ).hidden = !multiselectionContext;
 
+    // Show Play Tab menu item if the tab has attribute activemedia-blocked
+    document.getElementById("context_playTab").hidden = !(
+      this.contextTab.activeMediaBlocked && !multiselectionContext
+    );
+    document.getElementById("context_playSelectedTabs").hidden = !(
+      this.contextTab.activeMediaBlocked && multiselectionContext
+    );
+
     // Only one of pin/unpin/multiselect-pin/multiselect-unpin should be visible
     let contextPinTab = document.getElementById("context_pinTab");
     contextPinTab.hidden = this.contextTab.pinned || multiselectionContext;
@@ -6973,10 +6998,7 @@ var TabContextMenu = {
     toggleMultiSelectMute.hidden = !multiselectionContext;
 
     // Adjust the state of the toggle mute menu item.
-    if (this.contextTab.hasAttribute("activemedia-blocked")) {
-      toggleMute.label = gNavigatorBundle.getString("playTab.label");
-      toggleMute.accessKey = gNavigatorBundle.getString("playTab.accesskey");
-    } else if (this.contextTab.hasAttribute("muted")) {
+    if (this.contextTab.hasAttribute("muted")) {
       toggleMute.label = gNavigatorBundle.getString("unmuteTab.label");
       toggleMute.accessKey = gNavigatorBundle.getString("unmuteTab.accesskey");
     } else {
@@ -6985,14 +7007,7 @@ var TabContextMenu = {
     }
 
     // Adjust the state of the toggle mute menu item for multi-selected tabs.
-    if (this.contextTab.hasAttribute("activemedia-blocked")) {
-      toggleMultiSelectMute.label = gNavigatorBundle.getString(
-        "playTabs.label"
-      );
-      toggleMultiSelectMute.accessKey = gNavigatorBundle.getString(
-        "playTabs.accesskey"
-      );
-    } else if (this.contextTab.hasAttribute("muted")) {
+    if (this.contextTab.hasAttribute("muted")) {
       toggleMultiSelectMute.label = gNavigatorBundle.getString(
         "unmuteSelectedTabs2.label"
       );

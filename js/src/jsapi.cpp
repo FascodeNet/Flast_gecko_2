@@ -1350,10 +1350,6 @@ JS_PUBLIC_API void JS::ClearKeptObjects(JSContext* cx) {
   }
 }
 
-JS_PUBLIC_API bool JS::ZoneIsCollecting(JS::Zone* zone) {
-  return zone->wasGCStarted();
-}
-
 JS_PUBLIC_API bool JS::AtomsZoneIsCollecting(JSRuntime* runtime) {
   return runtime->activeGCInAtomsZone();
 }
@@ -1782,7 +1778,7 @@ JS_PUBLIC_API void JS_GlobalObjectTraceHook(JSTracer* trc, JSObject* global) {
 
   // Trace the realm for any GC things that should only stick around if we
   // know the global is live.
-  globalRealm->traceGlobal(trc);
+  globalRealm->traceGlobalData(trc);
 
   globalObj->traceData(trc);
 
@@ -2310,13 +2306,12 @@ void JS::TransitiveCompileOptions::copyPODTransitiveOptions(
   introductionLineno = rhs.introductionLineno;
   introductionOffset = rhs.introductionOffset;
   hasIntroductionInfo = rhs.hasIntroductionInfo;
-  hideScriptFromDebugger = rhs.hideScriptFromDebugger;
-  deferDebugMetadata = rhs.deferDebugMetadata;
+  hideScriptFromDebugger_ = rhs.hideScriptFromDebugger_;
+  deferDebugMetadata_ = rhs.deferDebugMetadata_;
   nonSyntacticScope = rhs.nonSyntacticScope;
   privateClassFields = rhs.privateClassFields;
   privateClassMethods = rhs.privateClassMethods;
   classStaticBlocks = rhs.classStaticBlocks;
-  useStencilXDR = rhs.useStencilXDR;
   useOffThreadParseGlobal = rhs.useOffThreadParseGlobal;
   useFdlibmForSinCosTan = rhs.useFdlibmForSinCosTan;
 };
@@ -2403,7 +2398,6 @@ JS::CompileOptions::CompileOptions(JSContext* cx) : ReadOnlyCompileOptions() {
 
   classStaticBlocks = cx->options().classStaticBlocks();
 
-  useStencilXDR = !UseOffThreadParseGlobal();
   useOffThreadParseGlobal = UseOffThreadParseGlobal();
 
   useFdlibmForSinCosTan = math_use_fdlibm_for_sin_cos_tan();
@@ -2507,7 +2501,7 @@ JS_PUBLIC_API void JS::SetScriptPrivate(JSScript* script,
 }
 
 JS_PUBLIC_API JS::Value JS::GetScriptPrivate(JSScript* script) {
-  return script->sourceObject()->canonicalPrivate();
+  return script->sourceObject()->getPrivate();
 }
 
 JS_PUBLIC_API JS::Value JS::GetScriptedCallerPrivate(JSContext* cx) {
@@ -2519,7 +2513,7 @@ JS_PUBLIC_API JS::Value JS::GetScriptedCallerPrivate(JSContext* cx) {
     return UndefinedValue();
   }
 
-  return iter.script()->sourceObject()->canonicalPrivate();
+  return iter.script()->sourceObject()->getPrivate();
 }
 
 JS_PUBLIC_API void JS::SetScriptPrivateReferenceHooks(
@@ -3679,7 +3673,7 @@ JS_PUBLIC_API void JS_SetPendingException(JSContext* cx, HandleValue value,
   // exception values can be in an abitrary compartment.
 
   if (behavior == JS::ExceptionStackBehavior::Capture) {
-    cx->setPendingExceptionAndCaptureStack(value);
+    cx->setPendingException(value, ShouldCaptureStack::Always);
   } else {
     cx->setPendingException(value, nullptr);
   }
@@ -3691,39 +3685,24 @@ JS_PUBLIC_API void JS_ClearPendingException(JSContext* cx) {
 }
 
 JS::AutoSaveExceptionState::AutoSaveExceptionState(JSContext* cx)
-    : context(cx),
-      wasPropagatingForcedReturn(cx->propagatingForcedReturn_),
-      wasOverRecursed(cx->overRecursed_),
-      wasThrowing(cx->throwing),
-      exceptionValue(cx),
-      exceptionStack(cx) {
+    : context(cx), status(cx->status), exceptionValue(cx), exceptionStack(cx) {
   AssertHeapIsIdle();
   CHECK_THREAD(cx);
-  if (wasPropagatingForcedReturn) {
-    cx->clearPropagatingForcedReturn();
-  }
-  if (wasOverRecursed) {
-    cx->overRecursed_ = false;
-  }
-  if (wasThrowing) {
+  if (IsCatchableExceptionStatus(status)) {
     exceptionValue = cx->unwrappedException();
     exceptionStack = cx->unwrappedExceptionStack();
-    cx->clearPendingException();
   }
+  cx->clearPendingException();
 }
 
 void JS::AutoSaveExceptionState::drop() {
-  wasPropagatingForcedReturn = false;
-  wasOverRecursed = false;
-  wasThrowing = false;
+  status = JS::ExceptionStatus::None;
   exceptionValue.setUndefined();
   exceptionStack = nullptr;
 }
 
 void JS::AutoSaveExceptionState::restore() {
-  context->propagatingForcedReturn_ = wasPropagatingForcedReturn;
-  context->overRecursed_ = wasOverRecursed;
-  context->throwing = wasThrowing;
+  context->status = status;
   context->unwrappedException() = exceptionValue;
   if (exceptionStack) {
     context->unwrappedExceptionStack() = &exceptionStack->as<SavedFrame>();
@@ -3732,13 +3711,14 @@ void JS::AutoSaveExceptionState::restore() {
 }
 
 JS::AutoSaveExceptionState::~AutoSaveExceptionState() {
+  // NOTE: An interrupt/uncatchable exception or a debugger-forced-return may be
+  //       clobbered here by the saved exception. If that is not desired, this
+  //       state should be dropped before the destructor fires.
   if (!context->isExceptionPending()) {
-    if (wasPropagatingForcedReturn) {
-      context->setPropagatingForcedReturn();
+    if (status != JS::ExceptionStatus::None) {
+      context->status = status;
     }
-    if (wasThrowing) {
-      context->overRecursed_ = wasOverRecursed;
-      context->throwing = true;
+    if (IsCatchableExceptionStatus(status)) {
       context->unwrappedException() = exceptionValue;
       if (exceptionStack) {
         context->unwrappedExceptionStack() = &exceptionStack->as<SavedFrame>();
@@ -4208,7 +4188,7 @@ JS_PUBLIC_API bool JS_GetGlobalJitCompilerOption(JSContext* cx,
 #if !defined(STATIC_EXPORTABLE_JS_API) && !defined(STATIC_JS_API) && \
     defined(XP_WIN)
 
-#  include "util/Windows.h"
+#  include "util/WindowsWrapper.h"
 
 /*
  * Initialization routine for the JS DLL.
@@ -4475,160 +4455,6 @@ JS_PUBLIC_API void JS::detail::AssertArgumentsAreSane(JSContext* cx,
   cx->check(value);
 }
 #endif /* JS_DEBUG */
-
-JS_PUBLIC_API JS::TranscodeResult JS::EncodeScript(JSContext* cx,
-                                                   TranscodeBuffer& buffer,
-                                                   HandleScript scriptArg) {
-  // Run-once top-level scripts may mutate singleton objects so do not allow
-  // encoding them. It could be possible to encode early enough to avoid this,
-  // but for consistency with `CopyScriptImpl` we always disallow.
-  MOZ_ASSERT(!scriptArg->isFunction());
-  if (scriptArg->treatAsRunOnce()) {
-    return JS::TranscodeResult::Failure_RunOnceNotSupported;
-  }
-
-  XDREncoder encoder(cx, buffer, buffer.length());
-  RootedScript script(cx, scriptArg);
-  XDRResult res = encoder.codeScript(&script);
-  if (res.isErr()) {
-    buffer.clearAndFree();
-    return res.unwrapErr();
-  }
-  MOZ_ASSERT(!buffer.empty());
-  return JS::TranscodeResult::Ok;
-}
-
-JS_PUBLIC_API JS::TranscodeResult JS::DecodeScript(
-    JSContext* cx, const ReadOnlyCompileOptions& options,
-    TranscodeBuffer& buffer, JS::MutableHandleScript scriptp,
-    size_t cursorIndex) {
-  auto decoder = js::MakeUnique<XDRDecoder>(cx, &options, buffer, cursorIndex);
-  if (!decoder) {
-    ReportOutOfMemory(cx);
-    return JS::TranscodeResult::Throw;
-  }
-  XDRResult res = decoder->codeScript(scriptp);
-  MOZ_ASSERT(bool(scriptp) == res.isOk());
-  if (res.isErr()) {
-    return res.unwrapErr();
-  }
-  return JS::TranscodeResult::Ok;
-}
-
-static JS::TranscodeResult DecodeStencil(JSContext* cx,
-                                         JS::TranscodeBuffer& buffer,
-                                         frontend::CompilationInput& input,
-                                         frontend::CompilationStencil& stencil,
-                                         size_t cursorIndex) {
-  XDRStencilDecoder decoder(cx, buffer, cursorIndex);
-
-  if (!input.initForGlobal(cx)) {
-    return JS::TranscodeResult::Throw;
-  }
-
-  XDRResult res = decoder.codeStencil(input.options, stencil);
-  if (res.isErr()) {
-    return res.unwrapErr();
-  }
-
-  return JS::TranscodeResult::Ok;
-}
-
-JS_PUBLIC_API JS::TranscodeResult JS::DecodeScriptMaybeStencil(
-    JSContext* cx, const ReadOnlyCompileOptions& options,
-    TranscodeBuffer& buffer, JS::MutableHandleScript scriptp,
-    size_t cursorIndex) {
-  if (!options.useStencilXDR) {
-    // The buffer contains JSScript.
-    return JS::DecodeScript(cx, options, buffer, scriptp, cursorIndex);
-  }
-
-  MOZ_ASSERT(JS::IsTranscodingBytecodeAligned(buffer.begin()));
-  MOZ_ASSERT(JS::IsTranscodingBytecodeOffsetAligned(cursorIndex));
-
-  // The buffer contains stencil.
-
-  Rooted<frontend::CompilationInput> input(cx,
-                                           frontend::CompilationInput(options));
-  frontend::CompilationStencil stencil(nullptr);
-
-  JS::TranscodeResult res =
-      DecodeStencil(cx, buffer, input.get(), stencil, cursorIndex);
-  if (res != JS::TranscodeResult::Ok) {
-    return res;
-  }
-
-  Rooted<frontend::CompilationGCOutput> gcOutput(cx);
-  if (!frontend::InstantiateStencils(cx, input.get(), stencil,
-                                     gcOutput.get())) {
-    return JS::TranscodeResult::Throw;
-  }
-
-  MOZ_ASSERT(gcOutput.get().script);
-  scriptp.set(gcOutput.get().script);
-
-  return JS::TranscodeResult::Ok;
-}
-
-JS_PUBLIC_API JS::TranscodeResult JS::DecodeScript(
-    JSContext* cx, const ReadOnlyCompileOptions& options,
-    const TranscodeRange& range, JS::MutableHandleScript scriptp) {
-  auto decoder = js::MakeUnique<XDRDecoder>(cx, &options, range);
-  if (!decoder) {
-    ReportOutOfMemory(cx);
-    return JS::TranscodeResult::Throw;
-  }
-  XDRResult res = decoder->codeScript(scriptp);
-  MOZ_ASSERT(bool(scriptp) == res.isOk());
-  if (res.isErr()) {
-    return res.unwrapErr();
-  }
-  return JS::TranscodeResult::Ok;
-}
-
-JS_PUBLIC_API JS::TranscodeResult JS::DecodeScriptAndStartIncrementalEncoding(
-    JSContext* cx, const ReadOnlyCompileOptions& options,
-    TranscodeBuffer& buffer, JS::MutableHandleScript scriptp,
-    size_t cursorIndex) {
-  MOZ_DIAGNOSTIC_ASSERT(options.useStencilXDR);
-
-  Rooted<frontend::CompilationInput> input(cx,
-                                           frontend::CompilationInput(options));
-  frontend::CompilationStencil stencil(nullptr);
-
-  JS::TranscodeResult res =
-      DecodeStencil(cx, buffer, input.get(), stencil, cursorIndex);
-  if (res != JS::TranscodeResult::Ok) {
-    return res;
-  }
-
-  Rooted<frontend::CompilationGCOutput> gcOutput(cx);
-  if (!frontend::InstantiateStencils(cx, input.get(), stencil,
-                                     gcOutput.get())) {
-    return JS::TranscodeResult::Throw;
-  }
-
-  MOZ_ASSERT(gcOutput.get().script);
-
-  auto initial =
-      js::MakeUnique<frontend::ExtensibleCompilationStencil>(cx, input.get());
-  if (!initial) {
-    ReportOutOfMemory(cx);
-    return JS::TranscodeResult::Throw;
-  }
-  if (!initial->steal(cx, std::move(stencil))) {
-    return JS::TranscodeResult::Throw;
-  }
-
-  if (!gcOutput.get().script->scriptSource()->startIncrementalEncoding(
-          cx, options, std::move(initial))) {
-    return JS::TranscodeResult::Throw;
-  }
-
-  scriptp.set(gcOutput.get().script);
-
-  return JS::TranscodeResult::Ok;
-}
 
 JS_PUBLIC_API bool JS::FinishIncrementalEncoding(JSContext* cx,
                                                  JS::HandleScript script,

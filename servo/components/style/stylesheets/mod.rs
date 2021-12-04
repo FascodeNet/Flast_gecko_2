@@ -20,6 +20,7 @@ mod page_rule;
 mod rule_list;
 mod rule_parser;
 mod rules_iterator;
+pub mod scroll_timeline_rule;
 mod style_rule;
 mod stylesheet;
 pub mod supports_rule;
@@ -62,6 +63,7 @@ pub use self::rules_iterator::{AllRules, EffectiveRules};
 pub use self::rules_iterator::{
     EffectiveRulesIterator, NestedRuleIterationCondition, RulesIterator,
 };
+pub use self::scroll_timeline_rule::ScrollTimelineRule;
 pub use self::style_rule::StyleRule;
 pub use self::stylesheet::{AllowImportRules, SanitizationData, SanitizationKind};
 pub use self::stylesheet::{DocumentStyleSheet, Namespaces, Stylesheet};
@@ -260,6 +262,7 @@ pub enum CssRule {
     Page(Arc<Locked<PageRule>>),
     Document(Arc<Locked<DocumentRule>>),
     Layer(Arc<Locked<LayerRule>>),
+    ScrollTimeline(Arc<Locked<ScrollTimelineRule>>),
 }
 
 impl CssRule {
@@ -303,6 +306,7 @@ impl CssRule {
 
             // TODO(emilio): Add memory reporting for @layer rules.
             CssRule::Layer(_) => 0,
+            CssRule::ScrollTimeline(_) => 0,
         }
     }
 }
@@ -310,10 +314,11 @@ impl CssRule {
 /// https://drafts.csswg.org/cssom-1/#dom-cssrule-type
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Debug, Eq, FromPrimitive, PartialEq)]
+#[repr(u8)]
 pub enum CssRuleType {
     // https://drafts.csswg.org/cssom/#the-cssrule-interface
     Style = 1,
-    Charset = 2,
+    // Charset = 2, // Historical
     Import = 3,
     Media = 4,
     FontFace = 5,
@@ -322,7 +327,7 @@ pub enum CssRuleType {
     Keyframes = 7,
     Keyframe = 8,
     // https://drafts.csswg.org/cssom/#the-cssrule-interface
-    Margin = 9,
+    // Margin = 9, // Not implemented yet.
     Namespace = 10,
     // https://drafts.csswg.org/css-counter-styles-3/#extentions-to-cssrule-interface
     CounterStyle = 11,
@@ -337,6 +342,7 @@ pub enum CssRuleType {
     // After viewport, all rules should return 0 from the API, but we still need
     // a constant somewhere.
     Layer = 16,
+    ScrollTimeline = 17,
 }
 
 #[allow(missing_docs)]
@@ -364,6 +370,7 @@ impl CssRule {
             CssRule::Page(_) => CssRuleType::Page,
             CssRule::Document(_) => CssRuleType::Document,
             CssRule::Layer(_) => CssRuleType::Layer,
+            CssRule::ScrollTimeline(_) => CssRuleType::ScrollTimeline,
         }
     }
 
@@ -503,6 +510,10 @@ impl DeepCloneWithLock for CssRule {
                     lock.wrap(rule.deep_clone_with_lock(lock, guard, params)),
                 ))
             }
+            CssRule::ScrollTimeline(ref arc) => {
+                let rule = arc.read_with(guard);
+                CssRule::ScrollTimeline(Arc::new(lock.wrap(rule.clone())))
+            }
         }
     }
 }
@@ -524,6 +535,7 @@ impl ToCssWithGuard for CssRule {
             CssRule::Page(ref lock) => lock.read_with(guard).to_css(guard, dest),
             CssRule::Document(ref lock) => lock.read_with(guard).to_css(guard, dest),
             CssRule::Layer(ref lock) => lock.read_with(guard).to_css(guard, dest),
+            CssRule::ScrollTimeline(ref lock) => lock.read_with(guard).to_css(guard, dest),
         }
     }
 }

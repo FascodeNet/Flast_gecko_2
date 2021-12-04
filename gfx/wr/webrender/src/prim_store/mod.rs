@@ -21,8 +21,6 @@ use crate::gpu_cache::{GpuCacheAddress, GpuCacheHandle, GpuDataRequest};
 use crate::gpu_types::{BrushFlags};
 use crate::intern;
 use crate::picture::PicturePrimitive;
-#[cfg(debug_assertions)]
-use crate::render_backend::{FrameId};
 use crate::render_task_graph::RenderTaskId;
 use crate::resource_cache::ImageProperties;
 use crate::scene::SceneProperties;
@@ -31,6 +29,8 @@ use std::{hash, ops, u32, usize};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use crate::util::Recycler;
 use crate::internal_types::LayoutPrimitiveInfo;
+#[cfg(debug_assertions)]
+use crate::internal_types::FrameId;
 use crate::visibility::PrimitiveVisibility;
 
 pub mod backdrop;
@@ -1114,6 +1114,12 @@ impl PrimitiveInstance {
     // Reset any pre-frame state for this primitive.
     pub fn reset(&mut self) {
         self.vis.reset();
+
+        if self.is_chased() {
+            #[cfg(debug_assertions)] // needed for ".id" part
+            println!("\tpreparing {:?}", self.id);
+            println!("\t{:?}", self.kind);
+        }
     }
 
     pub fn clear_visibility(&mut self) {
@@ -1428,15 +1434,6 @@ impl PrimitiveStore {
         use crate::print_tree::PrintTree;
         let mut pt = PrintTree::new("picture tree");
         self.pictures[root.0].print(&self.pictures, root, &mut pt);
-    }
-
-    /// Returns the total count of primitive instances contained in pictures.
-    pub fn prim_count(&self) -> usize {
-        let mut prim_count = 0;
-        for pic in &self.pictures {
-            prim_count += pic.prim_list.prim_instances.len();
-        }
-        prim_count
     }
 }
 

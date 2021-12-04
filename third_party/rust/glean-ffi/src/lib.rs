@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 use std::convert::TryFrom;
 use std::ffi::CStr;
@@ -42,6 +42,7 @@ mod string_list;
 mod timespan;
 mod timing_distribution;
 pub mod upload;
+mod url;
 mod uuid;
 
 #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
@@ -148,9 +149,15 @@ pub extern "C" fn glean_enable_logging() {
     #[cfg(target_os = "android")]
     {
         let _ = std::panic::catch_unwind(|| {
+            let filter = android_logger::FilterBuilder::new()
+                .filter_module("glean_ffi", log::LevelFilter::Debug)
+                .filter_module("glean_core", log::LevelFilter::Debug)
+                .filter_module("glean", log::LevelFilter::Debug)
+                .build();
             android_logger::init_once(
                 android_logger::Config::default()
                     .with_min_level(log::Level::Debug)
+                    .with_filter(filter)
                     .with_tag("libglean_ffi"),
             );
             log::trace!("Android logging should be hooked up!")

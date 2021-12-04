@@ -6,7 +6,7 @@
   <head>
     <meta charset="utf-8">
     <title></title>
-    <meta http-equiv="Content-Security-Policy" content="default-src chrome:;img-src data:; object-src 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src chrome:;img-src blob:; object-src 'none'">
 
     <link rel="localization" href="browser/screenshots.ftl">
 
@@ -32,9 +32,7 @@
           </button>
         </div>
         <div class="preview-image">
-          <div class="preview-image-area">
-            <!-- This is a placeholder image. -->
-            <img id="placeholder-image" src="chrome://browser/content/static-robot.png"/>
+          <div id="preview-image-div" class="preview-image-area">
           </div>
         </div>
       </div>

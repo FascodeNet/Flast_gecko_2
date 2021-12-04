@@ -10,8 +10,10 @@
 #include "mozilla/Maybe.h"
 #include "mozilla/MemoryReporting.h"
 #include "mozilla/Range.h"
+#include "mozilla/Span.h"
 #include "mozilla/TextUtils.h"
 
+#include <string_view>  // std::basic_string_view
 #include <type_traits>  // std::is_same
 
 #include "jstypes.h"  // js::Bit
@@ -1606,6 +1608,22 @@ inline JSLinearString* NewStringCopyN(
                                  heap);
 }
 
+/* Copy a counted string and GC-allocate a descriptor for it. */
+template <js::AllowGC allowGC, typename CharT>
+inline JSLinearString* NewStringCopy(
+    JSContext* cx, mozilla::Span<const CharT> s,
+    js::gc::InitialHeap heap = js::gc::DefaultHeap) {
+  return NewStringCopyN<allowGC>(cx, s.data(), s.size(), heap);
+}
+
+/* Copy a counted string and GC-allocate a descriptor for it. */
+template <js::AllowGC allowGC, typename CharT>
+inline JSLinearString* NewStringCopy(
+    JSContext* cx, std::basic_string_view<CharT> s,
+    js::gc::InitialHeap heap = js::gc::DefaultHeap) {
+  return NewStringCopyN<allowGC>(cx, s.data(), s.size(), heap);
+}
+
 /* Like NewStringCopyN, but doesn't try to deflate to Latin1. */
 template <js::AllowGC allowGC, typename CharT>
 extern JSLinearString* NewStringCopyNDontDeflate(
@@ -1702,12 +1720,6 @@ extern bool CompareStrings(JSContext* cx, JSString* str1, JSString* str2,
  */
 extern int32_t CompareStrings(const JSLinearString* str1,
                               const JSLinearString* str2);
-
-/*
- * Same as CompareStrings but for atoms.  Don't use this to just test
- * for equality; use this when you need an ordering on atoms.
- */
-extern int32_t CompareAtoms(JSAtom* atom1, JSAtom* atom2);
 
 /**
  * Return true if the string contains only ASCII characters.

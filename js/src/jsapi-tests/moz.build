@@ -14,6 +14,7 @@ UNIFIED_SOURCES += [
     "testAddPropertyPropcache.cpp",
     "testArgumentsObject.cpp",
     "testArrayBuffer.cpp",
+    "testArrayBufferOrViewAPI.cpp",
     "testArrayBufferView.cpp",
     "testArrayBufferWithUserOwnedContents.cpp",
     "testAtomicOperations.cpp",
@@ -106,6 +107,7 @@ UNIFIED_SOURCES += [
     "testSetPropertyIgnoringNamedGetter.cpp",
     "testSharedImmutableStringsCache.cpp",
     "testSliceBudget.cpp",
+    "testSlowScript.cpp",
     "testSourcePolicy.cpp",
     "testSparseBitmap.cpp",
     "testStencil.cpp",
@@ -125,7 +127,6 @@ UNIFIED_SOURCES += [
     "testWasmLEB128.cpp",
     "testWeakMap.cpp",
     "testWindowNonConfigurable.cpp",
-    "testXDR.cpp",
 ]
 
 SOURCES += [
@@ -188,5 +189,3 @@ USE_LIBS += [
 
 DEFINES["topsrcdir"] = "%s/js/src" % TOPSRCDIR
 OBJDIR_PP_FILES.js.src["jsapi-tests"] += ["jsapi-tests-gdb.py.in"]
-
-REQUIRES_UNIFIED_BUILD = True

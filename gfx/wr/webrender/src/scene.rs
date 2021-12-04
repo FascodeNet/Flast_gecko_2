@@ -14,7 +14,7 @@ use crate::frame_builder::{ChasePrimitive, FrameBuilderConfig};
 use crate::hit_test::{HitTester, HitTestingScene, HitTestingSceneStats};
 use crate::internal_types::{FastHashMap, PlaneSplitter};
 use crate::picture_graph::PictureGraph;
-use crate::prim_store::{PrimitiveStore, PrimitiveStoreStats, PictureIndex};
+use crate::prim_store::{PrimitiveStore, PrimitiveStoreStats, PictureIndex, PrimitiveInstance};
 use crate::tile_cache::TileCacheConfig;
 use std::sync::Arc;
 
@@ -284,12 +284,12 @@ pub struct BuiltScene {
     pub prim_store: PrimitiveStore,
     pub clip_store: ClipStore,
     pub config: FrameBuilderConfig,
-    pub spatial_tree: SpatialTree,
     pub hit_testing_scene: Arc<HitTestingScene>,
     pub tile_cache_config: TileCacheConfig,
     pub tile_cache_pictures: Vec<PictureIndex>,
     pub picture_graph: PictureGraph,
     pub plane_splitters: Vec<PlaneSplitter>,
+    pub prim_instances: Vec<PrimitiveInstance>,
 }
 
 impl BuiltScene {
@@ -301,12 +301,12 @@ impl BuiltScene {
             background_color: None,
             prim_store: PrimitiveStore::new(&PrimitiveStoreStats::empty()),
             clip_store: ClipStore::new(&ClipStoreStats::empty()),
-            spatial_tree: SpatialTree::new(),
             hit_testing_scene: Arc::new(HitTestingScene::new(&HitTestingSceneStats::empty())),
             tile_cache_config: TileCacheConfig::new(0),
             tile_cache_pictures: Vec::new(),
             picture_graph: PictureGraph::new(),
             plane_splitters: Vec::new(),
+            prim_instances: Vec::new(),
             config: FrameBuilderConfig {
                 default_font_render_mode: FontRenderMode::Mono,
                 dual_source_blending_is_enabled: true,
@@ -340,10 +340,13 @@ impl BuiltScene {
         }
     }
 
-    pub fn create_hit_tester(&mut self) -> HitTester {
+    pub fn create_hit_tester(
+        &mut self,
+        spatial_tree: &SpatialTree,
+    ) -> HitTester {
         HitTester::new(
             Arc::clone(&self.hit_testing_scene),
-            &self.spatial_tree,
+            spatial_tree,
         )
     }
 }

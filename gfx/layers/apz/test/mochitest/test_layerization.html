@@ -64,12 +64,10 @@ let config = getHitTestConfig();
 let activateAllScrollFrames = config.activateAllScrollFrames;
 
 let heightMultiplier = SpecialPowers.getCharPref("apz.y_stationary_size_multiplier");
-if (config.isWebRender) {
-  // With WebRender, the effective height multiplier can be reduced
-  // for alignment reasons. The reduction should be no more than a
-  // factor of two.
-  heightMultiplier /= 2;
-}
+// With WebRender, the effective height multiplier can be reduced
+// for alignment reasons. The reduction should be no more than a
+// factor of two.
+heightMultiplier /= 2;
 info("effective displayport height multipler is " + heightMultiplier);
 
 function hasNonZeroMarginDisplayPort(elementId, containingDoc = null) {
@@ -79,9 +77,10 @@ function hasNonZeroMarginDisplayPort(elementId, containingDoc = null) {
   }
   let elt = (containingDoc != null ? containingDoc : document).getElementById(elementId);
   info(elementId);
+  info("window size " + window.innerWidth + " " + window.innerHeight);
   info("dp " + dp.x + " " + dp.y + " " + dp.w + " " + dp.h);
   info("eltsize " + elt.clientWidth + " " + elt.clientHeight);
-  return dp.h >= heightMultiplier * elt.clientHeight;
+  return dp.h >= heightMultiplier * Math.min(elt.clientHeight, window.innerHeight);
 }
 
 function hasMinimalDisplayPort(elementId, containingDoc = null) {

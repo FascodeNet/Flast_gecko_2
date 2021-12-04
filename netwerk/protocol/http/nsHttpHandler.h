@@ -489,7 +489,7 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
 
   bool UseHTTPSRRAsAltSvcEnabled() const;
 
-  bool EchConfigEnabled() const;
+  bool EchConfigEnabled(bool aIsHttp3 = false) const;
   // When EchConfig is enabled and all records with echConfig are failed, this
   // functon indicate whether we can fallback to the origin server.
   // In the case an HTTPS RRSet contains some RRs with echConfig and some
@@ -648,9 +648,7 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   nsCString mSpoofedUserAgent;
   nsCString mUserAgentOverride;
 
-#if defined(MOZ_BUILD_APP_IS_BROWSER) && !defined(ANDROID)
   nsCString mExperimentUserAgent;
-#endif  // MOZ_BUILD_APP_IS_BROWSER && !ANDROID
 
   bool mUserAgentIsDirty{true};  // true if mUserAgent should be rebuilt
   bool mAcceptLanguagesIsDirty{true};
@@ -833,6 +831,8 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
   [[nodiscard]] bool IsHttp2Excluded(const nsHttpConnectionInfo* ci);
   void ExcludeHttp3(const nsHttpConnectionInfo* ci);
   [[nodiscard]] bool IsHttp3Excluded(const nsACString& aRoutedHost);
+  void Exclude0RttTcp(const nsHttpConnectionInfo* ci);
+  [[nodiscard]] bool Is0RttTcpExcluded(const nsHttpConnectionInfo* ci);
 
   void ExcludeHTTPSRRHost(const nsACString& aHost);
   [[nodiscard]] bool IsHostExcludedForHTTPSRR(const nsACString& aHost);
@@ -840,6 +840,7 @@ class nsHttpHandler final : public nsIHttpProtocolHandler,
  private:
   nsTHashSet<nsCString> mExcludedHttp2Origins;
   nsTHashSet<nsCString> mExcludedHttp3Origins;
+  nsTHashSet<nsCString> mExcluded0RttTcpOrigins;
   // A set of hosts that we should not upgrade to HTTPS with HTTPS RR.
   nsTHashSet<nsCString> mExcludedHostsForHTTPSRRUpgrade;
 

@@ -31,6 +31,7 @@ const AppConstants = ChromeUtils.import(
  * @typedef {import("../@types/perf").ProfilerWebChannel} ProfilerWebChannel
  * @typedef {import("../@types/perf").MessageFromFrontend} MessageFromFrontend
  * @typedef {import("../@types/perf").PageContext} PageContext
+ * @typedef {import("../@types/perf").PrefObserver} PrefObserver
  * @typedef {import("../@types/perf").PrefPostfix} PrefPostfix
  * @typedef {import("../@types/perf").Presets} Presets
  * @typedef {import("../@types/perf").ProfilerViewMode} ProfilerViewMode
@@ -52,6 +53,8 @@ const DURATION_PREF = "devtools.performance.recording.duration";
 const PRESET_PREF = "devtools.performance.recording.preset";
 /** @type {PerformancePref["PopupFeatureFlag"]} */
 const POPUP_FEATURE_FLAG_PREF = "devtools.performance.popup.feature-flag";
+/* This will be used to observe all profiler-related prefs. */
+const PREF_PREFIX = "devtools.performance.recording.";
 
 // Lazily load the require function, when it's needed.
 ChromeUtils.defineModuleGetter(
@@ -81,43 +84,73 @@ const lazy = createLazyLoaders({
     ),
 });
 
-// TODO - Bug 1681539. The presets still need to be localized.
+// The presets that we find in all interfaces are defined here.
+
+// The property l10nIds contain all FTL l10n IDs for these cases:
+// - properties in "popup" are used in the popup's select box.
+// - properties in "devtools" are used in other UIs (about:profiling and devtools panels).
+//
+// Properties for both cases have the same values, but because they're not used
+// in the same way we need to duplicate them.
+// Their values for the en-US locale are in the files:
+//   devtools/client/locales/en-US/perftools.ftl
+//   browser/locales/en-US/browser/appmenu.ftl
 
 /** @type {Presets} */
 const presets = {
   "web-developer": {
-    label: "Web Developer",
-    description:
-      "Recommended preset for most web app debugging, with low overhead.",
     entries: 128 * 1024 * 1024,
     interval: 1,
     features: ["screenshots", "js", "cpu"],
     threads: ["GeckoMain", "Compositor", "Renderer", "DOM Worker"],
     duration: 0,
     profilerViewMode: "active-tab",
+    l10nIds: {
+      popup: {
+        label: "profiler-popup-presets-web-developer-label",
+        description: "profiler-popup-presets-web-developer-description",
+      },
+      devtools: {
+        label: "perftools-presets-web-developer-label",
+        description: "perftools-presets-web-developer-description",
+      },
+    },
   },
   "firefox-platform": {
-    label: "Firefox Platform",
-    description: "Recommended preset for internal Firefox platform debugging.",
     entries: 128 * 1024 * 1024,
     interval: 1,
     features: ["screenshots", "js", "leaf", "stackwalk", "cpu", "java"],
     threads: ["GeckoMain", "Compositor", "Renderer", "SwComposite"],
     duration: 0,
+    l10nIds: {
+      popup: {
+        label: "profiler-popup-presets-firefox-platform-label",
+        description: "profiler-popup-presets-firefox-platform-description",
+      },
+      devtools: {
+        label: "perftools-presets-firefox-platform-label",
+        description: "perftools-presets-firefox-platform-description",
+      },
+    },
   },
   "firefox-front-end": {
-    label: "Firefox Front-End",
-    description: "Recommended preset for internal Firefox front-end debugging.",
     entries: 128 * 1024 * 1024,
     interval: 1,
     features: ["screenshots", "js", "leaf", "stackwalk", "cpu", "java"],
     threads: ["GeckoMain", "Compositor", "Renderer", "DOM Worker"],
     duration: 0,
+    l10nIds: {
+      popup: {
+        label: "profiler-popup-presets-firefox-front-end-label",
+        description: "profiler-popup-presets-firefox-front-end-description",
+      },
+      devtools: {
+        label: "perftools-presets-firefox-front-end-label",
+        description: "perftools-presets-firefox-front-end-description",
+      },
+    },
   },
   graphics: {
-    label: "Firefox Graphics",
-    description:
-      "Recommended preset for Firefox graphics performance investigation.",
     entries: 128 * 1024 * 1024,
     interval: 1,
     features: ["leaf", "stackwalk", "js", "cpu", "java"],
@@ -132,10 +165,18 @@ const presets = {
       "CanvasWorkers",
     ],
     duration: 0,
+    l10nIds: {
+      popup: {
+        label: "profiler-popup-presets-firefox-graphics-label",
+        description: "profiler-popup-presets-firefox-graphics-description",
+      },
+      devtools: {
+        label: "perftools-presets-firefox-graphics-label",
+        description: "perftools-presets-firefox-graphics-description",
+      },
+    },
   },
   media: {
-    label: "Media",
-    description: "Recommended preset for diagnosing audio and video problems.",
     entries: 128 * 1024 * 1024,
     interval: 1,
     features: ["js", "leaf", "stackwalk", "cpu", "audiocallbacktracing"],
@@ -157,12 +198,23 @@ const presets = {
       "ModuleProcessThread",
       "NativeAudioCallback",
       "PacerThread",
+      "RemVidChild",
       "RenderBackend",
       "Renderer",
       "SwComposite",
       "VoiceProcessThread",
     ],
     duration: 0,
+    l10nIds: {
+      popup: {
+        label: "profiler-popup-presets-media-label",
+        description: "profiler-popup-presets-media-description",
+      },
+      devtools: {
+        label: "perftools-presets-media-label",
+        description: "perftools-presets-media-description",
+      },
+    },
   },
 };
 
@@ -537,6 +589,24 @@ function changePreset(pageContext, presetName, supportedFeatures) {
 }
 
 /**
+ * Add an observer for the profiler-related preferences.
+ * @param {PrefObserver} observer
+ * @return {void}
+ */
+function addPrefObserver(observer) {
+  Services.prefs.addObserver(PREF_PREFIX, observer);
+}
+
+/**
+ * Removes an observer for the profiler-related preferences.
+ * @param {PrefObserver} observer
+ * @return {void}
+ */
+function removePrefObserver(observer) {
+  Services.prefs.removeObserver(PREF_PREFIX, observer);
+}
+
+/**
  * This handler handles any messages coming from the WebChannel from profiler.firefox.com.
  *
  * @param {ProfilerWebChannel} channel
@@ -626,6 +696,9 @@ module.exports = {
   revertRecordingSettings,
   changePreset,
   handleWebChannelMessage,
+  addPrefObserver,
+  removePrefObserver,
+  getProfilerViewModeForCurrentPreset,
 };
 
 // Object.keys() confuses the linting which expects a static array expression.

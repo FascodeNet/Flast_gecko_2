@@ -27,6 +27,7 @@
 #include "nsCOMPtr.h"
 #include "nsCSSFrameConstructor.h"
 #include "nsDocShell.h"
+#include "nsIConsoleService.h"
 #include "nsIContentViewer.h"
 #include "nsPIDOMWindow.h"
 #include "mozilla/ServoStyleSet.h"
@@ -99,7 +100,6 @@
 
 #include "nsBidiUtils.h"
 #include "nsServiceManagerUtils.h"
-#include "nsBidi.h"
 
 #include "mozilla/dom/URL.h"
 #include "mozilla/ServoCSSParser.h"
@@ -134,6 +134,52 @@ bool nsPresContext::IsDOMPaintEventPending() {
     return true;
   }
   return false;
+}
+
+struct WeakRunnableMethod : Runnable {
+  using Method = void (nsPresContext::*)();
+
+  WeakRunnableMethod(const char* aName, nsPresContext* aPc, Method aMethod)
+      : Runnable(aName), mPresContext(aPc), mMethod(aMethod) {}
+
+  NS_IMETHOD Run() override {
+    if (nsPresContext* pc = mPresContext.get()) {
+      (pc->*mMethod)();
+    }
+    return NS_OK;
+  }
+
+ private:
+  WeakPtr<nsPresContext> mPresContext;
+  Method mMethod;
+};
+
+// When forcing a font-info-update reflow from style, we don't need to reframe,
+// but we'll need to restyle to pick up updated font metrics. In order to avoid
+// synchronously having to deal with multiple restyles, we use an early refresh
+// driver runner, which should prevent flashing for users.
+//
+// We might do a bit of extra work if the page flushes layout between the
+// restyle and when this happens, which is a bit unfortunate, but not worse than
+// what we used to do...
+//
+// A better solution would be to be able to synchronously initialize font
+// information from style worker threads, perhaps...
+void nsPresContext::ForceReflowForFontInfoUpdateFromStyle() {
+  if (mPendingFontInfoUpdateReflowFromStyle) {
+    return;
+  }
+
+  mPendingFontInfoUpdateReflowFromStyle = true;
+  nsCOMPtr<nsIRunnable> ev = new WeakRunnableMethod(
+      "nsPresContext::DoForceReflowForFontInfoUpdateFromStyle", this,
+      &nsPresContext::DoForceReflowForFontInfoUpdateFromStyle);
+  RefreshDriver()->AddEarlyRunner(ev);
+}
+
+void nsPresContext::DoForceReflowForFontInfoUpdateFromStyle() {
+  mPendingFontInfoUpdateReflowFromStyle = false;
+  ForceReflowForFontInfoUpdate(false);
 }
 
 void nsPresContext::ForceReflowForFontInfoUpdate(bool aNeedsReframe) {
@@ -223,6 +269,7 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mPendingThemeChanged(false),
       mPendingThemeChangeKind(0),
       mPendingUIResolutionChanged(false),
+      mPendingFontInfoUpdateReflowFromStyle(false),
       mIsGlyph(false),
       mUsesExChUnits(false),
       mCounterStylesDirty(true),
@@ -237,12 +284,11 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
       mHadNonBlankPaint(false),
       mHadContentfulPaint(false),
       mHadNonTickContentfulPaint(false),
-      mHadContentfulPaintComposite(false)
+      mHadContentfulPaintComposite(false),
 #ifdef DEBUG
-      ,
-      mInitialized(false)
+      mInitialized(false),
 #endif
-{
+      mColorSchemeOverride(dom::PrefersColorSchemeOverride::None) {
 #ifdef DEBUG
   PodZero(&mLayoutPhaseCount);
 #endif
@@ -270,27 +316,32 @@ nsPresContext::nsPresContext(dom::Document* aDocument, nsPresContextType aType)
     // fine to set here.
     mDynamicToolbarMaxHeight = StaticPrefs::layout_dynamic_toolbar_max_height();
   }
+
+  UpdateFontVisibility();
 }
 
 static const char* gExactCallbackPrefs[] = {
-    "browser.underline_anchors",
-    "browser.anchor_color",
     "browser.active_color",
+    "browser.anchor_color",
+    "browser.underline_anchors",
     "browser.visited_color",
-    "image.animation_mode",
-    "dom.send_after_paint_to_content",
-    "layout.css.dpi",
-    "layout.css.devPixelsPerPx",
-    "nglayout.debug.paint_flashing",
-    "nglayout.debug.paint_flashing_chrome",
-    "intl.accept_languages",
     "dom.meta-viewport.enabled",
+    "dom.send_after_paint_to_content",
+    "image.animation_mode",
+    "intl.accept_languages",
+    "layout.css.devPixelsPerPx",
+    "layout.css.dpi",
+    "nglayout.debug.paint_flashing_chrome",
+    "nglayout.debug.paint_flashing",
+    "privacy.resistFingerprinting",
+    "privacy.trackingprotection.enabled",
     nullptr,
 };
 
 static const char* gPrefixCallbackPrefs[] = {
-    "font.", "browser.display.",    "browser.viewport.",
-    "bidi.", "gfx.font_rendering.", nullptr,
+    "bidi.", "browser.display.",    "browser.viewport.",
+    "font.", "gfx.font_rendering.", "layout.css.font-visibility.",
+    nullptr,
 };
 
 void nsPresContext::Destroy() {
@@ -412,6 +463,13 @@ static void HandleGlobalThemeChange() {
   if (XRE_IsParentProcess()) {
     ContentParent::BroadcastThemeUpdate(kind);
   }
+
+  nsContentUtils::AddScriptRunner(
+      NS_NewRunnableFunction("HandleGlobalThemeChange", [] {
+        if (nsCOMPtr<nsIObserverService> obs = services::GetObserverService()) {
+          obs->NotifyObservers(nullptr, "look-and-feel-changed", nullptr);
+        }
+      }));
 }
 
 void nsPresContext::GetUserPreferences() {
@@ -569,8 +627,10 @@ void nsPresContext::PreferenceChanged(const char* aPrefName) {
   auto restyleHint = RestyleHint{0};
   // Changing any of these potentially changes the value of @media
   // (prefers-contrast).
-  if (prefName.EqualsLiteral("layout.css.prefers-contrast.enabled") ||
-      prefName.EqualsLiteral("browser.display.document_color_use") ||
+  // The layout.css.prefers-contrast.enabled pref itself is not handled here,
+  // because that pref doesn't just affect the "live" value of the media query;
+  // it affects whether it is parsed at all.
+  if (prefName.EqualsLiteral("browser.display.document_color_use") ||
       prefName.EqualsLiteral("privacy.resistFingerprinting") ||
       prefName.EqualsLiteral("browser.display.foreground_color") ||
       prefName.EqualsLiteral("browser.display.background_color")) {
@@ -638,6 +698,9 @@ void nsPresContext::PreferenceChanged(const char* aPrefName) {
   GetUserPreferences();
 
   FlushFontCache();
+  if (UpdateFontVisibility()) {
+    changeHint |= NS_STYLE_HINT_REFLOW;
+  }
 
   // Preferences require rerunning selector matching because we rebuild
   // the pref style sheet for some preference changes.
@@ -647,24 +710,6 @@ void nsPresContext::PreferenceChanged(const char* aPrefName) {
 
   InvalidatePaintedLayers();
 }
-
-struct WeakRunnableMethod : Runnable {
-  using Method = void (nsPresContext::*)();
-
-  WeakRunnableMethod(const char* aName, nsPresContext* aPc, Method aMethod)
-      : Runnable(aName), mPresContext(aPc), mMethod(aMethod) {}
-
-  NS_IMETHOD Run() override {
-    if (nsPresContext* pc = mPresContext.get()) {
-      (pc->*mMethod)();
-    }
-    return NS_OK;
-  }
-
- private:
-  WeakPtr<nsPresContext> mPresContext;
-  Method mMethod;
-};
 
 nsresult nsPresContext::Init(nsDeviceContext* aDeviceContext) {
   NS_ASSERTION(!mInitialized, "attempt to reinit pres context");
@@ -760,6 +805,65 @@ nsresult nsPresContext::Init(nsDeviceContext* aDeviceContext) {
   return NS_OK;
 }
 
+bool nsPresContext::UpdateFontVisibility() {
+  FontVisibility oldValue = mFontVisibility;
+
+  // Is this a private browsing context?
+  bool isPrivate = false;
+  if (nsCOMPtr<nsILoadContext> loadContext = mDocument->GetLoadContext()) {
+    isPrivate = loadContext->UsePrivateBrowsing();
+  }
+
+  // Read the relevant pref depending on RFP/trackingProtection state
+  // to determine the visibility level to use.
+  int32_t level;
+  if (StaticPrefs::privacy_resistFingerprinting()) {
+    level = StaticPrefs::layout_css_font_visibility_resistFingerprinting();
+  } else if (StaticPrefs::privacy_trackingprotection_enabled() ||
+             (isPrivate &&
+              StaticPrefs::privacy_trackingprotection_pbmode_enabled())) {
+    level = StaticPrefs::layout_css_font_visibility_trackingprotection();
+  } else {
+    level = StaticPrefs::layout_css_font_visibility_standard();
+  }
+
+  // For private browsing contexts, apply the private-mode limit.
+  if (isPrivate) {
+    int32_t priv = StaticPrefs::layout_css_font_visibility_private();
+    level = std::max(std::min(level, priv), int32_t(FontVisibility::Base));
+  }
+
+  // Clamp result to the valid range of levels.
+  level = std::max(std::min(level, int32_t(FontVisibility::User)),
+                   int32_t(FontVisibility::Base));
+
+  mFontVisibility = FontVisibility(level);
+  return mFontVisibility != oldValue;
+}
+
+void nsPresContext::ReportBlockedFontFamilyName(const nsCString& aFamily,
+                                                FontVisibility aVisibility) {
+  if (!mBlockedFonts.EnsureInserted(aFamily)) {
+    return;
+  }
+  nsAutoString msg;
+  msg.AppendPrintf(
+      "Request for font \"%s\" blocked at visibility level %d (requires %d)\n",
+      aFamily.get(), int(GetFontVisibility()), int(aVisibility));
+  nsContentUtils::ReportToConsoleNonLocalized(msg, nsIScriptError::warningFlag,
+                                              "Security"_ns, mDocument);
+}
+
+void nsPresContext::ReportBlockedFontFamily(const fontlist::Family& aFamily) {
+  auto* fontList = gfxPlatformFontList::PlatformFontList()->SharedFontList();
+  const nsCString& name = aFamily.DisplayName().AsString(fontList);
+  ReportBlockedFontFamilyName(name, aFamily.Visibility());
+}
+
+void nsPresContext::ReportBlockedFontFamily(const gfxFontFamily& aFamily) {
+  ReportBlockedFontFamilyName(aFamily.Name(), aFamily.Visibility());
+}
+
 void nsPresContext::InitFontCache() {
   if (!mFontCache) {
     mFontCache = new nsFontCache();
@@ -829,6 +933,24 @@ void nsPresContext::AttachPresShell(mozilla::PresShell* aPresShell) {
   UpdateCharSet(doc->GetDocumentCharacterSet());
 }
 
+Maybe<ColorScheme> nsPresContext::GetOverriddenColorScheme() const {
+  if (IsPrintingOrPrintPreview()) {
+    return Some(ColorScheme::Light);
+  }
+
+  switch (mColorSchemeOverride) {
+    case dom::PrefersColorSchemeOverride::Dark:
+      return Some(ColorScheme::Dark);
+    case dom::PrefersColorSchemeOverride::Light:
+      return Some(ColorScheme::Light);
+    case dom::PrefersColorSchemeOverride::None:
+    case dom::PrefersColorSchemeOverride::EndGuard_:
+      break;
+  }
+
+  return Nothing();
+}
+
 void nsPresContext::RecomputeBrowsingContextDependentData() {
   MOZ_ASSERT(mDocument);
   dom::Document* doc = mDocument;
@@ -846,6 +968,16 @@ void nsPresContext::RecomputeBrowsingContextDependentData() {
   SetFullZoom(browsingContext->FullZoom());
   SetTextZoom(browsingContext->TextZoom());
   SetOverrideDPPX(browsingContext->OverrideDPPX());
+
+  auto oldOverride = mColorSchemeOverride;
+  mColorSchemeOverride = browsingContext->Top()->PrefersColorSchemeOverride();
+  if (oldOverride != mColorSchemeOverride) {
+    // This is a bit of a lie, but it's the code-path that gets taken for
+    // regular system metrics changes via ThemeChanged().
+    MediaFeatureValuesChanged({MediaFeatureChangeReason::SystemMetricsChange},
+                              MediaFeatureChangePropagation::JustThisDocument);
+  }
+
   if (doc == mDocument) {
     // Medium doesn't apply to resource documents, etc.
     auto* top = browsingContext->Top();
@@ -976,15 +1108,14 @@ nsIWidget* nsPresContext::GetNearestWidget(nsPoint* aOffset) {
   return rootView->GetNearestWidget(aOffset);
 }
 
-nsIWidget* nsPresContext::GetRootWidget() const {
+already_AddRefed<nsIWidget> nsPresContext::GetRootWidget() const {
   NS_ENSURE_TRUE(mPresShell, nullptr);
   nsViewManager* vm = mPresShell->GetViewManager();
   if (!vm) {
     return nullptr;
   }
-  nsCOMPtr<nsIWidget> widget;
-  vm->GetRootWidget(getter_AddRefs(widget));
-  return widget.get();
+
+  return vm->GetRootWidget();
 }
 
 // We may want to replace this with something faster, maybe caching the root
@@ -1304,6 +1435,12 @@ nsISupports* nsPresContext::GetContainerWeak() const {
   return mDocument->GetDocShell();
 }
 
+nscolor nsPresContext::DefaultBackgroundColor() const {
+  return PrefSheetPrefs()
+      .ColorsFor(mDocument->DefaultColorScheme())
+      .mDefaultBackground;
+}
+
 nsDocShell* nsPresContext::GetDocShell() const {
   return nsDocShell::Cast(mDocument->GetDocShell());
 }
@@ -1414,12 +1551,39 @@ void nsPresContext::RecordInteractionTime(InteractionType aType,
 nsITheme* nsPresContext::EnsureTheme() {
   MOZ_ASSERT(!mTheme);
   if (Document()->ShouldAvoidNativeTheme()) {
-    mTheme = do_GetBasicNativeThemeDoNotUseDirectly();
+    BrowsingContext* bc = Document()->GetBrowsingContext();
+    if (bc && bc->Top()->InRDMPane()) {
+      mTheme = do_GetAndroidNonNativeThemeDoNotUseDirectly();
+    } else {
+      mTheme = do_GetBasicNativeThemeDoNotUseDirectly();
+    }
   } else {
     mTheme = do_GetNativeThemeDoNotUseDirectly();
   }
   MOZ_RELEASE_ASSERT(mTheme);
   return mTheme;
+}
+
+void nsPresContext::RecomputeTheme() {
+  if (!mTheme) {
+    return;
+  }
+  nsCOMPtr<nsITheme> oldTheme = std::move(mTheme);
+  EnsureTheme();
+  if (oldTheme == mTheme) {
+    return;
+  }
+  // Theme only affects layout information, not style, so we just need to
+  // reframe (as it affects whether we create scrollbar buttons for example).
+  RebuildAllStyleData(nsChangeHint_ReconstructFrame, RestyleHint{0});
+}
+
+bool nsPresContext::UseOverlayScrollbars() const {
+  if (LookAndFeel::GetInt(LookAndFeel::IntID::UseOverlayScrollbars)) {
+    return true;
+  }
+  BrowsingContext* bc = Document()->GetBrowsingContext();
+  return bc && bc->Top()->InRDMPane();
 }
 
 void nsPresContext::ThemeChanged(widget::ThemeChangeKind aKind) {
@@ -1760,6 +1924,12 @@ void nsPresContext::SetPrintSettings(nsIPrintSettings* aPrintSettings) {
 }
 
 bool nsPresContext::EnsureVisible() {
+  BrowsingContext* browsingContext =
+      mDocument ? mDocument->GetBrowsingContext() : nullptr;
+  if (!browsingContext || browsingContext->IsInBFCache()) {
+    return false;
+  }
+
   nsCOMPtr<nsIDocShell> docShell(GetDocShell());
   if (!docShell) {
     return false;
@@ -1782,24 +1952,6 @@ void nsPresContext::CountReflows(const char* aName, nsIFrame* aFrame) {
   }
 }
 #endif
-
-bool nsPresContext::HasAuthorSpecifiedRules(const nsIFrame* aFrame,
-                                            uint32_t aRuleTypeMask) const {
-  const bool padding = aRuleTypeMask & NS_AUTHOR_SPECIFIED_PADDING;
-  const bool borderBackground =
-      aRuleTypeMask & NS_AUTHOR_SPECIFIED_BORDER_OR_BACKGROUND;
-  const auto& style = *aFrame->Style();
-
-  if (padding && style.HasAuthorSpecifiedPadding()) {
-    return true;
-  }
-
-  if (borderBackground && style.HasAuthorSpecifiedBorderOrBackground()) {
-    return true;
-  }
-
-  return false;
-}
 
 gfxUserFontSet* nsPresContext::GetUserFontSet() {
   return mDocument->GetUserFontSet();
@@ -2128,7 +2280,7 @@ void nsPresContext::NotifyDidPaintForSubtree(
       mHadContentfulPaintComposite = true;
       RefPtr<nsDOMNavigationTiming> timing = mDocument->GetNavigationTiming();
       if (timing && !IsPrintingOrPrintPreview()) {
-        timing->NotifyContentfulPaintForRootContentDocument(aTimeStamp);
+        timing->NotifyContentfulCompositeForRootContentDocument(aTimeStamp);
       }
     }
   }
@@ -2535,11 +2687,11 @@ uint64_t nsPresContext::GetUndisplayedRestyleGeneration() const {
   return mRestyleManager->GetUndisplayedRestyleGeneration();
 }
 
-nsBidi& nsPresContext::GetBidiEngine() {
+mozilla::intl::Bidi& nsPresContext::GetBidiEngine() {
   MOZ_ASSERT(NS_IsMainThread());
 
   if (!mBidiEngine) {
-    mBidiEngine.reset(new nsBidi());
+    mBidiEngine.reset(new mozilla::intl::Bidi());
   }
   return *mBidiEngine;
 }

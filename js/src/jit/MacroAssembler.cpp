@@ -1845,7 +1845,8 @@ void MacroAssembler::setIsDefinitelyTypedArrayConstructor(Register obj,
     branchPtr(Assembler::Equal, output, ImmPtr(constructor), &isTrue);
   };
 
-#define TYPED_ARRAY_CONSTRUCTOR_NATIVE(T, N) branchIsTypedArrayCtor(Scalar::N);
+#define TYPED_ARRAY_CONSTRUCTOR_NATIVE(_, T, N) \
+  branchIsTypedArrayCtor(Scalar::N);
   JS_FOR_EACH_TYPED_ARRAY(TYPED_ARRAY_CONSTRUCTOR_NATIVE)
 #undef TYPED_ARRAY_CONSTRUCTOR_NATIVE
 
@@ -4193,6 +4194,17 @@ void MacroAssembler::debugAssertObjHasFixedSlots(Register obj,
 #endif
 }
 
+void MacroAssembler::debugAssertObjectHasClass(Register obj, Register scratch,
+                                               const JSClass* clasp) {
+#ifdef DEBUG
+  Label done;
+  branchTestObjClassNoSpectreMitigations(Assembler::Equal, obj, clasp, scratch,
+                                         &done);
+  assumeUnreachable("Class check failed");
+  bind(&done);
+#endif
+}
+
 void MacroAssembler::branchArrayIsNotPacked(Register array, Register temp1,
                                             Register temp2, Label* label) {
   loadPtr(Address(array, NativeObject::offsetOfElements()), temp1);
@@ -4579,6 +4591,13 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
                                    Register temp3) {
   LoadNativeIterator(*this, obj, temp1);
 
+  // The shared iterator used for for-in with null/undefined is immutable and
+  // unlinked. See NativeIterator::isEmptyIteratorSingleton.
+  Label done;
+  branchPtr(Assembler::Equal,
+            Address(temp1, NativeIterator::offsetOfObjectBeingIterated()),
+            ImmPtr(nullptr), &done);
+
   // Clear active bit.
   and32(Imm32(~NativeIterator::Flags::Active),
         Address(temp1, NativeIterator::offsetOfFlagsAndCount()));
@@ -4598,6 +4617,8 @@ void MacroAssembler::iteratorClose(Register obj, Register temp1, Register temp2,
   storePtr(ImmPtr(nullptr), Address(temp1, NativeIterator::offsetOfNext()));
   storePtr(ImmPtr(nullptr), Address(temp1, NativeIterator::offsetOfPrev()));
 #endif
+
+  bind(&done);
 }
 
 void MacroAssembler::toHashableNonGCThing(ValueOperand value,
@@ -4722,7 +4743,7 @@ void MacroAssembler::prepareHashNonGCThing(ValueOperand value, Register result,
 #ifdef JS_PUNBOX64
   auto r64 = Register64(temp);
   move64(value.toRegister64(), r64);
-  rshift64(Imm32(32), r64);
+  rshift64Arithmetic(Imm32(32), r64);
 #else
   // TODO: This seems like a bug in mozilla::detail::AddUintptrToHash().
   // The uint64_t input is first converted to uintptr_t and then back to
@@ -4816,7 +4837,7 @@ void MacroAssembler::prepareHashBigInt(Register bigInt, Register result,
   // |BigInt::hash()|.
 
   // Inline implementation of |mozilla::AddU32ToHash()|.
-  auto addU32ToHash = [&](Register toAdd) {
+  auto addU32ToHash = [&](auto toAdd) {
     rotateLeft(Imm32(5), result, result);
     xor32(toAdd, result);
     mul32(Imm32(mozilla::kGoldenRatioU32), result);
@@ -4833,19 +4854,26 @@ void MacroAssembler::prepareHashBigInt(Register bigInt, Register result,
   jump(&start);
   bind(&loop);
 
-  loadPtr(Address(temp2, 0), temp3);
   {
     // Compute |AddToHash(AddToHash(hash, data), sizeof(Digit))|.
+#if defined(JS_CODEGEN_MIPS64)
+    // Hash the lower 32-bits.
+    addU32ToHash(Address(temp2, 0));
 
-#if JS_PUNBOX64
+    // Hash the upper 32-bits.
+    addU32ToHash(Address(temp2, sizeof(int32_t)));
+#elif JS_PUNBOX64
+    // Use a single 64-bit load on non-MIPS64 platforms.
+    loadPtr(Address(temp2, 0), temp3);
+
     // Hash the lower 32-bits.
     addU32ToHash(temp3);
 
     // Hash the upper 32-bits.
-    rshift64(Imm32(32), Register64(temp3));
+    rshiftPtr(Imm32(32), temp3);
     addU32ToHash(temp3);
 #else
-    addU32ToHash(temp3);
+    addU32ToHash(Address(temp2, 0));
 #endif
   }
   addPtr(Imm32(sizeof(BigInt::Digit)), temp2);
@@ -4890,7 +4918,7 @@ void MacroAssembler::prepareHashObject(Register setObj, ValueOperand value,
 
   // Hash numbers are 32-bit values, so only hash the lower double-word.
   static_assert(sizeof(mozilla::HashNumber) == 4);
-  move64To32(value.toRegister64(), result);
+  move32To64ZeroExtend(value.valueReg(), Register64(result));
 
   // Inline implementation of |SipHasher::sipHash()|.
   auto m = Register64(result);
@@ -5292,10 +5320,10 @@ template void AutoGenericRegisterScope<FloatRegister>::reacquire();
 }  // namespace jit
 
 namespace wasm {
-const TlsData* ExtractCallerTlsFromFrameWithTls(const Frame* fp) {
-  return *reinterpret_cast<TlsData* const*>(
-      reinterpret_cast<const uint8_t*>(fp) + sizeof(Frame) + ShadowStackSpace +
-      FrameWithTls::callerTLSOffset());
+TlsData* ExtractCallerTlsFromFrameWithTls(Frame* fp) {
+  return *reinterpret_cast<TlsData**>(reinterpret_cast<uint8_t*>(fp) +
+                                      sizeof(Frame) + ShadowStackSpace +
+                                      FrameWithTls::callerTLSOffset());
 }
 
 const TlsData* ExtractCalleeTlsFromFrameWithTls(const Frame* fp) {

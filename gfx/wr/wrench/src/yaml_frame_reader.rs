@@ -30,7 +30,7 @@ macro_rules! try_intersect {
         } else {
             warn!("skipping item with non-intersecting bounds and clip_rect");
             return;
-        };
+        }
     }
 }
 
@@ -1849,7 +1849,6 @@ impl YamlFrameReader {
             external_id,
             content_rect,
             clip_rect,
-            ScrollSensitivity::ScriptAndInputEvents,
             external_scroll_offset,
             self.next_spatial_key(),
         );

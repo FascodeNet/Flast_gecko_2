@@ -498,7 +498,7 @@ typedef Vector<SymbolicAccess, 0, SystemAllocPolicy> SymbolicAccessVector;
 // code and metadata.
 
 class MemoryAccessDesc {
-  uint32_t offset_;
+  uint64_t offset64_;
   uint32_t align_;
   Scalar::Type type_;
   jit::Synchronization sync_;
@@ -511,7 +511,7 @@ class MemoryAccessDesc {
       Scalar::Type type, uint32_t align, uint64_t offset,
       BytecodeOffset trapOffset,
       const jit::Synchronization& sync = jit::Synchronization::None())
-      : offset_(uint32_t(offset)),
+      : offset64_(offset),
         align_(align),
         type_(type),
         sync_(sync),
@@ -519,12 +519,27 @@ class MemoryAccessDesc {
         widenOp_(wasm::SimdOp::Limit),
         loadOp_(Plain) {
     MOZ_ASSERT(mozilla::IsPowerOfTwo(align));
-    // Temporary implementation limit on the offset, enforced by
-    // readLinearMemoryAddress in WasmOpIter.h
-    MOZ_ASSERT(offset <= UINT32_MAX);
   }
 
-  uint32_t offset() const { return offset_; }
+  // The offset is a 64-bit value because of memory64.  Almost always, it will
+  // fit in 32 bits, and hence offset() checks that it will, this method is used
+  // almost everywhere in the engine.  The compiler front-ends must use
+  // offset64() to bypass the check performed by offset(), and must resolve
+  // offsets that don't fit in 32 bits early in the compilation pipeline so that
+  // no large offsets are observed later.
+  uint32_t offset() const {
+    MOZ_ASSERT(offset64_ <= UINT32_MAX);
+    return uint32_t(offset64_);
+  }
+  uint64_t offset64() const { return offset64_; }
+
+  // The offset can be cleared without worrying about its magnitude.
+  void clearOffset() { offset64_ = 0; }
+
+  // The offset can be set (after compile-time evaluation) but only to values
+  // that fit in 32 bits.
+  void setOffset32(uint32_t offset) { offset64_ = offset; }
+
   uint32_t align() const { return align_; }
   Scalar::Type type() const { return type_; }
   unsigned byteSize() const { return Scalar::byteSize(type()); }
@@ -560,9 +575,6 @@ class MemoryAccessDesc {
     widenOp_ = op;
     loadOp_ = Widen;
   }
-
-  void clearOffset() { offset_ = 0; }
-  void setOffset(uint32_t offset) { offset_ = offset; }
 };
 
 }  // namespace wasm
@@ -578,6 +590,14 @@ class AssemblerShared {
 #ifdef ENABLE_WASM_EXCEPTIONS
   wasm::WasmTryNoteVector tryNotes_;
 #endif
+#ifdef DEBUG
+  // To facilitate figuring out which part of SM created each instruction as
+  // shown by IONFLAGS=codegen, this maintains a stack of (notionally)
+  // code-creating routines, which is printed in the log output every time an
+  // entry is pushed or popped.  Do not push/pop entries directly; instead use
+  // `class AutoCreatedBy`.
+  mozilla::Vector<const char*> creators_;
+#endif
 
  protected:
   CodeLabelVector codeLabels_;
@@ -587,6 +607,17 @@ class AssemblerShared {
 
  public:
   AssemblerShared() : enoughMemory_(true), embedsNurseryPointers_(false) {}
+
+  ~AssemblerShared();
+
+#ifdef DEBUG
+  // Do not use these directly; instead use `class AutoCreatedBy`.
+  void pushCreator(const char*);
+  void popCreator();
+  // See comment on the implementation of `hasCreator` for guidance on what to
+  // do if you get failures of the assertion `MOZ_ASSERT(hasCreator())`,
+  bool hasCreator() const;
+#endif
 
   void propagateOOM(bool success) { enoughMemory_ &= success; }
 
@@ -642,6 +673,33 @@ class AssemblerShared {
   wasm::WasmTryNoteVector& tryNotes() { return tryNotes_; }
 #endif
 };
+
+// AutoCreatedBy pushes and later pops a who-created-these-insns? tag into the
+// JitSpew_Codegen output.  These could be created fairly frequently, so a
+// dummy inlineable-out version is provided for non-debug builds.  The tag
+// text can be completely arbitrary -- it serves only to help readers of the
+// output text to relate instructions back to the part(s) of SM that created
+// them.
+#ifdef DEBUG
+class MOZ_RAII AutoCreatedBy {
+ private:
+  AssemblerShared& ash_;
+
+ public:
+  AutoCreatedBy(AssemblerShared& ash, const char* who) : ash_(ash) {
+    ash_.pushCreator(who);
+  }
+  ~AutoCreatedBy() { ash_.popCreator(); }
+};
+#else
+class MOZ_RAII AutoCreatedBy {
+ public:
+  inline AutoCreatedBy(AssemblerShared& ash, const char* who) {}
+  // A user-defined constructor is necessary to stop some compilers from
+  // complaining about unused variables.
+  inline ~AutoCreatedBy() {}
+};
+#endif
 
 }  // namespace jit
 }  // namespace js

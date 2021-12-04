@@ -628,6 +628,7 @@ void gfxTextRun::Draw(const Range aRange, const gfx::Point aPt,
   params.paintSVGGlyphs =
       !aParams.callbacks || aParams.callbacks->mShouldPaintSVGGlyphs;
   params.dt = aParams.context->GetDrawTarget();
+  params.allowGDI = aParams.allowGDI;
 
   GlyphRunIterator iter(this, aRange);
   gfxFloat advance = 0.0;
@@ -1014,8 +1015,11 @@ uint32_t gfxTextRun::BreakAndMeasureText(
       // atHyphenationBreak indicates we're at a "soft" hyphen, where an extra
       // hyphen glyph will need to be painted. It is NOT set for breaks at an
       // explicit hyphen present in the text.
+      //
+      // NOTE(emilio): If you change this condition you also need to change
+      // nsTextFrame::AddInlineMinISizeForFlow to match.
       bool atHyphenationBreak = !atNaturalBreak && haveHyphenation &&
-                                hyphenBuffer[i - aStart] > HyphenType::Explicit;
+                                IsOptionalHyphenBreak(hyphenBuffer[i - aStart]);
       bool atAutoHyphenWithManualHyphenInSameWord =
           atHyphenationBreak &&
           hyphenBuffer[i - aStart] == HyphenType::AutoWithManualInSameWord;
@@ -1831,12 +1835,14 @@ void gfxTextRun::Dump(FILE* out) {
 }
 #endif
 
-gfxFontGroup::gfxFontGroup(const StyleFontFamilyList& aFontFamilyList,
+gfxFontGroup::gfxFontGroup(nsPresContext* aPresContext,
+                           const StyleFontFamilyList& aFontFamilyList,
                            const gfxFontStyle* aStyle, nsAtom* aLanguage,
                            bool aExplicitLanguage,
                            gfxTextPerfMetrics* aTextPerf,
                            gfxUserFontSet* aUserFontSet, gfxFloat aDevToCssSize)
-    : mFamilyList(aFontFamilyList),
+    : mPresContext(aPresContext),  // Note that aPresContext may be null!
+      mFamilyList(aFontFamilyList),
       mStyle(*aStyle),
       mLanguage(aLanguage),
       mUnderlineOffset(UNDERLINE_OFFSET_NOT_SET),
@@ -1881,7 +1887,7 @@ void gfxFontGroup::BuildFontList() {
           generic != StyleGenericFontFamily::SystemUi) {
         mFallbackGeneric = generic;
       }
-      pfl->AddGenericFonts(generic, mLanguage, fonts);
+      pfl->AddGenericFonts(mPresContext, generic, mLanguage, fonts);
       if (mTextPerf) {
         mTextPerf->current.genericLookups++;
       }
@@ -1891,7 +1897,7 @@ void gfxFontGroup::BuildFontList() {
   // if necessary, append fallback generic onto the end
   if (mFamilyList.fallback != StyleGenericFontFamily::None &&
       !mFamilyList.ContainsFallback()) {
-    pfl->AddGenericFonts(mFamilyList.fallback, mLanguage, fonts);
+    pfl->AddGenericFonts(mPresContext, mFamilyList.fallback, mLanguage, fonts);
     if (mTextPerf) {
       mTextPerf->current.genericLookups++;
     }
@@ -1927,7 +1933,7 @@ void gfxFontGroup::AddPlatformFont(const nsACString& aName, bool aQuotedName,
 
   // Not known in the user font set ==> check system fonts
   gfxPlatformFontList::PlatformFontList()->FindAndAddFamilies(
-      StyleGenericFontFamily::None, aName, &aFamilyList,
+      mPresContext, StyleGenericFontFamily::None, aName, &aFamilyList,
       aQuotedName ? gfxPlatformFontList::FindFamiliesFlags::eQuotedFamilyName
                   : gfxPlatformFontList::FindFamiliesFlags(0),
       &mStyle, mLanguage.get(), mDevToCssSize);
@@ -2095,7 +2101,7 @@ gfxFont* gfxFontGroup::GetDefaultFont() {
   }
 
   gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
-  FontFamily family = pfl->GetDefaultFont(&mStyle);
+  FontFamily family = pfl->GetDefaultFont(mPresContext, &mStyle);
   MOZ_ASSERT(!family.IsNull(),
              "invalid default font returned by GetDefaultFont");
 
@@ -2732,8 +2738,9 @@ void gfxFontGroup::InitScriptRun(DrawTarget* aDrawTarget, gfxTextRun* aTextRun,
                      syntheticLower, syntheticUpper)) {
         // fallback for small-caps variant glyphs
         if (!matchedFont->InitFakeSmallCapsRun(
-                aDrawTarget, aTextRun, aString + runStart, aOffset + runStart,
-                matchedLength, range.matchType, range.orientation, aRunScript,
+                mPresContext, aDrawTarget, aTextRun, aString + runStart,
+                aOffset + runStart, matchedLength, range.matchType,
+                range.orientation, aRunScript,
                 mExplicitLanguage ? mLanguage.get() : nullptr, syntheticLower,
                 syntheticUpper)) {
           matchedFont = nullptr;
@@ -3022,7 +3029,10 @@ gfxFont* gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh,
 
   // For Unicode hyphens, if not supported in the font then we'll try for
   // the ASCII hyphen-minus as a fallback.
-  uint32_t fallbackChar = (aCh == 0x2010 || aCh == 0x2011) ? '-' : 0;
+  // Similarly, for NBSP we try normal <space> as a fallback.
+  uint32_t fallbackChar = (aCh == 0x2010 || aCh == 0x2011) ? '-'
+                          : (aCh == 0x00A0)                ? ' '
+                                                           : 0;
 
   // Whether we've seen a font that is currently loading a resource that may
   // provide this character (so we should not start a new load).
@@ -3287,7 +3297,10 @@ gfxFont* gfxFontGroup::FindFontForChar(uint32_t aCh, uint32_t aPrevCh,
   // Also don't attempt any fallback for control characters or noncharacters,
   // where we won't be rendering a glyph anyhow, or for codepoints where global
   // fallback has already noted a failure.
-  if (gfxPlatformFontList::PlatformFontList()->SkipFontFallbackForChar(aCh) ||
+  FontVisibility level =
+      mPresContext ? mPresContext->GetFontVisibility() : FontVisibility::User;
+  if (gfxPlatformFontList::PlatformFontList()->SkipFontFallbackForChar(level,
+                                                                       aCh) ||
       GetGeneralCategory(aCh) == HB_UNICODE_GENERAL_CATEGORY_UNASSIGNED) {
     if (candidateFont) {
       *aMatchType = candidateMatchType;
@@ -3409,10 +3422,6 @@ void gfxFontGroup::ComputeRanges(nsTArray<TextRange>& aRanges, const T* aString,
     } else {
       // 8-bit case is trivial.
       nextCh = i < aLength - 1 ? aString[i + 1] : 0;
-    }
-
-    if (ch == 0xa0) {
-      ch = ' ';
     }
 
     gfxFont* font;
@@ -3656,7 +3665,7 @@ gfxFont* gfxFontGroup::WhichPrefFontSupportsChar(
             ? mFallbackGeneric
             : pfl->GetDefaultGeneric(currentLang);
     gfxPlatformFontList::PrefFontList* families =
-        pfl->GetPrefFontsLangGroup(generic, currentLang);
+        pfl->GetPrefFontsLangGroup(mPresContext, generic, currentLang);
     NS_ASSERTION(families, "no pref font families found");
 
     // find the first pref font that includes the character
@@ -3732,7 +3741,8 @@ gfxFont* gfxFontGroup::WhichSystemFontSupportsChar(
   FontVisibility visibility;
   gfxFont* font =
       gfxPlatformFontList::PlatformFontList()->SystemFindFontForChar(
-          aCh, aNextCh, aRunScript, aPresentation, &mStyle, &visibility);
+          mPresContext, aCh, aNextCh, aRunScript, aPresentation, &mStyle,
+          &visibility);
   if (font) {
     return font;
   }

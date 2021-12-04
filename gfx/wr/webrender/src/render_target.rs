@@ -7,7 +7,7 @@ use api::units::*;
 use api::{ColorF, ImageFormat, LineOrientation, BorderStyle};
 use crate::batch::{AlphaBatchBuilder, AlphaBatchContainer, BatchTextures};
 use crate::batch::{ClipBatcher, BatchBuilder};
-use crate::spatial_tree::{SpatialTree, ROOT_SPATIAL_NODE_INDEX};
+use crate::spatial_tree::SpatialTree;
 use crate::clip::ClipStore;
 use crate::composite::CompositeState;
 use crate::frame_builder::{FrameGlobalResources};
@@ -16,7 +16,7 @@ use crate::gpu_types::{BorderInstance, SvgFilterInstance, BlurDirection, BlurIns
 use crate::gpu_types::{TransformPalette, ZBufferIdGenerator};
 use crate::internal_types::{FastHashMap, TextureSource, CacheTextureId};
 use crate::picture::{SliceId, SurfaceInfo, ResolvedSurfaceTexture, TileCacheInstance};
-use crate::prim_store::{PrimitiveStore, DeferredResolve, PrimitiveScratchBuffer};
+use crate::prim_store::{PrimitiveInstance, PrimitiveStore, DeferredResolve, PrimitiveScratchBuffer};
 use crate::prim_store::gradient::{
     FastLinearGradientInstance, LinearGradientInstance, RadialGradientInstance,
     ConicGradientInstance,
@@ -26,6 +26,8 @@ use crate::render_task::{RenderTaskKind, RenderTaskAddress};
 use crate::render_task::{RenderTask, ScalingTask, SvgFilterInfo};
 use crate::render_task_graph::{RenderTaskGraph, RenderTaskId};
 use crate::resource_cache::ResourceCache;
+use crate::spatial_tree::SpatialNodeIndex;
+
 
 const STYLE_SOLID: i32 = ((BorderStyle::Solid as i32) << 8) | ((BorderStyle::Solid as i32) << 16);
 const STYLE_MASK: i32 = 0x00FF_FF00;
@@ -60,6 +62,7 @@ pub struct RenderTargetContext<'a, 'rc> {
     pub screen_world_rect: WorldRect,
     pub globals: &'a FrameGlobalResources,
     pub tile_caches: &'a FastHashMap<SliceId, Box<TileCacheInstance>>,
+    pub root_spatial_node_index: SpatialNodeIndex,
 }
 
 /// Represents a number of rendering operations on a surface.
@@ -96,6 +99,7 @@ pub trait RenderTarget {
         _transforms: &mut TransformPalette,
         _z_generator: &mut ZBufferIdGenerator,
         _composite_state: &mut CompositeState,
+        _prim_instances: &[PrimitiveInstance],
     ) {
     }
 
@@ -174,6 +178,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        prim_instances: &[PrimitiveInstance],
     ) {
         if self.targets.is_empty() {
             return;
@@ -189,6 +194,7 @@ impl<T: RenderTarget> RenderTargetList<T> {
                 transforms,
                 z_generator,
                 composite_state,
+                prim_instances,
             );
         }
     }
@@ -253,6 +259,7 @@ impl RenderTarget for ColorRenderTarget {
         transforms: &mut TransformPalette,
         z_generator: &mut ZBufferIdGenerator,
         composite_state: &mut CompositeState,
+        prim_instances: &[PrimitiveInstance],
     ) {
         profile_scope!("build");
         let mut merged_batches = AlphaBatchContainer::new(None);
@@ -272,7 +279,7 @@ impl RenderTarget for ColorRenderTarget {
                         }
                         None => {
                             // This must be the main framebuffer
-                            ROOT_SPATIAL_NODE_INDEX
+                            ctx.root_spatial_node_index
                         }
                     };
 
@@ -327,6 +334,7 @@ impl RenderTarget for ColorRenderTarget {
                         pic_task.surface_spatial_node_index,
                         z_generator,
                         composite_state,
+                        prim_instances,
                     );
 
                     let alpha_batch_builders = batch_builder.finalize();
@@ -533,18 +541,14 @@ impl RenderTarget for AlphaRenderTarget {
                     task_info.clip_node_range,
                     task_info.root_spatial_node_index,
                     render_tasks,
-                    ctx.resource_cache,
                     gpu_cache,
                     clip_store,
-                    ctx.spatial_tree,
                     transforms,
-                    &ctx.data_stores.clip,
                     task_info.actual_rect,
-                    &ctx.screen_world_rect,
                     task_info.device_pixel_scale,
-                    ctx.global_device_pixel_scale,
                     target_rect.min.to_f32(),
                     task_info.actual_rect.min,
+                    ctx,
                 );
                 if task_info.clear_to_one || clear_to_one {
                     self.one_clears.push(task_id);

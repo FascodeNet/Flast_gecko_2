@@ -366,18 +366,15 @@ class QuotaManager final : public BackgroundThreadObject {
 
   uint64_t GetOriginUsage(const PrincipalMetadata& aPrincipalMetadata);
 
+  Maybe<FullOriginMetadata> GetFullOriginMetadata(
+      const OriginMetadata& aOriginMetadata);
+
   void NotifyStoragePressure(uint64_t aUsage);
 
   // Record a quota client shutdown step, if shutting down.
   // Assumes that the QuotaManager singleton is alive.
   static void MaybeRecordQuotaClientShutdownStep(
-      const Client::Type aClientType, const nsACString& aStepDescription) {
-    // Callable on any thread.
-
-    MOZ_DIAGNOSTIC_ASSERT(QuotaManager::Get());
-    QuotaManager::Get()->MaybeRecordShutdownStep(Some(aClientType),
-                                                 aStepDescription);
-  }
+      const Client::Type aClientType, const nsACString& aStepDescription);
 
   // Record a quota client shutdown step, if shutting down.
   // Checks if the QuotaManager singleton is alive.
@@ -386,6 +383,9 @@ class QuotaManager final : public BackgroundThreadObject {
 
   // Record a quota manager shutdown step, if shutting down.
   void MaybeRecordQuotaManagerShutdownStep(const nsACString& aStepDescription);
+
+  template <typename F>
+  void MaybeRecordQuotaManagerShutdownStepWith(F&& aFunc);
 
   static void GetStorageId(PersistenceType aPersistenceType,
                            const nsACString& aOrigin, Client::Type aClientType,
@@ -550,8 +550,10 @@ class QuotaManager final : public BackgroundThreadObject {
 
   int64_t GenerateDirectoryLockId();
 
-  void MaybeRecordShutdownStep(Maybe<Client::Type> aClientType,
-                               const nsACString& aStepDescription);
+  bool ShutdownStarted() const;
+
+  void RecordShutdownStep(Maybe<Client::Type> aClientType,
+                          const nsACString& aStepDescription);
 
   template <typename Func>
   auto ExecuteInitialization(Initialization aInitialization, Func&& aFunc)

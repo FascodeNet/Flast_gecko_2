@@ -12,6 +12,7 @@
 
 #include "nsContentUtils.h"
 
+#include "mozilla/intl/Bidi.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/PresShellInlines.h"
 #include "mozilla/SVGImageContext.h"
@@ -124,6 +125,7 @@
 #include "mozilla/layers/CanvasClient.h"
 #include "mozilla/layers/WebRenderUserData.h"
 #include "mozilla/layers/WebRenderCanvasRenderer.h"
+#include "WindowRenderer.h"
 
 #undef free  // apparently defined by some windows header, clashing with a
              // free() method in SkTypes.h
@@ -2499,8 +2501,8 @@ static bool ValidateRect(double& aX, double& aY, double& aWidth,
   // The values of canvas API input are in double precision, but Moz2D APIs are
   // using float precision. Bypass canvas API calls when the input is out of
   // float precision to avoid precision problem
-  if (!std::isfinite((float)aX) | !std::isfinite((float)aY) |
-      !std::isfinite((float)aWidth) | !std::isfinite((float)aHeight)) {
+  if (!std::isfinite((float)aX) || !std::isfinite((float)aY) ||
+      !std::isfinite((float)aWidth) || !std::isfinite((float)aHeight)) {
     return false;
   }
 
@@ -3502,11 +3504,11 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor
   using ContextState = CanvasRenderingContext2D::ContextState;
 
   virtual void SetText(const char16_t* aText, int32_t aLength,
-                       nsBidiDirection aDirection) override {
+                       mozilla::intl::Bidi::Direction aDirection) override {
     mFontgrp->UpdateUserFonts();  // ensure user font generation is current
     // adjust flags for current direction run
     gfx::ShapedTextFlags flags = mTextRunFlags;
-    if (aDirection == NSBIDI_RTL) {
+    if (aDirection == mozilla::intl::Bidi::Direction::RTL) {
       flags |= gfx::ShapedTextFlags::TEXT_IS_RTL;
     } else {
       flags &= ~gfx::ShapedTextFlags::TEXT_IS_RTL;
@@ -3647,6 +3649,8 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor
     }
     gfxTextRun::DrawParams params(thebes);
 
+    params.allowGDI = false;
+
     const ContextState* state = &mCtx->CurrentState();
     if (state->StyleIsColor(style)) {  // Color
       nscolor fontColor = state->colorStyles[style];
@@ -3700,6 +3704,8 @@ struct MOZ_STACK_CLASS CanvasBidiProcessor
 
   // current text run
   RefPtr<gfxTextRun> mTextRun;
+
+  RefPtr<nsPresContext> mPresContext;
 
   // pointer to a screen reference context used to measure text and such
   RefPtr<DrawTarget> mDrawTarget;
@@ -3834,6 +3840,8 @@ TextMetrics* CanvasRenderingContext2D::DrawOrMeasureText(
 
   CanvasBidiProcessor processor;
 
+  processor.mPresContext = presContext;
+
   // If we don't have a ComputedStyle, we can't set up vertical-text flags
   // (for now, at least; perhaps we need new Canvas API to control this).
   processor.mTextRunFlags =
@@ -3866,7 +3874,9 @@ TextMetrics* CanvasRenderingContext2D::DrawOrMeasureText(
   // calls bidi algo twice since it needs the full text width and the
   // bounding boxes before rendering anything
   aError = nsBidiPresUtils::ProcessText(
-      textToDraw.get(), textToDraw.Length(), isRTL ? NSBIDI_RTL : NSBIDI_LTR,
+      textToDraw.get(), textToDraw.Length(),
+      isRTL ? mozilla::intl::Bidi::EmbeddingLevel::RTL()
+            : mozilla::intl::Bidi::EmbeddingLevel::LTR(),
       presShell->GetPresContext(), processor, nsBidiPresUtils::MODE_MEASURE,
       nullptr, 0, &totalWidthCoord, &mBidiEngine);
   if (aError.Failed()) {
@@ -4007,7 +4017,9 @@ TextMetrics* CanvasRenderingContext2D::DrawOrMeasureText(
   processor.mDoMeasureBoundingBox = false;
 
   aError = nsBidiPresUtils::ProcessText(
-      textToDraw.get(), textToDraw.Length(), isRTL ? NSBIDI_RTL : NSBIDI_LTR,
+      textToDraw.get(), textToDraw.Length(),
+      isRTL ? mozilla::intl::Bidi::EmbeddingLevel::RTL()
+            : mozilla::intl::Bidi::EmbeddingLevel::LTR(),
       presShell->GetPresContext(), processor, nsBidiPresUtils::MODE_DRAW,
       nullptr, 0, nullptr, &mBidiEngine);
 
@@ -4032,9 +4044,9 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
   // Use lazy (re)initialization for the fontGroup since it's rather expensive.
 
   RefPtr<PresShell> presShell = GetPresShell();
+  nsPresContext* pc = presShell ? presShell->GetPresContext() : nullptr;
   gfxTextPerfMetrics* tp = nullptr;
-  if (presShell && !presShell->IsDestroying()) {
-    nsPresContext* pc = presShell->GetPresContext();
+  if (pc) {
     tp = pc->GetTextPerfMetrics();
   }
 
@@ -4070,7 +4082,7 @@ gfxFontGroup* CanvasRenderingContext2D::GetCurrentFontStyle() {
       const auto* sans =
           Servo_FontFamily_Generic(StyleGenericFontFamily::SansSerif);
       fontGroup = gfxPlatform::GetPlatform()->CreateFontGroup(
-          sans->families, &style, language, explicitLanguage, tp, nullptr,
+          pc, sans->families, &style, language, explicitLanguage, tp, nullptr,
           devToCssSize);
       if (fontGroup) {
         CurrentState().font = kDefaultFontStyle;
@@ -5364,49 +5376,6 @@ void CanvasRenderingContext2D::OnBeforePaintTransaction() {
 
 void CanvasRenderingContext2D::OnDidPaintTransaction() { MarkContextClean(); }
 
-already_AddRefed<Layer> CanvasRenderingContext2D::GetCanvasLayer(
-    nsDisplayListBuilder* aBuilder, Layer* aOldLayer, LayerManager* aManager) {
-  if (mOpaque) {
-    // If we're opaque then make sure we have a surface so we paint black
-    // instead of transparent.
-    EnsureTarget();
-  }
-
-  // Don't call EnsureTarget() ... if there isn't already a surface, then
-  // we have nothing to paint and there is no need to create a surface just
-  // to paint nothing. Also, EnsureTarget() can cause creation of a persistent
-  // layer manager which must NOT happen during a paint.
-  if (!mBufferProvider && !IsTargetValid()) {
-    // No DidTransactionCallback will be received, so mark the context clean
-    // now so future invalidations will be dispatched.
-    MarkContextClean();
-    return nullptr;
-  }
-
-  if (!mResetLayer && aOldLayer) {
-    RefPtr<Layer> ret = aOldLayer;
-    return ret.forget();
-  }
-
-  RefPtr<CanvasLayer> canvasLayer = aManager->CreateCanvasLayer();
-  if (!canvasLayer) {
-    NS_WARNING("CreateCanvasLayer returned null!");
-    // No DidTransactionCallback will be received, so mark the context clean
-    // now so future invalidations will be dispatched.
-    MarkContextClean();
-    return nullptr;
-  }
-
-  const auto canvasRenderer = canvasLayer->CreateOrGetCanvasRenderer();
-  InitializeCanvasRenderer(aBuilder, canvasRenderer);
-  uint32_t flags = mOpaque ? Layer::CONTENT_OPAQUE : 0;
-  canvasLayer->SetContentFlags(flags);
-
-  mResetLayer = false;
-
-  return canvasLayer.forget();
-}
-
 bool CanvasRenderingContext2D::UpdateWebRenderCanvasData(
     nsDisplayListBuilder* aBuilder, WebRenderCanvasData* aCanvasData) {
   if (mOpaque) {
@@ -5489,11 +5458,6 @@ void CanvasRenderingContext2D::MarkContextCleanForFrameCapture() {
 
 bool CanvasRenderingContext2D::IsContextCleanForFrameCapture() {
   return !mIsCapturedFrameInvalid;
-}
-
-bool CanvasRenderingContext2D::ShouldForceInactiveLayer(
-    LayerManager* aManager) {
-  return !aManager->CanUseCanvasLayerForSize(GetSize());
 }
 
 void CanvasRenderingContext2D::GetAppUnitsValues(int32_t* aPerDevPixel,

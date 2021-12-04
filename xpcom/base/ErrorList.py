@@ -338,6 +338,8 @@ with modules["NETWORK"]:
     errors["NS_ERROR_NET_HTTP3_PROTOCOL_ERROR"] = FAILURE(84)
     # A timeout error code that can be used to cancel requests.
     errors["NS_ERROR_NET_TIMEOUT_EXTERNAL"] = FAILURE(85)
+    # An error related to HTTPS-only mode
+    errors["NS_ERROR_HTTPS_ONLY"] = FAILURE(86)
 
     # XXX really need to better rationalize these error codes.  are consumers of
     # necko really expected to know how to discern the meaning of these??
@@ -353,9 +355,6 @@ with modules["NETWORK"]:
     # a type expected by the channel (for nested channels such as the JAR
     # channel).
     errors["NS_ERROR_UNSAFE_CONTENT_TYPE"] = FAILURE(74)
-    # The request failed because the user tried to access to a remote XUL
-    # document from a website that is not in its white-list.
-    errors["NS_ERROR_REMOTE_XUL"] = FAILURE(75)
     # The request resulted in an error page being displayed.
     errors["NS_ERROR_LOAD_SHOWED_ERRORPAGE"] = FAILURE(77)
     # The request occurred in docshell that lacks a treeowner, so it is
@@ -741,6 +740,16 @@ with modules["DOM"]:
     # WebExtension content script may not load this URL.
     errors["NS_ERROR_DOM_WEBEXT_CONTENT_SCRIPT_URI"] = FAILURE(1039)
 
+    # Used to indicate that a resource load was blocked because of the
+    # Cross-Origin-Embedder-Policy response header.
+    # https://html.spec.whatwg.org/multipage/origin.html#coep
+    errors["NS_ERROR_DOM_COEP_FAILED"] = FAILURE(1040)
+
+    # Used to indicate that a resource load was blocked because of the
+    # Cross-Origin-Opener-Policy response header.
+    # https://html.spec.whatwg.org/multipage/origin.html#cross-origin-opener-policies
+    errors["NS_ERROR_DOM_COOP_FAILED"] = FAILURE(1041)
+
     # May be used to indicate when e.g. setting a property value didn't
     # actually change the value, like for obj.foo = "bar"; obj.foo = "bar";
     # the second assignment throws NS_SUCCESS_DOM_NO_OPERATION.
@@ -860,7 +869,6 @@ with modules["PROFILE"]:
     errors["NS_ERROR_LAUNCHED_CHILD_PROCESS"] = FAILURE(200)
     errors["NS_ERROR_SHOW_PROFILE_MANAGER"] = FAILURE(201)
     errors["NS_ERROR_DATABASE_CHANGED"] = FAILURE(202)
-    errors["NS_MIGRATE_INTO_PACKAGE"] = SUCCESS(203)
 
 
 # =======================================================================

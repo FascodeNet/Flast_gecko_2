@@ -2858,8 +2858,10 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     // worker is supposed to have the same storage permission as the window as
     // well as the hasStoragePermission flag.
     nsCOMPtr<nsILoadInfo> channelLoadInfo = loadInfo.mChannel->LoadInfo();
-    rv = channelLoadInfo->SetHasStoragePermission(
-        loadInfo.mHasStorageAccessPermissionGranted);
+    rv = channelLoadInfo->SetStoragePermission(
+        loadInfo.mHasStorageAccessPermissionGranted
+            ? nsILoadInfo::HasStoragePermission
+            : nsILoadInfo::NoStoragePermission);
     NS_ENSURE_SUCCESS(rv, rv);
 
     rv = loadInfo.SetPrincipalsAndCSPFromChannel(loadInfo.mChannel);
@@ -2914,6 +2916,8 @@ void WorkerPrivate::RunLoopNeverRan() {
       runnable->Release();
     }
   }
+
+  NotifyWorkerRefs(Killing);
 
   ScheduleDeletion(WorkerPrivate::WorkerRan);
 }
@@ -5008,7 +5012,7 @@ void WorkerPrivate::GarbageCollectInternal(JSContext* aCx, bool aShrinking,
 void WorkerPrivate::CycleCollectInternal(bool aCollectChildren) {
   auto data = mWorkerThreadAccessible.Access();
 
-  nsCycleCollector_collect(nullptr);
+  nsCycleCollector_collect(CCReason::WORKER, nullptr);
 
   if (aCollectChildren) {
     for (uint32_t index = 0; index < data->mChildWorkers.Length(); index++) {

@@ -43,6 +43,7 @@
 #include "frontend/ModuleSharedContext.h"
 #include "frontend/ParseNode.h"
 #include "frontend/ParseNodeVerify.h"
+#include "frontend/ParserAtom.h"  // TaggedParserAtomIndex, ParserAtomsTable, ParserAtom
 #include "frontend/ScriptIndex.h"  // ScriptIndex
 #include "frontend/TokenStream.h"
 #include "irregexp/RegExpAPI.h"
@@ -2208,7 +2209,7 @@ bool PerHandlerParser<SyntaxParseHandler>::finishFunction(
   for (auto binding : pc_->closedOverBindingsForLazy()) {
     void* raw = &(*cursor++);
     if (binding) {
-      this->parserAtoms().markUsedByStencil(binding);
+      this->parserAtoms().markUsedByStencil(binding, ParserAtom::Atomize::Yes);
       new (raw) TaggedScriptThingIndex(binding);
     } else {
       new (raw) TaggedScriptThingIndex();
@@ -3385,60 +3386,33 @@ bool GeneralParser<ParseHandler, Unit>::appendToCallSiteObj(
 
 template <typename Unit>
 FunctionNode* Parser<FullParseHandler, Unit>::standaloneLazyFunction(
-    HandleFunction fun, uint32_t toStringStart, bool strict,
+    CompilationInput& input, uint32_t toStringStart, bool strict,
     GeneratorKind generatorKind, FunctionAsyncKind asyncKind) {
   MOZ_ASSERT(checkOptionsCalled_);
 
-  FunctionSyntaxKind syntaxKind = FunctionSyntaxKind::Statement;
-  if (fun->isClassConstructor()) {
-    if (fun->isDerivedClassConstructor()) {
-      syntaxKind = FunctionSyntaxKind::DerivedClassConstructor;
-    } else {
-      syntaxKind = FunctionSyntaxKind::ClassConstructor;
-    }
-  } else if (fun->isMethod()) {
-    if (fun->isSyntheticFunction()) {
-      MOZ_ASSERT(!fun->isClassConstructor());
-      syntaxKind = FunctionSyntaxKind::FieldInitializer;
-      MOZ_ASSERT_UNREACHABLE(
-          "Lazy parsing of class field initializers not supported (yet)");
-    } else {
-      syntaxKind = FunctionSyntaxKind::Method;
-    }
-  } else if (fun->isGetter()) {
-    syntaxKind = FunctionSyntaxKind::Getter;
-  } else if (fun->isSetter()) {
-    syntaxKind = FunctionSyntaxKind::Setter;
-  } else if (fun->isArrow()) {
-    syntaxKind = FunctionSyntaxKind::Arrow;
-  }
-
+  FunctionSyntaxKind syntaxKind = input.functionSyntaxKind();
   FunctionNodeType funNode = handler_.newFunction(syntaxKind, pos());
   if (!funNode) {
     return null();
   }
 
-  // TODO-Stencil: Consider for snapshotting.
-  TaggedParserAtomIndex displayAtom;
-  if (fun->displayAtom()) {
-    displayAtom = this->parserAtoms().internJSAtom(
-        cx_, this->compilationState_.input.atomCache, fun->displayAtom());
-    if (!displayAtom) {
-      return null();
-    }
-  }
+  TaggedParserAtomIndex displayAtom =
+      this->getCompilationState().previousParseCache.displayAtom();
 
   Directives directives(strict);
   FunctionBox* funbox =
-      newFunctionBox(funNode, displayAtom, fun->flags(), toStringStart,
+      newFunctionBox(funNode, displayAtom, input.functionFlags(), toStringStart,
                      directives, generatorKind, asyncKind);
   if (!funbox) {
     return null();
   }
-  funbox->initFromLazyFunction(fun, this->compilationState_.scopeContext,
-                               fun->flags(), syntaxKind);
+  const ScriptStencilExtra& funExtra =
+      this->getCompilationState().previousParseCache.funExtra();
+  funbox->initFromLazyFunction(funExtra,
+                               this->getCompilationState().scopeContext,
+                               input.functionFlags(), syntaxKind);
   if (funbox->useMemberInitializers()) {
-    funbox->setMemberInitializers(fun->baseScript()->getMemberInitializers());
+    funbox->setMemberInitializers(funExtra.memberInitializers());
   }
 
   Directives newDirectives = directives;
@@ -3452,10 +3426,10 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneLazyFunction(
   // function is a not-async arrow, use TokenStream::SlashIsRegExp to keep
   // verifyConsistentModifier from complaining (we will use
   // TokenStream::SlashIsRegExp in functionArguments).
-  Modifier modifier =
-      (fun->isArrow() && asyncKind == FunctionAsyncKind::SyncFunction)
-          ? TokenStream::SlashIsRegExp
-          : TokenStream::SlashIsDiv;
+  Modifier modifier = (input.functionFlags().isArrow() &&
+                       asyncKind == FunctionAsyncKind::SyncFunction)
+                          ? TokenStream::SlashIsRegExp
+                          : TokenStream::SlashIsDiv;
   if (!tokenStream.peekTokenPos(&funNode->pn_pos, modifier)) {
     return null();
   }
@@ -3507,8 +3481,34 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneLazyFunction(
 }
 
 void ParserBase::setFunctionEndFromCurrentToken(FunctionBox* funbox) const {
-  MOZ_ASSERT(anyChars.currentToken().type != TokenKind::Eof);
-  funbox->setEnd(anyChars.currentToken().pos.end);
+  if (compilationState_.isInitialStencil()) {
+    MOZ_ASSERT(anyChars.currentToken().type != TokenKind::Eof);
+    MOZ_ASSERT(anyChars.currentToken().type < TokenKind::Limit);
+    funbox->setEnd(anyChars.currentToken().pos.end);
+  } else {
+    // If we're delazifying an arrow function with expression body and
+    // the expression is also a function, we arrive here immediately after
+    // skipping the function by Parser::skipLazyInnerFunction.
+    //
+    //   a => b => c
+    //              ^
+    //              |
+    //              we're here
+    //
+    // In that case, the current token's type field is either Limit or
+    // poisoned.
+    // We shouldn't read the value if it's poisoned.
+    // See TokenStreamSpecific<Unit, AnyCharsAccess>::advance and
+    // mfbt/MemoryChecking.h for more details.
+    //
+    // Also, in delazification, the FunctionBox should already have the
+    // correct extent, and we shouldn't overwrite it here.
+    // See ScriptStencil variant of PerHandlerParser::newFunctionBox.
+#if !defined(MOZ_ASAN) && !defined(MOZ_MSAN) && !defined(MOZ_VALGRIND)
+    MOZ_ASSERT(anyChars.currentToken().type != TokenKind::Eof);
+#endif
+    MOZ_ASSERT(funbox->extent().sourceEnd == anyChars.currentToken().pos.end);
+  }
 }
 
 template <class ParseHandler, typename Unit>
@@ -3873,13 +3873,6 @@ bool Parser<SyntaxParseHandler, Unit>::asmJS(ListNodeType list) {
   // encountered so that asm.js is always validated/compiled exactly once
   // during a full parse.
   MOZ_ALWAYS_FALSE(abortIfSyntaxParser());
-
-  // Record that the current script source constains some AsmJS, to disable
-  // any incremental encoder, as AsmJS cannot be encoded with XDR at the
-  // moment.
-  if (ss) {
-    ss->setContainsAsmJS();
-  }
   return false;
 }
 
@@ -3902,7 +3895,6 @@ bool Parser<FullParseHandler, Unit>::asmJS(ListNodeType list) {
     return true;
   }
 
-  ss->setContainsAsmJS();
   pc_->functionBox()->useAsm = true;
 
   // Attempt to validate and compile this asm.js module. On success, the
@@ -10942,7 +10934,8 @@ RegExpLiteral* Parser<FullParseHandler, Unit>::newRegExp() {
   if (!atom) {
     return nullptr;
   }
-  this->parserAtoms().markUsedByStencil(atom);
+  // RegExp patterm must be atomized.
+  this->parserAtoms().markUsedByStencil(atom, ParserAtom::Atomize::Yes);
 
   RegExpIndex index(this->compilationState_.regExpData.length());
   if (uint32_t(index) >= TaggedScriptThingIndex::IndexLimit) {

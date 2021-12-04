@@ -20,8 +20,18 @@
 
 class JSJitInfo;
 
+/*
+ * Set a callback used to trace gray roots.
+ *
+ * The callback is called after the first slice of GC so the embedding must
+ * implement appropriate barriers on its gray roots to ensure correctness.
+ *
+ * This callback may be called multiple times for different sets of zones. Use
+ * JS::ZoneIsGrayMarking() to determine whether roots from a particular zone are
+ * required.
+ */
 extern JS_PUBLIC_API void JS_SetGrayGCRootsTracer(JSContext* cx,
-                                                  JSTraceDataOp traceOp,
+                                                  JSGrayRootsTracer traceOp,
                                                   void* data);
 
 extern JS_PUBLIC_API JSObject* JS_FindCompilationScope(JSContext* cx,

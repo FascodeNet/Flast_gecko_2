@@ -30,12 +30,14 @@
 #include "mozilla/dom/CSSFontFaceRule.h"
 #include "mozilla/dom/CSSFontFeatureValuesRule.h"
 #include "mozilla/dom/CSSImportRule.h"
+#include "mozilla/dom/CSSLayerRule.h"
 #include "mozilla/dom/CSSMediaRule.h"
 #include "mozilla/dom/CSSMozDocumentRule.h"
 #include "mozilla/dom/CSSKeyframesRule.h"
 #include "mozilla/dom/CSSKeyframeRule.h"
 #include "mozilla/dom/CSSNamespaceRule.h"
 #include "mozilla/dom/CSSPageRule.h"
+#include "mozilla/dom/CSSScrollTimelineRule.h"
 #include "mozilla/dom/CSSSupportsRule.h"
 #include "mozilla/dom/ChildIterator.h"
 #include "mozilla/dom/FontFaceSet.h"
@@ -47,6 +49,7 @@
 #include "nsDeviceContext.h"
 #include "nsHTMLStyleSheet.h"
 #include "nsIAnonymousContentCreator.h"
+#include "nsLayoutUtils.h"
 #include "mozilla/dom/DocumentInlines.h"
 #include "nsPrintfCString.h"
 #include "gfxUserFontSet.h"
@@ -628,6 +631,28 @@ StyleSheet* ServoStyleSet::SheetAt(Origin aOrigin, size_t aIndex) const {
       Servo_StyleSet_GetSheetAt(mRawSet.get(), aOrigin, aIndex));
 }
 
+Maybe<StyleOrientation> ServoStyleSet::GetDefaultPageOrientation() {
+  const RefPtr<ComputedStyle> style =
+      ResolveNonInheritingAnonymousBoxStyle(PseudoStyleType::pageContent);
+  const StylePageSize& pageSize = style->StylePage()->mSize;
+  if (pageSize.IsOrientation()) {
+    return Some(pageSize.AsOrientation());
+  }
+  if (pageSize.IsSize()) {
+    const CSSCoord w = pageSize.AsSize().width.ToCSSPixels();
+    const CSSCoord h = pageSize.AsSize().height.ToCSSPixels();
+    if (w > h) {
+      return Some(StyleOrientation::Landscape);
+    }
+    if (w < h) {
+      return Some(StyleOrientation::Portrait);
+    }
+  } else {
+    MOZ_ASSERT(pageSize.IsAuto(), "Impossible page size");
+  }
+  return Nothing();
+}
+
 void ServoStyleSet::AppendAllNonDocumentAuthorSheets(
     nsTArray<StyleSheet*>& aArray) const {
   EnumerateShadowRoots(*mDocument, [&](ShadowRoot& aShadowRoot) {
@@ -906,33 +931,34 @@ void ServoStyleSet::RuleChangedInternal(StyleSheet& aSheet, css::Rule& aRule,
   SetStylistStyleSheetsDirty();
 
 #define CASE_FOR(constant_, type_)                                       \
-  case CSSRule_Binding::constant_##_RULE:                                \
+  case StyleCssRuleType::constant_:                                      \
     return Servo_StyleSet_##type_##RuleChanged(                          \
         mRawSet.get(), static_cast<dom::CSS##type_##Rule&>(aRule).Raw(), \
         &aSheet, aKind);
 
   switch (aRule.Type()) {
-    CASE_FOR(COUNTER_STYLE, CounterStyle)
-    CASE_FOR(STYLE, Style)
-    CASE_FOR(IMPORT, Import)
-    CASE_FOR(MEDIA, Media)
-    CASE_FOR(KEYFRAMES, Keyframes)
-    CASE_FOR(FONT_FEATURE_VALUES, FontFeatureValues)
-    CASE_FOR(FONT_FACE, FontFace)
-    CASE_FOR(PAGE, Page)
-    CASE_FOR(DOCUMENT, MozDocument)
-    CASE_FOR(SUPPORTS, Supports)
+    CASE_FOR(CounterStyle, CounterStyle)
+    CASE_FOR(Style, Style)
+    CASE_FOR(Import, Import)
+    CASE_FOR(Media, Media)
+    CASE_FOR(Keyframes, Keyframes)
+    CASE_FOR(FontFeatureValues, FontFeatureValues)
+    CASE_FOR(FontFace, FontFace)
+    CASE_FOR(Page, Page)
+    CASE_FOR(Document, MozDocument)
+    CASE_FOR(Supports, Supports)
+    CASE_FOR(Layer, Layer)
+    CASE_FOR(ScrollTimeline, ScrollTimeline)
     // @namespace can only be inserted / removed when there are only other
     // @namespace and @import rules, and can't be mutated.
-    case CSSRule_Binding::NAMESPACE_RULE:
-    case CSSRule_Binding::CHARSET_RULE:
+    case StyleCssRuleType::Namespace:
       break;
-    case CSSRule_Binding::KEYFRAME_RULE:
+    case StyleCssRuleType::Viewport:
+      MOZ_ASSERT_UNREACHABLE("Gecko doesn't implement @viewport");
+      break;
+    case StyleCssRuleType::Keyframe:
       // FIXME: We should probably just forward to the parent @keyframes rule? I
       // think that'd do the right thing, but meanwhile...
-      return MarkOriginsDirty(ToOriginFlags(aSheet.GetOrigin()));
-    default:
-      MOZ_ASSERT_UNREACHABLE("Unknown rule type changed");
       return MarkOriginsDirty(ToOriginFlags(aSheet.GetOrigin()));
   }
 

@@ -24,6 +24,17 @@ uint64_t ToNanoSeconds(const FILETIME& aFileTime) {
   return usec.QuadPart * 100;
 }
 
+nsresult GetCpuTimeSinceProcessStartInMs(uint64_t* aResult) {
+  FILETIME createTime, exitTime, kernelTime, userTime;
+  if (!GetProcessTimes(::GetCurrentProcess(), &createTime, &exitTime,
+                       &kernelTime, &userTime)) {
+    return NS_ERROR_FAILURE;
+  }
+  *aResult =
+      (ToNanoSeconds(kernelTime) + ToNanoSeconds(userTime)) / PR_NSEC_PER_MSEC;
+  return NS_OK;
+}
+
 RefPtr<ProcInfoPromise> GetProcInfo(nsTArray<ProcInfoRequest>&& aRequests) {
   auto holder = MakeUnique<MozPromiseHolder<ProcInfoPromise>>();
   RefPtr<ProcInfoPromise> promise = holder->Ensure(__func__);
@@ -68,7 +79,7 @@ RefPtr<ProcInfoPromise> GetProcInfo(nsTArray<ProcInfoRequest>&& aRequests) {
             // Ignore process, it may have died.
             continue;
           }
-          PROCESS_MEMORY_COUNTERS memoryCounters;
+          PROCESS_MEMORY_COUNTERS_EX memoryCounters;
           if (!GetProcessMemoryInfo(handle.get(),
                                     (PPROCESS_MEMORY_COUNTERS)&memoryCounters,
                                     sizeof(memoryCounters))) {
@@ -91,14 +102,9 @@ RefPtr<ProcInfoPromise> GetProcInfo(nsTArray<ProcInfoRequest>&& aRequests) {
           info.filename.Assign(filename);
           info.cpuKernel = ToNanoSeconds(kernelTime);
           info.cpuUser = ToNanoSeconds(userTime);
-          info.residentSetSize = memoryCounters.WorkingSetSize;
+          QueryProcessCycleTime(handle.get(), &info.cpuCycleCount);
 
-          // Computing the resident unique size is somewhat tricky,
-          // so we use about:memory's implementation. This implementation
-          // uses the `HANDLE` so, in theory, should be no additional
-          // race condition. However, in case of error, the result is `0`.
-          info.residentUniqueSize =
-              nsMemoryReporterManager::ResidentUnique(handle.get());
+          info.memory = memoryCounters.PrivateUsage;
 
           if (!gathered.put(request.pid, std::move(info))) {
             holder->Reject(NS_ERROR_OUT_OF_MEMORY, __func__);
@@ -163,6 +169,8 @@ RefPtr<ProcInfoPromise> GetProcInfo(nsTArray<ProcInfoRequest>&& aRequests) {
             threadInfo->cpuKernel = ToNanoSeconds(kernelTime);
             threadInfo->cpuUser = ToNanoSeconds(userTime);
           }
+
+          QueryThreadCycleTime(hThread.get(), &threadInfo->cpuCycleCount);
 
           // Attempt to get thread name.
           // If we fail, continue without this piece of information.

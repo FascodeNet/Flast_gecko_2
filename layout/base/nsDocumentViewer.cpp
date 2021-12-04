@@ -1276,7 +1276,8 @@ nsDocumentViewer::PermitUnload(PermitUnloadAction aAction,
         *aPermitUnload = false;
       });
 
-  SpinEventLoopUntil([&]() { return done; });
+  SpinEventLoopUntil("nsDocumentViewer::PermitUnload"_ns,
+                     [&]() { return done; });
 
   mInPermitUnloadPrompt = false;
   return NS_OK;
@@ -1596,8 +1597,6 @@ static void DetachContainerRecurse(nsIDocShell* aShell) {
 
 NS_IMETHODIMP
 nsDocumentViewer::Destroy() {
-  NS_ASSERTION(mDocument, "No document in Destroy()!");
-
   // Don't let the document get unloaded while we are printing.
   // this could happen if we hit the back button during printing.
   // We also keep the viewer from being cached in session history, since
@@ -1796,9 +1795,6 @@ nsDocumentViewer::Stop(void) {
   if (mDocument) {
     mDocument->StopDocumentLoad();
   }
-
-  if (!mHidden && (mLoaded || mStopped) && mPresContext && !mSHEntry)
-    mPresContext->SetImageAnimationMode(imgIContainer::kDontAnimMode);
 
   mStopped = true;
 
@@ -3517,6 +3513,10 @@ NS_IMETHODIMP nsDocumentViewer::SetPrintSettingsForSubdocument(
 
     MOZ_ASSERT(!mPresContext);
     MOZ_ASSERT(!mPresShell);
+
+    if (MOZ_UNLIKELY(!mDocument)) {
+      return NS_ERROR_NOT_AVAILABLE;
+    }
 
     RefPtr<nsIDeviceContextSpec> devspec = new nsDeviceContextSpecProxy();
     nsresult rv =

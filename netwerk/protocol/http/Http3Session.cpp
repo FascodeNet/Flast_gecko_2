@@ -29,24 +29,24 @@ namespace mozilla {
 namespace net {
 
 const uint64_t HTTP3_APP_ERROR_NO_ERROR = 0x100;
-const uint64_t HTTP3_APP_ERROR_GENERAL_PROTOCOL_ERROR = 0x101;
-const uint64_t HTTP3_APP_ERROR_INTERNAL_ERROR = 0x102;
-const uint64_t HTTP3_APP_ERROR_STREAM_CREATION_ERROR = 0x103;
-const uint64_t HTTP3_APP_ERROR_CLOSED_CRITICAL_STREAM = 0x104;
-const uint64_t HTTP3_APP_ERROR_FRAME_UNEXPECTED = 0x105;
-const uint64_t HTTP3_APP_ERROR_FRAME_ERROR = 0x106;
-const uint64_t HTTP3_APP_ERROR_EXCESSIVE_LOAD = 0x107;
-const uint64_t HTTP3_APP_ERROR_ID_ERROR = 0x108;
-const uint64_t HTTP3_APP_ERROR_SETTINGS_ERROR = 0x109;
-const uint64_t HTTP3_APP_ERROR_MISSING_SETTINGS = 0x10a;
+// const uint64_t HTTP3_APP_ERROR_GENERAL_PROTOCOL_ERROR = 0x101;
+// const uint64_t HTTP3_APP_ERROR_INTERNAL_ERROR = 0x102;
+// const uint64_t HTTP3_APP_ERROR_STREAM_CREATION_ERROR = 0x103;
+// const uint64_t HTTP3_APP_ERROR_CLOSED_CRITICAL_STREAM = 0x104;
+// const uint64_t HTTP3_APP_ERROR_FRAME_UNEXPECTED = 0x105;
+// const uint64_t HTTP3_APP_ERROR_FRAME_ERROR = 0x106;
+// const uint64_t HTTP3_APP_ERROR_EXCESSIVE_LOAD = 0x107;
+// const uint64_t HTTP3_APP_ERROR_ID_ERROR = 0x108;
+// const uint64_t HTTP3_APP_ERROR_SETTINGS_ERROR = 0x109;
+// const uint64_t HTTP3_APP_ERROR_MISSING_SETTINGS = 0x10a;
 const uint64_t HTTP3_APP_ERROR_REQUEST_REJECTED = 0x10b;
 const uint64_t HTTP3_APP_ERROR_REQUEST_CANCELLED = 0x10c;
-const uint64_t HTTP3_APP_ERROR_REQUEST_INCOMPLETE = 0x10d;
-const uint64_t HTTP3_APP_ERROR_EARLY_RESPONSE = 0x10e;
-const uint64_t HTTP3_APP_ERROR_CONNECT_ERROR = 0x10f;
+// const uint64_t HTTP3_APP_ERROR_REQUEST_INCOMPLETE = 0x10d;
+// const uint64_t HTTP3_APP_ERROR_EARLY_RESPONSE = 0x10e;
+// const uint64_t HTTP3_APP_ERROR_CONNECT_ERROR = 0x10f;
 const uint64_t HTTP3_APP_ERROR_VERSION_FALLBACK = 0x110;
 
-const uint32_t UDP_MAX_PACKET_SIZE = 4096;
+// const uint32_t UDP_MAX_PACKET_SIZE = 4096;
 const uint32_t MAX_PTO_COUNTS = 16;
 
 const uint32_t TRANSPORT_ERROR_STATELESS_RESET = 20;
@@ -68,44 +68,6 @@ Http3Session::Http3Session() {
   mThroughCaptivePortal = gHttpHandler->GetThroughCaptivePortal();
 }
 
-static void AddrToString(nsINetAddr* netAddr, nsACString& addrStr) {
-  nsAutoCString address;
-  netAddr->GetAddress(address);
-  uint16_t family = nsINetAddr::FAMILY_INET;
-  netAddr->GetFamily(&family);
-  uint16_t port = 0;
-  netAddr->GetPort(&port);
-
-  if (family == nsINetAddr::FAMILY_INET6) {
-    // Append '[' and ']'
-    addrStr.Append("[");
-    addrStr.Append(address);
-    addrStr.Append("]:");
-    addrStr.AppendInt(port);
-  } else {
-    addrStr.Append(address);
-    addrStr.Append(":");
-    addrStr.AppendInt(port);
-  }
-}
-
-static void AddrToString(NetAddr& netAddr, nsACString& addrStr) {
-  char buf[kIPv6CStrBufSize];
-  netAddr.ToStringBuffer(buf, kIPv6CStrBufSize);
-
-  if (netAddr.raw.family == AF_INET6) {
-    // Append '[' and ']'
-    addrStr.Append("[");
-    addrStr.Append(buf, strlen(buf));
-    addrStr.Append("]:");
-    addrStr.AppendInt(ntohs(netAddr.inet6.port));
-  } else {
-    addrStr.Append(buf, strlen(buf));
-    addrStr.Append(":");
-    addrStr.AppendInt(ntohs(netAddr.inet.port));
-  }
-}
-
 static nsresult StringAndPortToNetAddr(nsACString& remoteAddrStr,
                                        uint16_t remotePort, NetAddr* netAddr) {
   if (NS_FAILED(netAddr->InitFromString(remoteAddrStr, remotePort))) {
@@ -116,7 +78,7 @@ static nsresult StringAndPortToNetAddr(nsACString& remoteAddrStr,
 }
 
 nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
-                            nsINetAddr* selfAddr, nsINetAddr* peerAddr,
+                            nsINetAddr* aSelfAddr, nsINetAddr* aPeerAddr,
                             HttpConnectionUDP* udpConn, uint32_t controlFlags,
                             nsIInterfaceRequestor* callbacks) {
   LOG3(("Http3Session::Init %p", this));
@@ -125,7 +87,7 @@ nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
   MOZ_ASSERT(udpConn);
 
   mConnInfo = aConnInfo->Clone();
-  mNetAddr = peerAddr;
+  mNetAddr = aPeerAddr;
 
   bool httpsProxy =
       aConnInfo->ProxyInfo() ? aConnInfo->ProxyInfo()->IsHTTPS() : false;
@@ -140,22 +102,23 @@ nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
   // don't call into PSM while holding mLock!!
   mSocketControl->SetNotificationCallbacks(callbacks);
 
-  nsAutoCString selfAddrStr;
-  AddrToString(selfAddr, selfAddrStr);
-  nsAutoCString peerAddrStr;
-  AddrToString(peerAddr, peerAddrStr);
+  NetAddr selfAddr;
+  MOZ_ALWAYS_SUCCEEDS(aSelfAddr->GetNetAddr(&selfAddr));
+  NetAddr peerAddr;
+  MOZ_ALWAYS_SUCCEEDS(aPeerAddr->GetNetAddr(&peerAddr));
 
   LOG3(
       ("Http3Session::Init origin=%s, alpn=%s, selfAddr=%s, peerAddr=%s,"
        " qpack table size=%u, max blocked streams=%u [this=%p]",
        PromiseFlatCString(mConnInfo->GetOrigin()).get(),
-       PromiseFlatCString(mConnInfo->GetNPNToken()).get(), selfAddrStr.get(),
-       peerAddrStr.get(), gHttpHandler->DefaultQpackTableSize(),
+       PromiseFlatCString(mConnInfo->GetNPNToken()).get(),
+       selfAddr.ToString().get(), peerAddr.ToString().get(),
+       gHttpHandler->DefaultQpackTableSize(),
        gHttpHandler->DefaultHttp3MaxBlockedStreams(), this));
 
   nsresult rv = NeqoHttp3Conn::Init(
-      mConnInfo->GetOrigin(), mConnInfo->GetNPNToken(), selfAddrStr,
-      peerAddrStr, gHttpHandler->DefaultQpackTableSize(),
+      mConnInfo->GetOrigin(), mConnInfo->GetNPNToken(), selfAddr, peerAddr,
+      gHttpHandler->DefaultQpackTableSize(),
       gHttpHandler->DefaultHttp3MaxBlockedStreams(),
       StaticPrefs::network_http_http3_max_data(),
       StaticPrefs::network_http_http3_max_stream_data(),
@@ -195,7 +158,7 @@ nsresult Http3Session::Init(const nsHttpConnectionInfo* aConnInfo,
     ZeroRttTelemetry(ZeroRttOutcome::NOT_USED);
   }
 
-  if (gHttpHandler->EchConfigEnabled()) {
+  if (gHttpHandler->EchConfigEnabled(true)) {
     mSocketControl->SetEchConfig(mConnInfo->GetEchConfig());
   }
 
@@ -254,6 +217,8 @@ void Http3Session::Shutdown() {
       stream->Close(NS_ERROR_NET_PARTIAL_TRANSFER);
     } else if (mError == NS_ERROR_NET_HTTP3_PROTOCOL_ERROR) {
       stream->Close(NS_ERROR_NET_HTTP3_PROTOCOL_ERROR);
+    } else if (mError == NS_ERROR_NET_RESET) {
+      stream->Close(NS_ERROR_NET_RESET);
     } else {
       stream->Close(NS_ERROR_ABORT);
     }
@@ -320,9 +285,7 @@ void Http3Session::ProcessInput(nsIUDPSocket* socket) {
     if (NS_FAILED(rv) || data.IsEmpty()) {
       break;
     }
-    nsAutoCString remoteAddrStr;
-    AddrToString(addr, remoteAddrStr);
-    rv = mHttp3Connection->ProcessInput(&remoteAddrStr, data);
+    rv = mHttp3Connection->ProcessInput(addr, data);
     MOZ_ALWAYS_SUCCEEDS(rv);
     if (NS_FAILED(rv)) {
       break;
@@ -877,7 +840,7 @@ nsresult Http3Session::TryActivating(
   }
 
   nsresult rv = mHttp3Connection->Fetch(aMethod, aScheme, aAuthorityHeader,
-                                        aPath, aHeaders, aStreamId);
+                                        aPath, aHeaders, aStreamId, 3, false);
   if (NS_FAILED(rv)) {
     LOG(("Http3Session::TryActivating returns error=0x%" PRIx32 "[stream=%p, "
          "this=%p]",

@@ -288,7 +288,7 @@ ImgDrawResult ImageResource::GetImageContainerImpl(
 
   if (!container) {
     // We need a new ImageContainer, so create one.
-    container = layers::LayerManager::CreateImageContainer();
+    container = MakeAndAddRef<layers::ImageContainer>();
 
     if (i >= 0) {
       entry->mContainer = container;
@@ -537,7 +537,7 @@ void ImageResource::SendOnUnlockedDraw(uint32_t aFlags) {
             tracker->OnUnlockedDraw();
           }
         });
-    eventTarget->Dispatch(CreateMediumHighRunnable(ev.forget()),
+    eventTarget->Dispatch(CreateRenderBlockingRunnable(ev.forget()),
                           NS_DISPATCH_NORMAL);
   }
 }

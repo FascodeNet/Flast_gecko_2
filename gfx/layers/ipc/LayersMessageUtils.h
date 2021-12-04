@@ -227,7 +227,7 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
     WriteParam(aMsg, aParam.mBoundingCompositionSize);
     WriteParam(aMsg, aParam.mPresShellId);
     WriteParam(aMsg, aParam.mLayoutViewport);
-    WriteParam(aMsg, aParam.mExtraResolution);
+    WriteParam(aMsg, aParam.mTransformToAncestorScale);
     WriteParam(aMsg, aParam.mPaintRequestTime);
     WriteParam(aMsg, aParam.mVisualDestination);
     WriteParam(aMsg, aParam.mVisualScrollUpdateType);
@@ -257,7 +257,7 @@ struct ParamTraits<mozilla::layers::FrameMetrics>
             ReadParam(aMsg, aIter, &aResult->mBoundingCompositionSize) &&
             ReadParam(aMsg, aIter, &aResult->mPresShellId) &&
             ReadParam(aMsg, aIter, &aResult->mLayoutViewport) &&
-            ReadParam(aMsg, aIter, &aResult->mExtraResolution) &&
+            ReadParam(aMsg, aIter, &aResult->mTransformToAncestorScale) &&
             ReadParam(aMsg, aIter, &aResult->mPaintRequestTime) &&
             ReadParam(aMsg, aIter, &aResult->mVisualDestination) &&
             ReadParam(aMsg, aIter, &aResult->mVisualScrollUpdateType) &&
@@ -292,7 +292,7 @@ struct ParamTraits<mozilla::layers::RepaintRequest>
     WriteParam(aMsg, aParam.mDisplayPortMargins);
     WriteParam(aMsg, aParam.mPresShellId);
     WriteParam(aMsg, aParam.mLayoutViewport);
-    WriteParam(aMsg, aParam.mExtraResolution);
+    WriteParam(aMsg, aParam.mTransformToAncestorScale);
     WriteParam(aMsg, aParam.mPaintRequestTime);
     WriteParam(aMsg, aParam.mScrollUpdateType);
     WriteParam(aMsg, aParam.mIsRootContent);
@@ -313,7 +313,7 @@ struct ParamTraits<mozilla::layers::RepaintRequest>
             ReadParam(aMsg, aIter, &aResult->mDisplayPortMargins) &&
             ReadParam(aMsg, aIter, &aResult->mPresShellId) &&
             ReadParam(aMsg, aIter, &aResult->mLayoutViewport) &&
-            ReadParam(aMsg, aIter, &aResult->mExtraResolution) &&
+            ReadParam(aMsg, aIter, &aResult->mTransformToAncestorScale) &&
             ReadParam(aMsg, aIter, &aResult->mPaintRequestTime) &&
             ReadParam(aMsg, aIter, &aResult->mScrollUpdateType) &&
             ReadBoolForBitfield(aMsg, aIter, aResult,
@@ -403,22 +403,6 @@ struct ParamTraits<mozilla::layers::OverscrollBehaviorInfo> {
 };
 
 template <>
-struct ParamTraits<mozilla::layers::LayerClip> {
-  typedef mozilla::layers::LayerClip paramType;
-
-  static void Write(Message* aMsg, const paramType& aParam) {
-    WriteParam(aMsg, aParam.mClipRect);
-    WriteParam(aMsg, aParam.mMaskLayerIndex);
-  }
-
-  static bool Read(const Message* aMsg, PickleIterator* aIter,
-                   paramType* aResult) {
-    return (ReadParam(aMsg, aIter, &aResult->mClipRect) &&
-            ReadParam(aMsg, aIter, &aResult->mMaskLayerIndex));
-  }
-};
-
-template <>
 struct ParamTraits<mozilla::ScrollGeneration>
     : PlainOldDataSerializer<mozilla::ScrollGeneration> {};
 
@@ -439,7 +423,6 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
     WriteParam(aMsg, aParam.GetContentDescription());
     WriteParam(aMsg, aParam.mLineScrollAmount);
     WriteParam(aMsg, aParam.mPageScrollAmount);
-    WriteParam(aMsg, aParam.mScrollClip);
     WriteParam(aMsg, aParam.mHasScrollgrab);
     WriteParam(aMsg, aParam.mIsLayersIdRoot);
     WriteParam(aMsg, aParam.mIsAutoDirRootContentRTL);
@@ -472,7 +455,6 @@ struct ParamTraits<mozilla::layers::ScrollMetadata>
             ReadContentDescription(aMsg, aIter, aResult) &&
             ReadParam(aMsg, aIter, &aResult->mLineScrollAmount) &&
             ReadParam(aMsg, aIter, &aResult->mPageScrollAmount) &&
-            ReadParam(aMsg, aIter, &aResult->mScrollClip) &&
             ReadBoolForBitfield(aMsg, aIter, aResult,
                                 &paramType::SetHasScrollgrab) &&
             ReadBoolForBitfield(aMsg, aIter, aResult,
@@ -935,7 +917,6 @@ struct ParamTraits<mozilla::layers::SimpleLayerAttributes> {
   static void Write(Message* aMsg, const paramType& aParam) {
     WriteParam(aMsg, aParam.mTransform);
     WriteParam(aMsg, aParam.mTransformIsPerspective);
-    WriteParam(aMsg, aParam.mScrolledClip);
     WriteParam(aMsg, aParam.mPostXScale);
     WriteParam(aMsg, aParam.mPostYScale);
     WriteParam(aMsg, aParam.mContentFlags);
@@ -953,7 +934,6 @@ struct ParamTraits<mozilla::layers::SimpleLayerAttributes> {
                    paramType* aResult) {
     return ReadParam(aMsg, aIter, &aResult->mTransform) &&
            ReadParam(aMsg, aIter, &aResult->mTransformIsPerspective) &&
-           ReadParam(aMsg, aIter, &aResult->mScrolledClip) &&
            ReadParam(aMsg, aIter, &aResult->mPostXScale) &&
            ReadParam(aMsg, aIter, &aResult->mPostYScale) &&
            ReadParam(aMsg, aIter, &aResult->mContentFlags) &&
@@ -1008,11 +988,19 @@ struct ParamTraits<mozilla::RayReferenceData> {
 };
 
 template <>
+struct ParamTraits<mozilla::layers::CantZoomOutBehavior>
+    : public ContiguousEnumSerializerInclusive<
+          mozilla::layers::CantZoomOutBehavior,
+          mozilla::layers::CantZoomOutBehavior::Nothing,
+          mozilla::layers::CantZoomOutBehavior::ZoomIn> {};
+
+template <>
 struct ParamTraits<mozilla::layers::ZoomTarget> {
   typedef mozilla::layers::ZoomTarget paramType;
 
   static void Write(Message* aMsg, const paramType& aParam) {
     WriteParam(aMsg, aParam.targetRect);
+    WriteParam(aMsg, aParam.cantZoomOutBehavior);
     WriteParam(aMsg, aParam.elementBoundingRect);
     WriteParam(aMsg, aParam.documentRelativePointerPosition);
   }
@@ -1020,6 +1008,7 @@ struct ParamTraits<mozilla::layers::ZoomTarget> {
   static bool Read(const Message* aMsg, PickleIterator* aIter,
                    paramType* aResult) {
     return (ReadParam(aMsg, aIter, &aResult->targetRect) &&
+            ReadParam(aMsg, aIter, &aResult->cantZoomOutBehavior) &&
             ReadParam(aMsg, aIter, &aResult->elementBoundingRect) &&
             ReadParam(aMsg, aIter, &aResult->documentRelativePointerPosition));
   }

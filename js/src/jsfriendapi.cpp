@@ -67,7 +67,8 @@ JS::RootingContext::RootingContext() : realm_(nullptr), zone_(nullptr) {
 #endif
 }
 
-JS_PUBLIC_API void JS_SetGrayGCRootsTracer(JSContext* cx, JSTraceDataOp traceOp,
+JS_PUBLIC_API void JS_SetGrayGCRootsTracer(JSContext* cx,
+                                           JSGrayRootsTracer traceOp,
                                            void* data) {
   cx->runtime()->gc.setGrayRootsTracer(traceOp, data);
 }
@@ -746,7 +747,7 @@ JS_PUBLIC_API JS::Value js::MaybeGetScriptPrivate(JSObject* object) {
     return UndefinedValue();
   }
 
-  return object->as<ScriptSourceObject>().canonicalPrivate();
+  return object->as<ScriptSourceObject>().getPrivate();
 }
 
 JS_PUBLIC_API uint64_t js::GetGCHeapUsageForObjectZone(JSObject* obj) {

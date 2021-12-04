@@ -22,6 +22,7 @@
 #include "gc/GCLock.h"
 #include "gc/Memory.h"
 #include "gc/PublicIterators.h"
+#include "gc/Tenuring.h"
 #include "jit/JitFrames.h"
 #include "jit/JitRealm.h"
 #include "util/DifferentialTesting.h"
@@ -794,17 +795,6 @@ void js::Nursery::forwardBufferPointer(uintptr_t* pSlotsElems) {
   *pSlotsElems = reinterpret_cast<uintptr_t>(buffer);
 }
 
-js::TenuringTracer::TenuringTracer(JSRuntime* rt, Nursery* nursery)
-    : GenericTracer(rt, JS::TracerKind::Tenuring,
-                    JS::WeakMapTraceAction::TraceKeysAndValues),
-      nursery_(*nursery),
-      tenuredSize(0),
-      tenuredCells(0),
-      objHead(nullptr),
-      objTail(&objHead),
-      stringHead(nullptr),
-      stringTail(&stringHead) {}
-
 inline double js::Nursery::calcPromotionRate(bool* validForTenuring) const {
   MOZ_ASSERT(validForTenuring);
 
@@ -1184,7 +1174,10 @@ void js::Nursery::sendTelemetry(JS::GCReason reason, TimeDuration totalTime,
                                 size_t sitesPretenured) {
   JSRuntime* rt = runtime();
   rt->addTelemetry(JS_TELEMETRY_GC_MINOR_REASON, uint32_t(reason));
-  if (totalTime.ToMilliseconds() > 1.0) {
+
+  // Long minor GCs are those that take more than 1ms.
+  bool wasLongMinorGC = totalTime.ToMilliseconds() > 1.0;
+  if (wasLongMinorGC) {
     rt->addTelemetry(JS_TELEMETRY_GC_MINOR_REASON_LONG, uint32_t(reason));
   }
   rt->addTelemetry(JS_TELEMETRY_GC_MINOR_US, totalTime.ToMicroseconds());
@@ -1243,7 +1236,7 @@ js::Nursery::CollectionResult js::Nursery::doCollection(JS::GCReason reason) {
   // Sweep to update any pointers to nursery objects that have now been
   // tenured.
   startProfile(ProfileKey::Sweep);
-  sweep(&mover);
+  sweep();
   endProfile(ProfileKey::Sweep);
 
   // Update any slot or element pointers whose destination has been tenured.
@@ -1280,6 +1273,7 @@ js::Nursery::CollectionResult js::Nursery::doCollection(JS::GCReason reason) {
   startProfile(ProfileKey::CheckHashTables);
 #ifdef JS_GC_ZEAL
   if (gc->hasZealMode(ZealMode::CheckHashTablesOnMinorGC)) {
+    runtime()->caches().checkEvalCacheAfterMinorGC();
     gc->checkHashTablesAfterMovingGC();
   }
 #endif
@@ -1438,7 +1432,9 @@ bool js::Nursery::registerMallocedBuffer(void* buffer, size_t nbytes) {
   return true;
 }
 
-void js::Nursery::sweep(JSTracer* trc) {
+void js::Nursery::sweep() {
+  MinorSweepingTracer trc(runtime());
+
   // Sweep unique IDs first before we sweep any tables that may be keyed based
   // on them.
   for (Cell* cell : cellsWithUid_) {
@@ -1452,15 +1448,13 @@ void js::Nursery::sweep(JSTracer* trc) {
   }
   cellsWithUid_.clear();
 
-  for (CompartmentsIter c(runtime()); !c.done(); c.next()) {
-    c->sweepAfterMinorGC(trc);
-  }
-
-  for (ZonesIter zone(trc->runtime(), SkipAtoms); !zone.done(); zone.next()) {
-    zone->sweepAfterMinorGC(trc);
+  for (ZonesIter zone(runtime(), SkipAtoms); !zone.done(); zone.next()) {
+    zone->sweepAfterMinorGC(&trc);
   }
 
   sweepMapAndSetObjects();
+
+  runtime()->caches().sweepAfterMinorGC(&trc);
 }
 
 void js::Nursery::clear() {

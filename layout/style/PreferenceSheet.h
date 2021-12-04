@@ -10,6 +10,7 @@
 #define mozilla_ColorPreferences_h
 
 #include "nsColor.h"
+#include "mozilla/ColorScheme.h"
 
 namespace mozilla {
 
@@ -19,7 +20,7 @@ class Document;
 
 struct PreferenceSheet {
   struct Prefs {
-    struct {
+    struct Colors {
       nscolor mLink = NS_RGB(0x00, 0x00, 0xEE);
       nscolor mActiveLink = NS_RGB(0xEE, 0x00, 0x00);
       nscolor mVisitedLink = NS_RGB(0x55, 0x1A, 0x8B);
@@ -29,22 +30,22 @@ struct PreferenceSheet {
 
       nscolor mFocusText = mDefault;
       nscolor mFocusBackground = mDefaultBackground;
-    } mColors;
+    } mLightColors, mDarkColors;
+
+    const Colors& ColorsFor(ColorScheme aScheme) const {
+      return aScheme == ColorScheme::Light ? mLightColors : mDarkColors;
+    }
 
     bool mIsChrome = false;
     bool mUseAccessibilityTheme = false;
 
     bool mUseDocumentColors = true;
 
-    // Whether the non-native theme should use system colors for widgets.
-    // We only do that if we have a high-contrast theme _and_ we are overriding
-    // the document colors. Otherwise it causes issues when pages only override
-    // some of the system colors, specially in dark themes mode.
-    bool NonNativeThemeShouldUseSystemColors() const {
-      return mUseAccessibilityTheme && !mUseDocumentColors;
-    }
+    // Whether the non-native theme should use real system colors for widgets.
+    bool NonNativeThemeShouldBeHighContrast() const;
 
     void Load(bool aIsChrome);
+    void LoadColors(bool aIsLight);
   };
 
   static void EnsureInitialized() {

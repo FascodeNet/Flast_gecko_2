@@ -148,6 +148,7 @@ mozilla::LazyLogModule ApplicationReputationService::prlog(
 const char* const ApplicationReputationService::kNonBinaryExecutables[] = {
     ".ad",
     ".air",
+    ".inetloc",
 };
 
 // Items that should be submitted for application reputation checks that users
@@ -264,6 +265,7 @@ const char* const ApplicationReputationService::kBinaryFileExtensions[] = {
     ".img",      // Mac disk image
     ".imgpart",  // Mac disk image
     //".inf", exec // Windows installer
+    //".inetloc", exec  // Apple finder internet location data file
     ".ini",  // Generic config file
     //".ins", exec // IIS config
     ".internetconnect",  // Configuration file for Apple system
@@ -588,6 +590,7 @@ class PendingDBLookup;
 // This class is private to ApplicationReputationService.
 class PendingLookup final : public nsIStreamListener,
                             public nsITimerCallback,
+                            public nsINamed,
                             public nsIObserver,
                             public nsSupportsWeakReference {
  public:
@@ -595,6 +598,7 @@ class PendingLookup final : public nsIStreamListener,
   NS_DECL_NSIREQUESTOBSERVER
   NS_DECL_NSISTREAMLISTENER
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
   NS_DECL_NSIOBSERVER
 
   // Constructor and destructor.
@@ -876,7 +880,8 @@ PendingDBLookup::HandleEvent(const nsACString& tables) {
 }
 
 NS_IMPL_ISUPPORTS(PendingLookup, nsIStreamListener, nsIRequestObserver,
-                  nsIObserver, nsISupportsWeakReference, nsITimerCallback)
+                  nsIObserver, nsISupportsWeakReference, nsITimerCallback,
+                  nsINamed)
 
 PendingLookup::PendingLookup(nsIApplicationReputationQuery* aQuery,
                              nsIApplicationReputationCallback* aCallback)
@@ -1706,6 +1711,12 @@ PendingLookup::Notify(nsITimer* aTimer) {
              true);
   mChannel->Cancel(NS_ERROR_NET_TIMEOUT_EXTERNAL);
   mTimeoutTimer->Cancel();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+PendingLookup::GetName(nsACString& aName) {
+  aName.AssignLiteral("PendingLookup");
   return NS_OK;
 }
 

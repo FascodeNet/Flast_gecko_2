@@ -1113,7 +1113,7 @@ static bool ExtractCharsetFromXmlDeclaration(const unsigned char* aBytes,
         // The shortest string allowed before this is  (strlen==13):
         // <?xml version
         if ((((char*)aBytes)[i] == 'n') && (i >= 12) &&
-            (0 == PL_strncmp("versio", (char*)(aBytes + i - 6), 6))) {
+            (0 == strncmp("versio", (char*)(aBytes + i - 6), 6))) {
           // Fast forward through version
           char q = 0;
           for (++i; i < aLen; ++i) {
@@ -1138,7 +1138,7 @@ static bool ExtractCharsetFromXmlDeclaration(const unsigned char* aBytes,
         // The shortest allowed string before this (strlen==26):
         // <?xml version="1" encoding
         if ((((char*)aBytes)[i] == 'g') && (i >= 25) &&
-            (0 == PL_strncmp("encodin", (char*)(aBytes + i - 7), 7))) {
+            (0 == strncmp("encodin", (char*)(aBytes + i - 7), 7))) {
           int32_t encStart = 0;
           char q = 0;
           for (++i; i < aLen; ++i) {
@@ -1215,9 +1215,7 @@ static nsresult ParserWriteFunc(nsIInputStream* in, void* closure,
     // This code was bogus when I found it. It expects the BOM or the XML
     // declaration to be entirely in the first network buffer. -- hsivonen
     const Encoding* encoding;
-    size_t bomLength;
-    Tie(encoding, bomLength) = Encoding::ForBOM(Span(buf, count));
-    Unused << bomLength;
+    Tie(encoding, Ignore) = Encoding::ForBOM(Span(buf, count));
     if (encoding) {
       // The decoder will swallow the BOM. The UTF-16 will re-sniff for
       // endianness. The value of preferred is now "UTF-8", "UTF-16LE"

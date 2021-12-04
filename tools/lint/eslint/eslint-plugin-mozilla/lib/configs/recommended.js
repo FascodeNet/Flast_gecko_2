@@ -129,6 +129,7 @@ module.exports = {
     "mozilla/no-useless-removeEventListener": "error",
     "mozilla/prefer-boolean-length-check": "error",
     "mozilla/prefer-formatValues": "error",
+    "mozilla/reject-addtask-only": "error",
     "mozilla/reject-chromeutils-import-params": "error",
     "mozilla/reject-importGlobalProperties": ["error", "allownonwebidl"],
     "mozilla/reject-osfile": "warn",
@@ -209,6 +210,9 @@ module.exports = {
 
     // No single if block inside an else block
     "no-lonely-if": "error",
+
+    // Disallow the use of number literals that immediately lose precision at runtime when converted to JS Number
+    "no-loss-of-precision": "error",
 
     // Nested ternary statements are confusing
     "no-nested-ternary": "error",

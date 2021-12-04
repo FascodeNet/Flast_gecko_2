@@ -26,6 +26,7 @@
 #include "frontend/Stencil.h"
 #include "frontend/TaggedParserAtomIndexHasher.h"  // TaggedParserAtomIndexHasher
 #include "frontend/UsedNameTracker.h"
+#include "js/CompileOptions.h"  // JS::ReadOnlyCompileOptions
 #include "js/GCVector.h"
 #include "js/HashTable.h"
 #include "js/RealmOptions.h"
@@ -42,6 +43,9 @@
 #include "vm/Realm.h"
 #include "vm/ScopeKind.h"      // ScopeKind
 #include "vm/SharedStencil.h"  // SharedImmutableScriptData
+
+class JSAtom;
+class JSString;
 
 namespace js {
 
@@ -181,7 +185,7 @@ struct ScopeContext {
 
 struct CompilationAtomCache {
  public:
-  using AtomCacheVector = JS::GCVector<JSAtom*, 0, js::SystemAllocPolicy>;
+  using AtomCacheVector = JS::GCVector<JSString*, 0, js::SystemAllocPolicy>;
 
  private:
   // Atoms lowered into or converted from CompilationStencil.parserAtomData.
@@ -192,12 +196,18 @@ struct CompilationAtomCache {
   AtomCacheVector atoms_;
 
  public:
+  JSString* getExistingStringAt(ParserAtomIndex index) const;
+  JSString* getExistingStringAt(JSContext* cx,
+                                TaggedParserAtomIndex taggedIndex) const;
+  JSString* getStringAt(ParserAtomIndex index) const;
+
   JSAtom* getExistingAtomAt(ParserAtomIndex index) const;
   JSAtom* getExistingAtomAt(JSContext* cx,
                             TaggedParserAtomIndex taggedIndex) const;
   JSAtom* getAtomAt(ParserAtomIndex index) const;
+
   bool hasAtomAt(ParserAtomIndex index) const;
-  bool setAtomAt(JSContext* cx, ParserAtomIndex index, JSAtom* atom);
+  bool setAtomAt(JSContext* cx, ParserAtomIndex index, JSString* atom);
   bool allocate(JSContext* cx, size_t length);
 
   void stealBuffer(AtomCacheVector& atoms);
@@ -333,7 +343,7 @@ struct CompilationInput {
 
   // When compiling a lazy function, this is needed to initialize the
   // FunctionBox as well as the CompilationState.
-  JSFunction* function() { return lazy_->function(); }
+  JSFunction* function() const { return lazy_->function(); }
 
   // When compiling an inner function, we want to know the unique identifier
   // which identify a function. This is computed from the source extend.
@@ -345,6 +355,11 @@ struct CompilationInput {
   }
 
   RO_IMMUTABLE_SCRIPT_FLAGS(immutableFlags())
+
+  FunctionFlags functionFlags() const { return function()->flags(); }
+
+  // When delazifying, return the kind of function which is defined.
+  FunctionSyntaxKind functionSyntaxKind() const;
 
   bool hasPrivateScriptData() const {
     // This is equivalent to: ngcthings != 0 || useMemberInitializers()
@@ -397,6 +412,13 @@ class CompilationSyntaxParseCache {
   // CompilationState.
   mozilla::Span<TaggedParserAtomIndex> closedOverBindings_;
 
+  // Atom of the function being compiled. This atom index is valid in the
+  // current CompilationState.
+  TaggedParserAtomIndex displayAtom_;
+
+  // Stencil-like data about the function which is being compiled.
+  ScriptStencilExtra funExtra_;
+
 #ifdef DEBUG
   // Whether any of these data should be considered or not.
   bool isInitialized = false;
@@ -416,6 +438,18 @@ class CompilationSyntaxParseCache {
   }
   const ScriptStencilExtra& scriptExtra(size_t functionIndex) const {
     return cachedScriptExtra_[scriptIndex(functionIndex)];
+  }
+
+  // Return the name of the function being delazified, if any.
+  TaggedParserAtomIndex displayAtom() const {
+    MOZ_ASSERT(isInitialized);
+    return displayAtom_;
+  }
+
+  // Return the extra information about the function being delazified, if any.
+  const ScriptStencilExtra& funExtra() const {
+    MOZ_ASSERT(isInitialized);
+    return funExtra_;
   }
 
   // Initialize the SynaxParse cache given a LifoAlloc. The JSContext is only
@@ -439,6 +473,10 @@ class CompilationSyntaxParseCache {
     return taggedScriptIndex.toFunction();
   }
 
+  [[nodiscard]] bool copyFunctionInfo(JSContext* cx,
+                                      ParserAtomsTable& parseAtoms,
+                                      CompilationAtomCache& atomCache,
+                                      BaseScript* lazy);
   [[nodiscard]] bool copyScriptInfo(JSContext* cx, LifoAlloc& alloc,
                                     ParserAtomsTable& parseAtoms,
                                     CompilationAtomCache& atomCache,
@@ -711,8 +749,8 @@ struct CompilationStencil {
       CompilationGCOutput& gcOutput);
 
   [[nodiscard]] static bool prepareForInstantiate(
-      JSContext* cx, CompilationInput& input, const CompilationStencil& stencil,
-      CompilationGCOutput& gcOutput);
+      JSContext* cx, CompilationAtomCache& atomCache,
+      const CompilationStencil& stencil, CompilationGCOutput& gcOutput);
 
   [[nodiscard]] static bool instantiateStencils(
       JSContext* cx, CompilationInput& input, const CompilationStencil& stencil,
@@ -758,6 +796,8 @@ struct CompilationStencil {
 
   // Steal ExtensibleCompilationStencil content.
   [[nodiscard]] bool steal(JSContext* cx, ExtensibleCompilationStencil&& other);
+
+  bool isModule() const;
 
 #ifdef DEBUG
   void assertNoExternalDependency() const;
@@ -876,6 +916,8 @@ struct ExtensibleCompilationStencil {
 
   // Steal CompilationStencil content.
   [[nodiscard]] bool steal(JSContext* cx, CompilationStencil&& other);
+
+  bool isModule() const;
 
   inline size_t sizeOfExcludingThis(mozilla::MallocSizeOf mallocSizeOf) const;
   size_t sizeOfIncludingThis(mozilla::MallocSizeOf mallocSizeOf) const {

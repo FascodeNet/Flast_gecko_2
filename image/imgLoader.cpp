@@ -1869,6 +1869,35 @@ bool imgLoader::ValidateRequestWithNewChannel(
   return true;
 }
 
+void imgLoader::NotifyObserversForCachedImage(
+    imgCacheEntry* aEntry, imgRequest* request, nsIURI* aURI,
+    nsIReferrerInfo* aReferrerInfo, Document* aLoadingDocument,
+    nsIPrincipal* aTriggeringPrincipal, CORSMode aCORSMode) {
+  nsCOMPtr<nsIChannel> newChannel;
+  bool forcePrincipalCheck;
+  nsresult rv =
+      NewImageChannel(getter_AddRefs(newChannel), &forcePrincipalCheck, aURI,
+                      nullptr, aCORSMode, aReferrerInfo, nullptr, 0,
+                      nsIContentPolicy::TYPE_INTERNAL_IMAGE,
+                      aTriggeringPrincipal, aLoadingDocument, mRespectPrivacy);
+  if (NS_FAILED(rv)) {
+    return;
+  }
+
+  RefPtr<HttpBaseChannel> httpBaseChannel = do_QueryObject(newChannel);
+  if (httpBaseChannel) {
+    httpBaseChannel->SetDummyChannelForImageCache();
+    newChannel->SetContentType(nsDependentCString(request->GetMimeType()));
+    RefPtr<mozilla::image::Image> image = request->GetImage();
+    if (image) {
+      newChannel->SetContentLength(aEntry->GetDataSize());
+    }
+    nsCOMPtr<nsIObserverService> obsService = services::GetObserverService();
+    obsService->NotifyObservers(newChannel, "http-on-image-cache-response",
+                                nullptr);
+  }
+}
+
 bool imgLoader::ValidateEntry(
     imgCacheEntry* aEntry, nsIURI* aURI, nsIURI* aInitialDocumentURI,
     nsIReferrerInfo* aReferrerInfo, nsILoadGroup* aLoadGroup,
@@ -1880,10 +1909,10 @@ bool imgLoader::ValidateEntry(
   LOG_SCOPE(gImgLog, "imgLoader::ValidateEntry");
 
   // If the expiration time is zero, then the request has not gotten far enough
-  // to know when it will expire.
+  // to know when it will expire, or we know it will never expire (see
+  // nsContentUtils::GetSubresourceCacheValidationInfo).
   uint32_t expiryTime = aEntry->GetExpiryTime();
-  bool hasExpired =
-      expiryTime != 0 && expiryTime <= SecondsFromPRTime(PR_Now());
+  bool hasExpired = expiryTime && expiryTime <= SecondsFromPRTime(PR_Now());
 
   nsresult rv;
 
@@ -2015,6 +2044,12 @@ bool imgLoader::ValidateEntry(
         aObserver, aLoadingDocument, innerWindowID, aLoadFlags, aLoadPolicyType,
         aProxyRequest, aTriggeringPrincipal, aCORSMode, aLinkPreload,
         aNewChannelCreated);
+  }
+
+  if (!validateRequest) {
+    NotifyObserversForCachedImage(aEntry, request, aURI, aReferrerInfo,
+                                  aLoadingDocument, aTriggeringPrincipal,
+                                  aCORSMode);
   }
 
   return !validateRequest;

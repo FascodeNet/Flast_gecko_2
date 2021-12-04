@@ -15,6 +15,7 @@
 #include "nsContentUtils.h"
 #include "ContentParent.h"
 #include "nsPIDOMWindow.h"
+#include "nsIContentInlines.h"
 #include "nsIDocShell.h"
 #include "nsIDocShellTreeOwner.h"
 #include "nsIFormControl.h"
@@ -1153,6 +1154,13 @@ void nsFocusManager::WindowHidden(mozIDOMWindowProxy* aWindow,
     return;
   }
 
+  if (!XRE_IsParentProcess() &&
+      mActiveBrowsingContextInContent ==
+          docShellBeingHidden->GetBrowsingContext() &&
+      mActiveBrowsingContextInContent->GetIsInBFCache()) {
+    SetActiveBrowsingContextInContent(nullptr, aActionId);
+  }
+
   // if the window being hidden is an ancestor of the focused window, adjust
   // the focused window so that it points to the one being hidden. This
   // ensures that the focused window isn't in a chain of frames that doesn't
@@ -1311,10 +1319,20 @@ void nsFocusManager::NotifyFocusStateChange(Element* aElement,
       eventStateToAdd |= NS_EVENT_STATE_FOCUSRING;
     }
     aElement->AddStates(eventStateToAdd);
+
+    for (nsIContent* host = aElement->GetContainingShadowHost(); host;
+         host = host->GetContainingShadowHost()) {
+      host->AsElement()->AddStates(NS_EVENT_STATE_FOCUS);
+    }
   } else {
     EventStates eventStateToRemove =
         NS_EVENT_STATE_FOCUS | NS_EVENT_STATE_FOCUSRING;
     aElement->RemoveStates(eventStateToRemove);
+
+    for (nsIContent* host = aElement->GetContainingShadowHost(); host;
+         host = host->GetContainingShadowHost()) {
+      host->AsElement()->RemoveStates(NS_EVENT_STATE_FOCUS);
+    }
   }
 
   for (nsIContent* content = aElement; content && content != commonAncestor;
@@ -1353,8 +1371,7 @@ void nsFocusManager::EnsureCurrentWidgetFocused(CallerType aCallerType) {
   if (!vm) {
     return;
   }
-  nsCOMPtr<nsIWidget> widget;
-  vm->GetRootWidget(getter_AddRefs(widget));
+  nsCOMPtr<nsIWidget> widget = vm->GetRootWidget();
   if (!widget) {
     return;
   }
@@ -2010,16 +2027,19 @@ bool nsFocusManager::IsNonFocusableRoot(nsIContent* aContent) {
   MOZ_ASSERT(aContent, "aContent must not be NULL");
   MOZ_ASSERT(aContent->IsInComposedDoc(), "aContent must be in a document");
 
-  // If aContent is in designMode, the root element is not focusable.
-  // NOTE: in designMode, most elements are not focusable, just the document is
-  //       focusable.
-  // Also, if aContent is not editable but it isn't in designMode, it's not
+  // If the uncomposed document of aContent is in designMode, the root element
+  // is not focusable.
+  // NOTE: Most elements whose uncomposed document is in design mode are not
+  //       focusable, just the document is focusable.  However, if it's in a
+  //       shadow tree, it may be focus able even if the shadow host is in
+  //       design mode.
+  // Also, if aContent is not editable and it's not in designMode, it's not
   // focusable.
   // And in userfocusignored context nothing is focusable.
   Document* doc = aContent->GetComposedDoc();
   NS_ASSERTION(doc, "aContent must have current document");
   return aContent == doc->GetRootElement() &&
-         (doc->HasFlag(NODE_IS_EDITABLE) || !aContent->IsEditable());
+         (aContent->IsInDesignMode() || !aContent->IsEditable());
 }
 
 Element* nsFocusManager::FlushAndCheckIfFocusable(Element* aElement,
@@ -2106,7 +2126,38 @@ Element* nsFocusManager::FlushAndCheckIfFocusable(Element* aElement,
     }
   }
 
-  return frame->IsFocusable(aFlags & FLAG_BYMOUSE) ? aElement : nullptr;
+  if (frame->IsFocusable(aFlags & FLAG_BYMOUSE)) {
+    return aElement;
+  }
+
+  if (ShadowRoot* root = aElement->GetShadowRoot()) {
+    if (root->DelegatesFocus()) {
+      // If focus target's shadow root is a shadow-including inclusive ancestor
+      // of the currently focused area of a top-level browsing context's DOM
+      // anchor, then return null.
+      //
+      // Note that the spec still uses the host, see
+      // https://github.com/whatwg/html/issues/7207
+      if (nsPIDOMWindowInner* innerWindow =
+              aElement->OwnerDoc()->GetInnerWindow()) {
+        BrowsingContext* bc = innerWindow->GetBrowsingContext();
+        if (bc && bc->IsTop()) {
+          if (Element* focusedElement = innerWindow->GetFocusedElement()) {
+            if (focusedElement->IsShadowIncludingInclusiveDescendantOf(root)) {
+              return nullptr;
+            }
+          }
+        }
+      }
+
+      if (Element* firstFocusable =
+              root->GetFirstFocusable(aFlags & FLAG_BYMOUSE)) {
+        return firstFocusable;
+      }
+    }
+  }
+
+  return nullptr;
 }
 
 bool nsFocusManager::Blur(BrowsingContext* aBrowsingContextToClear,
@@ -2535,8 +2586,7 @@ void nsFocusManager::Focus(
 
   if (aAdjustWidget && !sTestMode) {
     if (nsViewManager* vm = presShell->GetViewManager()) {
-      nsCOMPtr<nsIWidget> widget;
-      vm->GetRootWidget(getter_AddRefs(widget));
+      nsCOMPtr<nsIWidget> widget = vm->GetRootWidget();
       if (widget)
         widget->SetFocus(nsIWidget::Raise::No, aFlags & FLAG_NONSYSTEMCALLER
                                                    ? CallerType::NonSystem
@@ -2548,10 +2598,13 @@ void nsFocusManager::Focus(
   // document and then the window.
   if (aIsNewDocument) {
     Document* doc = aWindow->GetExtantDoc();
-    // The focus change should be notified to IMEStateManager from here if
-    // the focused element is a designMode editor since any content won't
+    // The focus change should be notified to IMEStateManager from here if:
+    // * the focused element is in design mode or
+    // * nobody gets focus and the document is in design mode
+    // since any element whose uncomposed document is in design mode won't
     // receive focus event.
-    if (doc && doc->HasFlag(NODE_IS_EDITABLE)) {
+    if (doc && ((aElement && aElement->IsInDesignMode()) ||
+                (!aElement && doc->IsInDesignMode()))) {
       IMEStateManager::OnChangeFocus(presShell->GetPresContext(), nullptr,
                                      GetFocusMoveActionCause(aFlags));
     }
@@ -2879,8 +2932,8 @@ void nsFocusManager::RaiseWindow(nsPIDOMWindowOuter* aWindow,
     nsCOMPtr<nsPIDOMWindowOuter> window(aWindow);
     RefPtr<nsFocusManager> self(this);
     NS_DispatchToCurrentThread(NS_NewRunnableFunction(
-        "nsFocusManager::RaiseWindow", [self, window, aActionId]() -> void {
-          self->WindowRaised(window, aActionId);
+        "nsFocusManager::RaiseWindow", [self, window]() -> void {
+          self->WindowRaised(window, GenerateFocusActionId());
         }));
     return;
   }
@@ -2920,8 +2973,7 @@ void nsFocusManager::RaiseWindow(nsPIDOMWindowOuter* aWindow,
   }
 
   if (nsViewManager* vm = presShell->GetViewManager()) {
-    nsCOMPtr<nsIWidget> widget;
-    vm->GetRootWidget(getter_AddRefs(widget));
+    nsCOMPtr<nsIWidget> widget = vm->GetRootWidget();
     if (widget) {
       widget->SetFocus(nsIWidget::Raise::Yes, aCallerType);
     }

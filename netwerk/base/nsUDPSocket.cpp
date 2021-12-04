@@ -31,6 +31,7 @@
 #include "nsICancelable.h"
 #include "nsWrapperCacheInlines.h"
 #include "HttpConnectionUDP.h"
+#include "mozilla/StaticPrefs_network.h"
 
 namespace mozilla {
 namespace net {
@@ -72,7 +73,9 @@ static nsresult CheckIOStatus(const NetAddr* aAddr) {
     return NS_ERROR_FAILURE;
   }
 
-  if (gIOService->IsOffline() && !aAddr->IsLoopbackAddr()) {
+  if (gIOService->IsOffline() &&
+      (StaticPrefs::network_disable_localhost_when_offline() ||
+       !aAddr->IsLoopbackAddr())) {
     return NS_ERROR_OFFLINE;
   }
 
@@ -202,7 +205,7 @@ nsUDPMessage::GetData(nsACString& aData) {
 NS_IMETHODIMP
 nsUDPMessage::GetOutputStream(nsIOutputStream** aOutputStream) {
   NS_ENSURE_ARG_POINTER(aOutputStream);
-  NS_IF_ADDREF(*aOutputStream = mOutputStream);
+  *aOutputStream = do_AddRef(mOutputStream).take();
   return NS_OK;
 }
 
@@ -366,7 +369,7 @@ UDPMessageProxy::GetRawData(JSContext* cx, JS::MutableHandleValue aRawData) {
 NS_IMETHODIMP
 UDPMessageProxy::GetOutputStream(nsIOutputStream** aOutputStream) {
   NS_ENSURE_ARG_POINTER(aOutputStream);
-  NS_IF_ADDREF(*aOutputStream = mOutputStream);
+  *aOutputStream = do_AddRef(mOutputStream).take();
   return NS_OK;
 }
 

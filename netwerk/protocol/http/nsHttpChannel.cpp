@@ -42,6 +42,7 @@
 #include "nsIStreamTransportService.h"
 #include "prnetdb.h"
 #include "nsEscape.h"
+#include "nsComponentManagerUtils.h"
 #include "nsStreamUtils.h"
 #include "nsIOService.h"
 #include "nsDNSPrefetch.h"
@@ -590,8 +591,36 @@ nsresult nsHttpChannel::MaybeUseHTTPSRRForUpgrade(bool aShouldUpgrade,
     return ContinueOnBeforeConnect(hasHTTPSRR, aStatus, hasHTTPSRR);
   }
 
+  auto dnsStrategy = GetProxyDNSStrategy();
+  if (!(dnsStrategy & DNS_PREFETCH_ORIGIN)) {
+    return ContinueOnBeforeConnect(aShouldUpgrade, aStatus);
+  }
+
   LOG(("nsHttpChannel::MaybeUseHTTPSRRForUpgrade [%p] wait for HTTPS RR",
        this));
+
+  OriginAttributes originAttributes;
+  StoragePrincipalHelper::GetOriginAttributesForHTTPSRR(this, originAttributes);
+
+  RefPtr<nsDNSPrefetch> resolver =
+      new nsDNSPrefetch(mURI, originAttributes, nsIRequest::GetTRRMode());
+  nsWeakPtr weakPtrThis(
+      do_GetWeakReference(static_cast<nsIHttpChannel*>(this)));
+  nsresult rv = resolver->FetchHTTPSSVC(
+      mCaps & NS_HTTP_REFRESH_DNS, !LoadUseHTTPSSVC(),
+      [weakPtrThis](nsIDNSHTTPSSVCRecord* aRecord) {
+        nsCOMPtr<nsIHttpChannel> channel = do_QueryReferent(weakPtrThis);
+        RefPtr<nsHttpChannel> httpChannelImpl = do_QueryObject(channel);
+        if (httpChannelImpl) {
+          httpChannelImpl->OnHTTPSRRAvailable(aRecord);
+        }
+      });
+  if (NS_FAILED(rv)) {
+    LOG(("  FetchHTTPSSVC failed with 0x%08" PRIx32,
+         static_cast<uint32_t>(rv)));
+    return ContinueOnBeforeConnect(aShouldUpgrade, aStatus);
+  }
+
   StoreWaitHTTPSSVCRecord(true);
   return NS_OK;
 }
@@ -2076,7 +2105,7 @@ void nsHttpChannel::AsyncContinueProcessResponse() {
 
 nsresult nsHttpChannel::ContinueProcessResponse1() {
   MOZ_ASSERT(!mCallOnResume, "How did that happen?");
-  nsresult rv;
+  nsresult rv = NS_OK;
 
   if (mSuspendCount) {
     LOG(("Waiting until resume to finish processing response [this=%p]\n",
@@ -2085,21 +2114,6 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
       self->AsyncContinueProcessResponse();
       return NS_OK;
     };
-    return NS_OK;
-  }
-
-  rv = ProcessCrossOriginResourcePolicyHeader();
-  if (NS_FAILED(rv)) {
-    mStatus = NS_ERROR_DOM_CORP_FAILED;
-    HandleAsyncAbort();
-    return NS_OK;
-  }
-
-  rv = ComputeCrossOriginOpenerPolicyMismatch();
-  if (rv == NS_ERROR_BLOCKED_BY_POLICY) {
-    // this navigates the doc's browsing context to a network error.
-    mStatus = NS_ERROR_BLOCKED_BY_POLICY;
-    HandleAsyncAbort();
     return NS_OK;
   }
 
@@ -2163,13 +2177,6 @@ nsresult nsHttpChannel::ContinueProcessResponse1() {
     }
     mAuthProvider = nullptr;
     LOG(("  continuation state has been reset"));
-  }
-
-  rv = ProcessCrossOriginEmbedderPolicyHeader();
-  if (NS_FAILED(rv)) {
-    mStatus = NS_ERROR_BLOCKED_BY_POLICY;
-    HandleAsyncAbort();
-    return NS_OK;
   }
 
   // No process switch needed, continue as normal.
@@ -2544,6 +2551,13 @@ nsresult nsHttpChannel::ContinueProcessNormal(nsresult rv) {
     // have to report our status as failed.
     mStatus = rv;
     DoNotifyListener();
+    return rv;
+  }
+
+  rv = ProcessCrossOriginSecurityHeaders();
+  if (NS_FAILED(rv)) {
+    mStatus = rv;
+    HandleAsyncAbort();
     return rv;
   }
 
@@ -3546,7 +3560,8 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(bool isHttps) {
     };
 
     // calls nsHttpChannel::Notify after `mCacheOpenDelay` milliseconds
-    NS_NewTimerWithCallback(getter_AddRefs(mCacheOpenTimer), this,
+    auto callback = MakeRefPtr<TimerCallback>(this);
+    NS_NewTimerWithCallback(getter_AddRefs(mCacheOpenTimer), callback,
                             mCacheOpenDelay, nsITimer::TYPE_ONE_SHOT);
   }
   NS_ENSURE_SUCCESS(rv, rv);
@@ -3771,6 +3786,7 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
 
   bool isForcedValid = false;
   entry->GetIsForcedValid(&isForcedValid);
+  auto prefetchStatus = Telemetry::LABELS_PREDICTOR_PREFETCH_USE_STATUS::Used;
 
   bool weaklyFramed, isImmutable;
   nsHttp::DetermineFramingAndImmutability(entry, mCachedResponseHead.get(),
@@ -3781,11 +3797,16 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
     LOG(("Validating based on Vary headers returning TRUE\n"));
     canAddImsHeader = false;
     doValidation = true;
+    prefetchStatus = Telemetry::LABELS_PREDICTOR_PREFETCH_USE_STATUS::WouldVary;
   } else {
+    if (mCachedResponseHead->ExpiresInPast() ||
+        mCachedResponseHead->MustValidateIfExpired()) {
+      prefetchStatus = Telemetry::LABELS_PREDICTOR_PREFETCH_USE_STATUS::Expired;
+    }
     doValidation = nsHttp::ValidationRequired(
         isForcedValid, mCachedResponseHead.get(), mLoadFlags,
-        LoadAllowStaleCacheContent(), isImmutable,
-        LoadCustomConditionalRequest(), mRequestHead, entry,
+        LoadAllowStaleCacheContent(), LoadForceValidateCacheContent(),
+        isImmutable, LoadCustomConditionalRequest(), mRequestHead, entry,
         cacheControlRequest, fromPreviousSession, &doBackgroundValidation);
   }
 
@@ -3823,6 +3844,9 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
     doValidation =
         (fromPreviousSession && !buf.IsEmpty()) ||
         (buf.IsEmpty() && mRequestHead.HasHeader(nsHttp::Authorization));
+    if (doValidation) {
+      prefetchStatus = Telemetry::LABELS_PREDICTOR_PREFETCH_USE_STATUS::Auth;
+    }
   }
 
   // Bug #561276: We maintain a chain of cache-keys which returns cached
@@ -3846,10 +3870,27 @@ nsHttpChannel::OnCacheEntryCheck(nsICacheEntry* entry, uint32_t* aResult) {
          doValidation ? "contains" : "does not contain", cacheKey.get()));
 
     // Append cacheKey if not in the chain already
-    if (!doValidation) mRedirectedCachekeys->AppendElement(cacheKey);
+    if (!doValidation) {
+      mRedirectedCachekeys->AppendElement(cacheKey);
+    } else {
+      prefetchStatus =
+          Telemetry::LABELS_PREDICTOR_PREFETCH_USE_STATUS::Redirect;
+    }
   }
 
   mCachedContentIsValid = !doValidation;
+
+  if (isForcedValid) {
+    // Telemetry value is only useful if this was a prefetched item
+    if (!doValidation) {
+      // Could have gotten to a funky state with some of the if chain above
+      // and in nsHttp::ValidationRequired. Make sure we get it right here.
+      prefetchStatus = Telemetry::LABELS_PREDICTOR_PREFETCH_USE_STATUS::Used;
+
+      entry->MarkForcedValidUse();
+    }
+    Telemetry::AccumulateCategorical(prefetchStatus);
+  }
 
   if (doValidation) {
     //
@@ -4275,7 +4316,9 @@ nsresult nsHttpChannel::OpenCacheInputStream(nsICacheEntry* cacheEntry,
       if (pref.type() == altDataType &&
           (pref.contentType().IsEmpty() || pref.contentType() == contentType)) {
         foundAltData = true;
-        deliverAltData = pref.deliverAltData();
+        deliverAltData =
+            pref.deliverAltData() ==
+            nsICacheInfoChannel::PreferredAlternativeDataDeliveryType::ASYNC;
         break;
       }
     }
@@ -4931,6 +4974,10 @@ nsresult nsHttpChannel::InstallCacheListener(int64_t offset) {
 }
 
 void nsHttpChannel::ClearBogusContentEncodingIfNeeded() {
+  if (!StaticPrefs::network_http_clear_bogus_content_encoding()) {
+    return;
+  }
+
   // For .gz files, apache sends both a Content-Type: application/x-gzip
   // as well as Content-Encoding: gzip, which is completely wrong.  In
   // this case, we choose to ignore the rogue Content-Encoding header. We
@@ -4967,7 +5014,7 @@ nsresult nsHttpChannel::SetupReplacementChannel(nsIURI* newURI,
        "[this=%p newChannel=%p preserveMethod=%d]",
        this, newChannel, preserveMethod));
 
-  if (!mEndMarkerAdded && profiler_can_accept_markers()) {
+  if (!mEndMarkerAdded && profiler_thread_is_being_profiled()) {
     mEndMarkerAdded = true;
 
     nsAutoCString requestMethod;
@@ -5053,6 +5100,13 @@ nsresult nsHttpChannel::AsyncProcessRedirection(uint32_t redirectType) {
   LOG(("nsHttpChannel::AsyncProcessRedirection [this=%p type=%u]\n", this,
        redirectType));
 
+  nsresult rv = ProcessCrossOriginSecurityHeaders();
+  if (NS_FAILED(rv)) {
+    mStatus = rv;
+    HandleAsyncAbort();
+    return rv;
+  }
+
   nsAutoCString location;
 
   // if a location header was not given, then we can't perform the redirect,
@@ -5079,7 +5133,7 @@ nsresult nsHttpChannel::AsyncProcessRedirection(uint32_t redirectType) {
   LOG(("redirecting to: %s [redirection-limit=%u]\n", location.get(),
        uint32_t(mRedirectionLimit)));
 
-  nsresult rv = CreateNewURI(location.get(), getter_AddRefs(mRedirectURI));
+  rv = CreateNewURI(location.get(), getter_AddRefs(mRedirectURI));
 
   if (NS_FAILED(rv)) {
     LOG(("Invalid URI for redirect: Location: %s\n", location.get()));
@@ -5351,7 +5405,6 @@ NS_INTERFACE_MAP_BEGIN(nsHttpChannel)
   NS_INTERFACE_MAP_ENTRY(nsISupportsWeakReference)
   NS_INTERFACE_MAP_ENTRY(nsICorsPreflightCallback)
   NS_INTERFACE_MAP_ENTRY(nsIRaceCacheWithNetwork)
-  NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
   NS_INTERFACE_MAP_ENTRY(nsIRequestTailUnblockCallback)
   NS_INTERFACE_MAP_ENTRY_CONCRETE(nsHttpChannel)
 NS_INTERFACE_MAP_END_INHERITING(HttpBaseChannel)
@@ -5488,7 +5541,8 @@ nsresult nsHttpChannel::CancelInternal(nsresult status) {
   mCanceled = true;
   mStatus = NS_FAILED(status) ? status : NS_ERROR_ABORT;
 
-  if (mLastStatusReported && !mEndMarkerAdded && profiler_can_accept_markers()) {
+  if (mLastStatusReported && !mEndMarkerAdded &&
+      profiler_thread_is_being_profiled()) {
     // These do allocations/frees/etc; avoid if not active
     // mLastStatusReported can be null if Cancel is called before we added the
     // start marker.
@@ -5679,8 +5733,7 @@ nsHttpChannel::Resume() {
 NS_IMETHODIMP
 nsHttpChannel::GetSecurityInfo(nsISupports** securityInfo) {
   NS_ENSURE_ARG_POINTER(securityInfo);
-  *securityInfo = mSecurityInfo;
-  NS_IF_ADDREF(*securityInfo);
+  *securityInfo = do_AddRef(mSecurityInfo).take();
   return NS_OK;
 }
 
@@ -5807,9 +5860,8 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
 void nsHttpChannel::AsyncOpenFinal(TimeStamp aTimeStamp) {
   // We save this timestamp from outside of the if block in case we enable the
   // profiler after AsyncOpen().
-  mLastStatusReported =
-    TimeStamp::Now();
-  if (profiler_can_accept_markers()) {
+  mLastStatusReported = TimeStamp::Now();
+  if (profiler_thread_is_being_profiled()) {
     nsAutoCString requestMethod;
     GetRequestMethod(requestMethod);
 
@@ -5873,7 +5925,7 @@ void nsHttpChannel::MaybeResolveProxyAndBeginConnect() {
   // settings if we are never going to make a network connection.
   if (!mProxyInfo &&
       !(mLoadFlags & (LOAD_ONLY_FROM_CACHE | LOAD_NO_NETWORK_IO)) &&
-      NS_SUCCEEDED(ResolveProxy())) {
+      !LoadBypassProxy() && NS_SUCCEEDED(ResolveProxy())) {
     return;
   }
 
@@ -5973,6 +6025,7 @@ nsresult nsHttpChannel::BeginConnect() {
 
   SetOriginHeader();
   SetDoNotTrack();
+  SetGlobalPrivacyControl();
 
   OriginAttributes originAttributes;
   // Regular principal in case we have a proxy.
@@ -5999,10 +6052,11 @@ nsresult nsHttpChannel::BeginConnect() {
   RefPtr<nsHttpConnectionInfo> connInfo = new nsHttpConnectionInfo(
       host, port, ""_ns, mUsername, proxyInfo, originAttributes, isHttps);
   bool http2Allowed = !gHttpHandler->IsHttp2Excluded(connInfo);
-  if (!LoadAllowHttp3()) {
+
+  bool http3Allowed = Http3Allowed();
+  if (!http3Allowed) {
     mCaps |= NS_HTTP_DISALLOW_HTTP3;
   }
-  bool http3Allowed = Http3Allowed();
 
   RefPtr<AltSvcMapping> mapping;
   if (!mConnectionInfo && LoadAllowAltSvc() &&  // per channel
@@ -6199,12 +6253,6 @@ nsresult nsHttpChannel::BeginConnect() {
 }
 
 nsresult nsHttpChannel::MaybeStartDNSPrefetch() {
-  bool httpssvcQueried = false;
-  // If https rr is not queried sucessfully, we have to reset mUseHTTPSSVC to
-  // false. Otherwise, this channel may wait https rr forever.
-  auto resetUsHTTPSSVC = MakeScopeExit(
-      [&] { StoreUseHTTPSSVC(LoadUseHTTPSSVC() && httpssvcQueried); });
-
   // Start a DNS lookup very early in case the real open is queued the DNS can
   // happen in parallel. Do not do so in the presence of an HTTP proxy as
   // all lookups other than for the proxy itself are done by the proxy.
@@ -6253,11 +6301,9 @@ nsresult nsHttpChannel::MaybeStartDNSPrefetch() {
       mDNSBlockingThenable = mDNSBlockingPromise.Ensure(__func__);
     }
 
-    // When LoadUseHTTPSSVC() is true, we should really "fetch" the HTTPS RR,
-    // not "prefetch", since DNS prefetch can be disabled by the pref.
-    if (LoadUseHTTPSSVC() ||
-        (gHttpHandler->UseHTTPSRRForSpeculativeConnection() &&
-         !mHTTPSSVCRecord && !(mCaps & NS_HTTP_DISALLOW_HTTPS_RR))) {
+    if ((gHttpHandler->UseHTTPSRRAsAltSvcEnabled() ||
+         gHttpHandler->UseHTTPSRRForSpeculativeConnection()) &&
+        !mHTTPSSVCRecord && !(mCaps & NS_HTTP_DISALLOW_HTTPS_RR)) {
       MOZ_ASSERT(!mHTTPSSVCRecord);
 
       OriginAttributes originAttributes;
@@ -6266,23 +6312,10 @@ nsresult nsHttpChannel::MaybeStartDNSPrefetch() {
 
       RefPtr<nsDNSPrefetch> resolver =
           new nsDNSPrefetch(mURI, originAttributes, nsIRequest::GetTRRMode());
-      nsWeakPtr weakPtrThis(
-          do_GetWeakReference(static_cast<nsIHttpChannel*>(this)));
-      nsresult rv = resolver->FetchHTTPSSVC(
-          mCaps & NS_HTTP_REFRESH_DNS, !LoadUseHTTPSSVC(),
-          [weakPtrThis](nsIDNSHTTPSSVCRecord* aRecord) {
-            nsCOMPtr<nsIHttpChannel> channel = do_QueryReferent(weakPtrThis);
-            RefPtr<nsHttpChannel> httpChannelImpl = do_QueryObject(channel);
-            if (httpChannelImpl) {
-              httpChannelImpl->OnHTTPSRRAvailable(aRecord);
-            }
-          });
-      if (NS_FAILED(rv)) {
-        LOG(("  FetchHTTPSSVC failed with 0x%08" PRIx32,
-             static_cast<uint32_t>(rv)));
-      } else {
-        httpssvcQueried = true;
-      }
+      Unused << resolver->FetchHTTPSSVC(mCaps & NS_HTTP_REFRESH_DNS, true,
+                                        [](nsIDNSHTTPSSVCRecord*) {
+                                          // Do nothing. This is a DNS prefetch.
+                                        });
     }
   }
 
@@ -6518,11 +6551,10 @@ nsHttpChannel::OnProxyAvailable(nsICancelable* request, nsIChannel* channel,
 NS_IMETHODIMP
 nsHttpChannel::GetProxyInfo(nsIProxyInfo** result) {
   if (!mConnectionInfo) {
-    *result = mProxyInfo;
+    *result = do_AddRef(mProxyInfo).take();
   } else {
-    *result = mConnectionInfo->ProxyInfo();
+    *result = do_AddRef(mConnectionInfo->ProxyInfo()).take();
   }
-  NS_IF_ADDREF(*result);
   return NS_OK;
 }
 
@@ -6869,29 +6901,11 @@ nsHttpChannel::OnStartRequest(nsIRequest* request) {
     return NS_OK;
   }
 
-  rv = ProcessCrossOriginEmbedderPolicyHeader();
+  rv = ProcessCrossOriginSecurityHeaders();
   if (NS_FAILED(rv)) {
-    mStatus = NS_ERROR_BLOCKED_BY_POLICY;
+    mStatus = rv;
     HandleAsyncAbort();
-    return NS_OK;
-  }
-
-  rv = ProcessCrossOriginResourcePolicyHeader();
-  if (NS_FAILED(rv)) {
-    mStatus = NS_ERROR_DOM_CORP_FAILED;
-    HandleAsyncAbort();
-    return NS_OK;
-  }
-
-  // before we check for redirects, check if the load should be shifted into a
-  // new process.
-  rv = ComputeCrossOriginOpenerPolicyMismatch();
-
-  if (rv == NS_ERROR_BLOCKED_BY_POLICY) {
-    // this navigates the doc's browsing context to a network error.
-    mStatus = NS_ERROR_BLOCKED_BY_POLICY;
-    HandleAsyncAbort();
-    return NS_OK;
+    return rv;
   }
 
   // No process change is needed, so continue on to ContinueOnStartRequest1.
@@ -7003,8 +7017,8 @@ static void ReportHTTPSRRTelemetry(
                                                 getter_AddRefs(svcbRecord)))) {
     MOZ_ASSERT(svcbRecord);
 
-    Maybe<Tuple<nsCString, bool>> alpn = svcbRecord->GetAlpn();
-    bool isHttp3 = alpn ? Get<1>(*alpn) : false;
+    Maybe<Tuple<nsCString, SupportedAlpnType>> alpn = svcbRecord->GetAlpn();
+    bool isHttp3 = alpn ? Get<1>(*alpn) == SupportedAlpnType::HTTP_3 : false;
     Telemetry::Accumulate(Telemetry::HTTPS_RR_WITH_HTTP3_PRESENTED, isHttp3);
   }
 }
@@ -7258,6 +7272,13 @@ nsresult nsHttpChannel::ContinueOnStopRequestAfterAuthRetry(
                         mResponseHead->Status() == 200;
 
   if (upgradeWebsocket || upgradeConnect) {
+    if (nsIOService::UseSocketProcess() && upgradeConnect) {
+      // TODO: Support connection upgrade for socket process in bug 1632809.
+      Unused << mUpgradeProtocolCallback->OnUpgradeFailed(
+          NS_ERROR_NOT_IMPLEMENTED);
+      return ContinueOnStopRequest(aStatus, aIsFromNet, aContentComplete);
+    }
+
     nsresult rv = gHttpHandler->CompleteUpgrade(aTransWithStickyConn,
                                                 mUpgradeProtocolCallback);
     if (NS_FAILED(rv)) {
@@ -7464,7 +7485,7 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
 
   MaybeFlushConsoleReports();
 
-  if (!mEndMarkerAdded && profiler_can_accept_markers()) {
+  if (!mEndMarkerAdded && profiler_thread_is_being_profiled()) {
     // These do allocations/frees/etc; avoid if not active
     mEndMarkerAdded = true;
 
@@ -7911,6 +7932,20 @@ nsHttpChannel::GetAllowStaleCacheContent(bool* aAllowStaleCacheContent) {
 }
 
 NS_IMETHODIMP
+nsHttpChannel::SetForceValidateCacheContent(bool aForceValidateCacheContent) {
+  LOG(("nsHttpChannel::SetForceValidateCacheContent [this=%p, allow=%d]", this,
+       aForceValidateCacheContent));
+  StoreForceValidateCacheContent(aForceValidateCacheContent);
+  return NS_OK;
+}
+NS_IMETHODIMP
+nsHttpChannel::GetForceValidateCacheContent(bool* aForceValidateCacheContent) {
+  NS_ENSURE_ARG(aForceValidateCacheContent);
+  *aForceValidateCacheContent = LoadForceValidateCacheContent();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsHttpChannel::SetPreferCacheLoadOverBypass(bool aPreferCacheLoadOverBypass) {
   StorePreferCacheLoadOverBypass(aPreferCacheLoadOverBypass);
   return NS_OK;
@@ -7923,9 +7958,9 @@ nsHttpChannel::GetPreferCacheLoadOverBypass(bool* aPreferCacheLoadOverBypass) {
 }
 
 NS_IMETHODIMP
-nsHttpChannel::PreferAlternativeDataType(const nsACString& aType,
-                                         const nsACString& aContentType,
-                                         bool aDeliverAltData) {
+nsHttpChannel::PreferAlternativeDataType(
+    const nsACString& aType, const nsACString& aContentType,
+    PreferredAlternativeDataDeliveryType aDeliverAltData) {
   ENSURE_CALLED_BEFORE_ASYNC_OPEN();
   mPreferredCachedAltDataTypes.AppendElement(PreferredAlternativeDataTypeParams(
       nsCString(aType), nsCString(aContentType), aDeliverAltData));
@@ -7985,22 +8020,18 @@ nsHttpChannel::GetOriginalInputStream(nsIInputStreamReceiver* aReceiver) {
 }
 
 NS_IMETHODIMP
-nsHttpChannel::GetAltDataInputStream(const nsACString& aType,
-                                     nsIInputStreamReceiver* aReceiver) {
-  if (aReceiver == nullptr) {
-    return NS_ERROR_INVALID_ARG;
-  }
-  nsCOMPtr<nsIInputStream> inputStream;
+nsHttpChannel::GetAlternativeDataInputStream(nsIInputStream** aInputStream) {
+  NS_ENSURE_ARG_POINTER(aInputStream);
+
+  *aInputStream = nullptr;
 
   nsCOMPtr<nsICacheEntry> cacheEntry =
       mCacheEntry ? mCacheEntry : mAltDataCacheEntry;
-  if (cacheEntry) {
+  if (!mAvailableCachedAltDataType.IsEmpty() && cacheEntry) {
     nsresult rv = cacheEntry->OpenAlternativeInputStream(
-        aType, getter_AddRefs(inputStream));
+        mAvailableCachedAltDataType, aInputStream);
     NS_ENSURE_SUCCESS(rv, rv);
   }
-
-  aReceiver->OnInputStreamReady(inputStream);
   return NS_OK;
 }
 
@@ -8711,6 +8742,17 @@ void nsHttpChannel::SetDoNotTrack() {
   }
 }
 
+void nsHttpChannel::SetGlobalPrivacyControl() {
+  MOZ_ASSERT(NS_IsMainThread(), "Must be called on the main thread");
+
+  if (StaticPrefs::privacy_globalprivacycontrol_enabled() &&
+      StaticPrefs::privacy_globalprivacycontrol_functionality_enabled()) {
+    // Send the header with a value of 1 to indicate opting-out
+    DebugOnly<nsresult> rv =
+        mRequestHead.SetHeader(nsHttp::GlobalPrivacyControl, "1"_ns, false);
+  }
+}
+
 void nsHttpChannel::ReportRcwnStats(bool isFromNet) {
   if (!StaticPrefs::network_http_rcwn_enabled()) {
     return;
@@ -8968,7 +9010,9 @@ nsresult nsHttpChannel::TriggerNetworkWithDelay(uint32_t aDelay) {
   if (!mNetworkTriggerTimer) {
     mNetworkTriggerTimer = NS_NewTimer();
   }
-  mNetworkTriggerTimer->InitWithCallback(this, aDelay, nsITimer::TYPE_ONE_SHOT);
+  auto callback = MakeRefPtr<TimerCallback>(this);
+  mNetworkTriggerTimer->InitWithCallback(callback, aDelay,
+                                         nsITimer::TYPE_ONE_SHOT);
   return NS_OK;
 }
 
@@ -9090,14 +9134,24 @@ nsHttpChannel::Test_triggerNetwork(int32_t aTimeout) {
   return TriggerNetworkWithDelay(aTimeout);
 }
 
+nsHttpChannel::TimerCallback::TimerCallback(nsHttpChannel* aChannel)
+    : mChannel(aChannel) {}
+
+NS_IMPL_ISUPPORTS(nsHttpChannel::TimerCallback, nsITimerCallback, nsINamed)
+
 NS_IMETHODIMP
-nsHttpChannel::Notify(nsITimer* aTimer) {
-  RefPtr<nsHttpChannel> self(this);
-  if (aTimer == mCacheOpenTimer) {
-    return Test_triggerDelayedOpenCacheEntry();
+nsHttpChannel::TimerCallback::GetName(nsACString& aName) {
+  aName.AssignLiteral("nsHttpChannel");
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsHttpChannel::TimerCallback::Notify(nsITimer* aTimer) {
+  if (aTimer == mChannel->mCacheOpenTimer) {
+    return mChannel->Test_triggerDelayedOpenCacheEntry();
   }
-  if (aTimer == mNetworkTriggerTimer) {
-    return TriggerNetwork();
+  if (aTimer == mChannel->mNetworkTriggerTimer) {
+    return mChannel->TriggerNetwork();
   }
   MOZ_CRASH("Unknown timer");
 

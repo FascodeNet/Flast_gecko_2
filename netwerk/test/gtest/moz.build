@@ -10,6 +10,7 @@ UNIFIED_SOURCES += [
     "TestBufferedInputStream.cpp",
     "TestCommon.cpp",
     "TestCookie.cpp",
+    "TestDNSPacket.cpp",
     "TestHeaders.cpp",
     "TestHttpAuthUtils.cpp",
     "TestHttpChannel.cpp",
@@ -23,7 +24,6 @@ UNIFIED_SOURCES += [
     "TestServerTimingHeader.cpp",
     "TestSocketTransportService.cpp",
     "TestStandardURL.cpp",
-    "TestSupportAlpn.cpp",
     "TestUDPSocket.cpp",
 ]
 
@@ -79,5 +79,3 @@ include("/ipc/chromium/chromium-config.mozbuild")
 FINAL_LIBRARY = "xul-gtest"
 
 LOCAL_INCLUDES += ["!/xpcom", "/xpcom/components"]
-
-REQUIRES_UNIFIED_BUILD = True

@@ -631,6 +631,7 @@ enum WebIDLProcType {
 dictionary ThreadInfoDictionary {
   long long tid = 0;
   DOMString name = "";
+  unsigned long long cpuCycleCount = 0;
   unsigned long long cpuUser = 0;
   unsigned long long cpuKernel = 0;
 };
@@ -672,21 +673,22 @@ dictionary ChildProcInfoDictionary {
   // Process filename (without the path name).
   DOMString filename = "";
 
-  // RSS, in bytes, i.e. the total amount of memory allocated
-  // by this process.
-  long long residentSetSize = 0;
-
-  // Resident unique size, i.e. the total amount of memory
-  // allocated by this process *and not shared with other processes*.
-  // Given that we share lots of memory between processes,
-  // this is probably the best end-user measure for "memory used".
-  long long residentUniqueSize = 0;
+  // The best end-user measure for "memory used" that we can obtain without
+  // triggering expensive computations. The value is in bytes.
+  // On Mac and Linux this matches the values shown by the system monitors.
+  // On Windows this will return the Commit Size.
+  unsigned long long memory = 0;
 
   // Time spent by the process in user mode, in ns.
   unsigned long long cpuUser = 0;
 
   // Time spent by the process in kernel mode, in ns.
   unsigned long long cpuKernel = 0;
+
+  // Total CPU cycles used by this process.
+  // On Windows where the resolution of CPU timings is 16ms, this can
+  // be used to determine if a process is idle or slightly active.
+  unsigned long long cpuCycleCount = 0;
 
   // Thread information for this process.
   sequence<ThreadInfoDictionary> threads = [];
@@ -719,21 +721,22 @@ dictionary ParentProcInfoDictionary {
   // Process filename (without the path name).
   DOMString filename = "";
 
-  // RSS, in bytes, i.e. the total amount of memory allocated
-  // by this process.
-  long long residentSetSize = 0;
-
-  // Resident unique size, i.e. the total amount of memory
-  // allocated by this process *and not shared with other processes*.
-  // Given that we share lots of memory between processes,
-  // this is probably the best end-user measure for "memory used".
-  long long residentUniqueSize = 0;
+  // The best end-user measure for "memory used" that we can obtain without
+  // triggering expensive computations. The value is in bytes.
+  // On Mac and Linux this matches the values shown by the system monitors.
+  // On Windows this will return the Commit Size.
+  unsigned long long memory = 0;
 
   // Time spent by the process in user mode, in ns.
   unsigned long long cpuUser = 0;
 
   // Time spent by the process in kernel mode, in ns.
   unsigned long long cpuKernel = 0;
+
+  // Total CPU cycles used by this process.
+  // On Windows where the resolution of CPU timings is 16ms, this can
+  // be used to determine if a process is idle or slightly active.
+  unsigned long long cpuCycleCount = 0;
 
   // Thread information for this process.
   sequence<ThreadInfoDictionary> threads = [];

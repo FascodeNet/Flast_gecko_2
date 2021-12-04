@@ -53,17 +53,7 @@ struct TlsData {
   // 64-bits on 64-bit systems so as to allow for heap lengths up to and beyond
   // 4GB, and 32-bits on 32-bit systems, where heaps are limited to 2GB.
   //
-  // On 64-bit systems, the upper bits of this value will be zero and 32-bit
-  // bounds checks can be used under the following circumstances:
-  //
-  // - The heap is for asm.js; asm.js heaps are limited to 2GB
-  // - The max size of the heap is encoded in the module and is less than 4GB
-  // - Cranelift is present in the system; Cranelift-compatible heaps are
-  //   limited to 4GB-128K
-  //
-  // All our jits require little-endian byte order, so the address of the 32-bit
-  // heap limit is the same as the address of the 64-bit heap limit: the address
-  // of this member.
+  // See "Linear memory addresses and bounds checking" in WasmMemory.cpp.
   uintptr_t boundsCheckLimit;
 
   // Pointer to the Instance that contains this TLS data.
@@ -78,6 +68,17 @@ struct TlsData {
   // The class_ of WasmValueBox, this is a per-process value.
   const JSClass* valueBoxClass;
 
+#ifdef ENABLE_WASM_EXCEPTIONS
+  // The pending exception that was found during stack unwinding after a throw.
+  //
+  //   - Only non-null while unwinding the control stack from a wasm-exit stub.
+  //     until the nearest enclosing Wasm try-catch or try-delegate block.
+  //   - Set by wasm::HandleThrow, unset by Instance::consumePendingException.
+  //   - If the unwind target is a `try-delegate`, it is unset by the delegated
+  //     try-catch block or function body block.
+  GCPtrObject pendingException;
+#endif
+
   // Usually equal to cx->stackLimitForJitCode(JS::StackForUntrustedScript),
   // but can be racily set to trigger immediate trap as an opportunity to
   // CheckForInterrupt without an additional branch.
@@ -86,7 +87,7 @@ struct TlsData {
   // Set to 1 when wasm should call CheckForInterrupt.
   Atomic<uint32_t, mozilla::Relaxed> interrupt;
 
-  uint8_t* addressOfNeedsIncrementalBarrier;
+  const uint32_t* addressOfNeedsIncrementalBarrier;
 
   // Methods to set, test and clear the above two fields. Both interrupt
   // fields are Relaxed and so no consistency/ordering can be assumed.
@@ -100,6 +101,10 @@ struct TlsData {
   // When compiling with tiering, the jumpTable has one entry for each
   // baseline-compiled function.
   void** jumpTable;
+
+  // General scratch storage for the baseline compiler, which can't always use
+  // the stack for this.
+  uint32_t baselineScratch[2];
 
   // The globalArea must be the last field.  Globals for the module start here
   // and are inline in this structure.  16-byte alignment is required for SIMD

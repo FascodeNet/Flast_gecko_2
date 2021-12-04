@@ -50,10 +50,12 @@
   --autocomplete-popup-separator-color: color-mix(in srgb, currentColor 14%, transparent);
 
   --identity-box-margin-inline: 4px;
-  --identity-box-label-opacity: .8;
   --urlbar-box-bgcolor: var(--button-bgcolor);
+  --urlbar-box-focus-bgcolor: var(--button-bgcolor);
   --urlbar-box-hover-bgcolor: var(--button-hover-bgcolor);
   --urlbar-box-active-bgcolor: var(--button-active-bgcolor);
+  --urlbar-box-text-color: inherit;
+  --urlbar-box-hover-text-color: var(--urlbar-box-text-color);
   --urlbar-min-height: 32px;
   --urlbar-icon-fill-opacity: 0.9;
   --urlbar-icon-padding: 6px; /* (32px - 2px border - 2px padding - 16px icon) / 2 */
@@ -65,7 +67,7 @@
   --lwt-additional-images: none;
   --lwt-background-alignment: right top;
   --lwt-background-tiling: no-repeat;
-  --lwt-popup-brighttext-url-color: #74c0ff;
+  --lwt-brighttext-url-color: #00ddff;
 }
 
 @media (prefers-contrast) {
@@ -73,6 +75,10 @@
     --autocomplete-popup-separator-color: color-mix(in srgb, currentColor 86%, transparent);
     --urlbar-icon-fill-opacity: 1;
     --checkbox-checked-border-color: var(--checkbox-checked-bgcolor);
+
+    --urlbar-box-hover-bgcolor: SelectedItem;
+    --urlbar-box-active-bgcolor: SelectedItem;
+    --urlbar-box-hover-text-color: SelectedItemText;
   }
 }
 
@@ -98,6 +104,7 @@
   --focus-outline-width: 2px;
   --focus-outline-color: currentColor;
   --focus-outline: var(--focus-outline-width) solid var(--focus-outline-color);
+  --focus-outline-offset: 2px;
 }
 
 @media not (prefers-contrast) {
@@ -110,20 +117,18 @@
   }
 }
 
-:root[lwt-toolbar-field-focus-brighttext] {
-  --lwt-popup-brighttext-url-color: #00ddff;
-}
-
 /* Increase the contrast of urlbar boxes in brighttext LWT.
    In practice these are bumped-up --button(-hover)-bgcolor rules */
 :root:-moz-lwtheme-brighttext:not([lwt-default-theme-in-dark-mode]) {
   --urlbar-box-bgcolor: color-mix(in srgb, currentColor 16%, transparent);
+  --urlbar-box-focus-bgcolor: color-mix(in srgb, currentColor 16%, transparent);
   --urlbar-box-hover-bgcolor: color-mix(in srgb, currentColor 22%, transparent);
 }
 /* Linux dark OS */
 @media (prefers-color-scheme: dark) {
   :root:not(:-moz-lwtheme) {
     --urlbar-box-bgcolor: color-mix(in srgb, currentColor 16%, transparent);
+    --urlbar-box-focus-bgcolor: color-mix(in srgb, currentColor 16%, transparent);
     --urlbar-box-hover-bgcolor: color-mix(in srgb, currentColor 22%, transparent);
   }
 }
@@ -140,20 +145,21 @@
   }
 }
 
-/* Increase contrast of UI links on dark themes */
+/* Set link color with proper contrast for WebExt themes */
 
-:root[lwt-popup-brighttext] panel .text-link {
-  color: var(--lwt-popup-brighttext-url-color);
-}
-
-#PersonalToolbar:-moz-lwtheme .text-link,
-#nav-bar:-moz-lwtheme .text-link {
+toolbar .text-link:-moz-lwtheme,
+panel .text-link:-moz-lwtheme {
   color: #0060df;
 }
 
-#PersonalToolbar[brighttext]:-moz-lwtheme .text-link,
-#nav-bar[brighttext]:-moz-lwtheme .text-link {
-  color: #45a1ff;
+toolbar[brighttext] .text-link:-moz-lwtheme,
+:root[lwt-popup-brighttext] panel .text-link {
+  color: var(--lwt-brighttext-url-color);
+}
+
+toolbar .text-link:-moz-lwtheme:not(:hover),
+panel .text-link:-moz-lwtheme:not(:hover) {
+  text-decoration: none;
 }
 
 /* Toolbar / content area border */
@@ -332,7 +338,7 @@ menupopup::part(drop-indicator) {
 }
 
 .private-browsing-indicator {
-  background-image: url("chrome://browser/skin/indicator-private-browsing.svg");
+  background-image: url("chrome://global/skin/icons/indicator-private-browsing.svg");
 }
 
 :root:not([accessibilitymode]) .accessibility-indicator,
@@ -365,11 +371,6 @@ menupopup::part(drop-indicator) {
 
 #addon-progress-notification-progressmeter {
   margin: 2px 4px;
-}
-
-/* Permissions popup learn more link. */
-#addon-webext-perm-info {
-  margin-inline-start: 0;
 }
 
 /* Contextual Feature Recommendation popup-notification */
@@ -727,6 +728,20 @@ popupnotificationcontent {
   margin-block-start: 8px;
 }
 
+/**
+ * Our OS integration code toggles whether system colors should return light or
+ * dark values based on the luminosity of the toolbar background. Because themes
+ * can style panels to have a different background color than the toolbar, we
+ * need specific overrides for system colors used in light or dark themes.
+ */
+.popup-notification-body:-moz-lwtheme {
+  color-scheme: light;
+}
+
+:root[lwt-popup-brighttext] .popup-notification-body {
+  color-scheme: dark;
+}
+
 .popup-notification-body menulist {
   margin: 0;
 }
@@ -762,7 +777,7 @@ popupnotificationcontent {
   list-style-image: url("chrome://global/skin/media/audio.svg");
 }
 
-.popup-notification-body :is(description, label, checkbox, input) {
+.popup-notification-body :is(description, label:not(.learnMore), checkbox, input) {
   margin-inline: 0;
 }
 

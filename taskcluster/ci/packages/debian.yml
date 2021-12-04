@@ -7,17 +7,6 @@ job-defaults:
         using: debian-package
         dist: jessie
 
-deb10-cmake:
-    description: "Cmake backport for Debian buster"
-    treeherder:
-        symbol: Deb10(cmake)
-    run:
-        dist: buster
-        dsc:
-            url: http://snapshot.debian.org/archive/debian/20200202T210747Z/pool/main/c/cmake/cmake_3.16.3-1.dsc
-            sha256: ecfa7cbc93dc6a9749022ccd9538843f4a0e2e77a14bb2f87e325aaf3c36b519
-        pre-build-command: apt-get install debhelper/buster-backports
-
 deb10-mercurial:
     description: "Modern Mercurial for Debian buster"
     treeherder:
@@ -56,9 +45,8 @@ deb11-valgrind:
     run:
         dist: bullseye
         dsc:
-            url: http://snapshot.debian.org/archive/debian/20200628T204444Z/pool/main/v/valgrind/valgrind_3.16.1-1.dsc
-            sha256: bd9b1bf5454da3d93d2dfab8de44df0c3aebe0371022c4f00aef6850aa0b4e07
-        patch: valgrind-bullseye.diff
+            url: http://snapshot.debian.org/archive/debian/20210904T143545Z/pool/main/v/valgrind/valgrind_3.17.0-1.dsc
+            sha256: e56ee4356fd873b402e0795610d0db7f3d14bedee3c775ded61f82647b841231
 
 deb10-python-zstandard:
     description: "python-zstandard for Debian buster"
@@ -67,9 +55,9 @@ deb10-python-zstandard:
     run:
         dist: buster
         tarball:
-            url: https://github.com/indygreg/python-zstandard/releases/download/0.15.2/zstandard-0.15.2.tar.gz
-            sha256: 52de08355fd5cfb3ef4533891092bb96229d43c2069703d4aff04fdbedf9c92f
-        pre-build-command: debchange -v 0.15.2-1.deb10moz --distribution buster "Mozilla backport for buster"
+            url: https://github.com/indygreg/python-zstandard/releases/download/0.16.0/zstandard-0.16.0.tar.gz
+            sha256: eaae2d3e8fdf8bfe269628385087e4b648beef85bb0c187644e7df4fb0fe9046
+        pre-build-command: debchange -v 0.16.0-1.deb10moz --distribution buster "Mozilla backport for buster"
         name: python-zstandard
 
 deb11-python-zstandard:
@@ -80,25 +68,10 @@ deb11-python-zstandard:
         using: debian-package
         dist: bullseye
         tarball:
-            url: https://github.com/indygreg/python-zstandard/releases/download/0.15.2/zstandard-0.15.2.tar.gz
-            sha256: 52de08355fd5cfb3ef4533891092bb96229d43c2069703d4aff04fdbedf9c92f
-        pre-build-command: debchange -v 0.15.2-1.deb11moz --distribution bullseye "Mozilla backport for buster"
+            url: https://github.com/indygreg/python-zstandard/releases/download/0.16.0/zstandard-0.16.0.tar.gz
+            sha256: eaae2d3e8fdf8bfe269628385087e4b648beef85bb0c187644e7df4fb0fe9046
+        pre-build-command: debchange -v 0.16.0-1.deb11moz --distribution bullseye "Mozilla backport for buster"
         name: python-zstandard
-
-deb10-mmdebstrap:
-    # Only a more recent version of mmdebstrap than what is in buster has the
-    # features we want.
-    description: "mmdebstrap 0.7.5 for Debian buster"
-    treeherder:
-        symbol: Deb10(python-mmdebstrap)
-    run:
-        dist: buster
-        dsc:
-            url: http://snapshot.debian.org/archive/debian/20210507T203327Z/pool/main/m/mmdebstrap/mmdebstrap_0.7.5-2.2.dsc
-            sha256: 231ab505fac675acda098a5b328fee0b939be5d5881d7713b8ec759ee9833543
-        pre-build-command: >-
-          sed -i "s/debhelper-compat (= 13)/debhelper/" debian/control &&
-          echo 12 > debian/compat
 
 deb8-gcc-7:
     description: "gcc 7 for Debian jessie"

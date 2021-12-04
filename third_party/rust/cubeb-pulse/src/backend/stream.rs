@@ -15,7 +15,7 @@ use ringbuf::RingBuffer;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_long, c_void};
 use std::slice;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};
 use std::{mem, ptr};
 
 use self::LinearInputBuffer::*;
@@ -272,9 +272,10 @@ pub struct PulseStream<'ctx> {
     input_stream: Option<pulse::Stream>,
     data_callback: ffi::cubeb_data_callback,
     state_callback: ffi::cubeb_state_callback,
-    drain_timer: *mut pa_time_event,
+    drain_timer: AtomicPtr<pa_time_event>,
     output_sample_spec: pulse::SampleSpec,
     input_sample_spec: pulse::SampleSpec,
+    // output frames count excluding pre-buffering
     output_frame_count: AtomicUsize,
     shutdown: bool,
     volume: f32,
@@ -375,12 +376,13 @@ impl<'ctx> PulseStream<'ctx> {
                 return;
             }
 
+            let nframes = nbytes / stm.output_sample_spec.frame_size();
+            let first_callback = stm.output_frame_count.fetch_add(nframes, Ordering::SeqCst) == 0;
             if stm.input_stream.is_some() {
-                let nframes = nbytes / stm.output_sample_spec.frame_size();
                 let nsamples_input = nframes * stm.input_sample_spec.channels as usize;
                 let input_buffer_manager = stm.input_buffer_manager.as_mut().unwrap();
 
-                if stm.output_frame_count.fetch_add(nframes, Ordering::SeqCst) == 0 {
+                if first_callback {
                     let buffered_input_frames = input_buffer_manager.available_samples()
                         / stm.input_sample_spec.channels as usize;
                     if buffered_input_frames > nframes {
@@ -409,7 +411,7 @@ impl<'ctx> PulseStream<'ctx> {
             data_callback,
             state_callback,
             user_ptr,
-            drain_timer: ptr::null_mut(),
+            drain_timer: AtomicPtr::new(ptr::null_mut()),
             output_sample_spec: pulse::SampleSpec::default(),
             input_sample_spec: pulse::SampleSpec::default(),
             output_frame_count: AtomicUsize::new(0),
@@ -572,9 +574,10 @@ impl<'ctx> PulseStream<'ctx> {
         self.context.mainloop.lock();
         {
             if let Some(stm) = self.output_stream.take() {
-                if !self.drain_timer.is_null() {
+                let drain_timer = self.drain_timer.load(Ordering::Acquire);
+                if !drain_timer.is_null() {
                     /* there's no pa_rttime_free, so use this instead. */
-                    self.context.mainloop.get_api().time_free(self.drain_timer);
+                    self.context.mainloop.get_api().time_free(drain_timer);
                 }
                 stm.clear_state_callback();
                 stm.clear_write_callback();
@@ -635,7 +638,7 @@ impl<'ctx> StreamOps for PulseStream<'ctx> {
             self.shutdown = true;
             // If draining is taking place wait to finish
             cubeb_log!("Stream stop: waiting for drain.");
-            while !self.drain_timer.is_null() {
+            while !self.drain_timer.load(Ordering::Acquire).is_null() {
                 self.context.mainloop.wait();
             }
             cubeb_log!("Stream stop: waited for drain.");
@@ -986,11 +989,12 @@ impl<'ctx> PulseStream<'ctx> {
         ) {
             cubeb_logv!("Drain finished callback.");
             let stm = unsafe { &mut *(u as *mut PulseStream) };
-            debug_assert_eq!(stm.drain_timer, e);
+            let drain_timer = stm.drain_timer.load(Ordering::Acquire);
+            debug_assert_eq!(drain_timer, e);
             stm.state_change_callback(ffi::CUBEB_STATE_DRAINED);
             /* there's no pa_rttime_free, so use this instead. */
-            a.time_free(stm.drain_timer);
-            stm.drain_timer = ptr::null_mut();
+            a.time_free(drain_timer);
+            stm.drain_timer.store(ptr::null_mut(), Ordering::Release);
             stm.context.mainloop.signal();
         }
 
@@ -1015,14 +1019,14 @@ impl<'ctx> PulseStream<'ctx> {
                             read_offset
                         );
                         let read_ptr = unsafe { (input_data as *const u8).add(read_offset) };
-                        let got = unsafe {
+                        let mut got = unsafe {
                             self.data_callback.unwrap()(
                                 self as *const _ as *mut _,
                                 self.user_ptr,
                                 read_ptr as *const _ as *mut _,
                                 buffer,
                                 (size / frame_size) as c_long,
-                            )
+                            ) as i64
                         };
                         if got < 0 {
                             let _ = stm.cancel_write();
@@ -1055,15 +1059,40 @@ impl<'ctx> PulseStream<'ctx> {
                             }
                         }
 
+                        let should_drain = (got as usize) < size / frame_size;
+
+                        if should_drain && self.output_frame_count.load(Ordering::SeqCst) == 0 {
+                            // Draining during preroll, ensure `prebuf` frames are written so
+                            // the stream starts. If not, pad with a bit of silence.
+                            let prebuf_size_bytes = stm.get_buffer_attr().prebuf as usize;
+                            let got_bytes = got as usize * frame_size;
+                            if prebuf_size_bytes > got_bytes {
+                                let padding_bytes = prebuf_size_bytes - got_bytes;
+                                if padding_bytes + got_bytes <= size {
+                                    // A slice that starts after the data provided by the callback,
+                                    // with just enough room to provide a final buffer big enough.
+                                    let padding_buf: &mut [u8] = unsafe {
+                                        slice::from_raw_parts_mut::<u8>(
+                                            buffer.add(got_bytes) as *mut u8,
+                                            padding_bytes,
+                                        )
+                                    };
+                                    padding_buf.fill(0);
+                                    got += (padding_bytes / frame_size) as i64;
+                                }
+                            } else {
+                                cubeb_log!("Not enough room to pad up to prebuf when prebuffering.")
+                            }
+                        }
+
                         let r = stm.write(
                             buffer,
                             got as usize * frame_size,
                             0,
                             pulse::SeekMode::Relative,
                         );
-                        debug_assert!(r.is_ok());
 
-                        if (got as usize) < size / frame_size {
+                        if should_drain {
                             cubeb_logv!("Draining {} < {}", got, size / frame_size);
                             let latency = match stm.get_latency() {
                                 Ok(StreamLatency::Positive(l)) => l,
@@ -1082,18 +1111,23 @@ impl<'ctx> PulseStream<'ctx> {
 
                             /* pa_stream_drain is useless, see PA bug# 866. this is a workaround. */
                             /* arbitrary safety margin: double the current latency. */
-                            debug_assert!(self.drain_timer.is_null());
+                            debug_assert!(self.drain_timer.load(Ordering::Acquire).is_null());
                             let stream_ptr = self as *const _ as *mut _;
                             if let Some(ref context) = self.context.context {
-                                self.drain_timer = context.rttime_new(
-                                    pulse::rtclock_now() + 2 * latency,
-                                    drained_cb,
-                                    stream_ptr,
+                                self.drain_timer.store(
+                                    context.rttime_new(
+                                        pulse::rtclock_now() + 2 * latency,
+                                        drained_cb,
+                                        stream_ptr,
+                                    ),
+                                    Ordering::Release,
                                 );
                             }
                             self.shutdown = true;
                             return;
                         }
+
+                        debug_assert!(r.is_ok());
 
                         towrite -= size;
                     }

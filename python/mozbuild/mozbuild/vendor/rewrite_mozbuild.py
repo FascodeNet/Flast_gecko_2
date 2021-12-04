@@ -183,7 +183,7 @@ import re
 import ast
 import sys
 import copy
-import fileinput
+import shutil
 import subprocess
 
 from pprint import pprint
@@ -239,8 +239,16 @@ def get_attribute_label(node):
     while isinstance(subtarget, ast.Attribute):
         label = subtarget.attr + ("." if label else "") + label
         subtarget = subtarget.value
-    assert isinstance(subtarget, ast.Name)
-    label = subtarget.id + "." + label
+
+    if isinstance(subtarget, ast.Name):
+        label = subtarget.id + "." + label
+    elif isinstance(subtarget, ast.Subscript) and isinstance(subtarget.value, ast.Name):
+        label = subtarget.value.id + "." + label
+    else:
+        raise Exception(
+            "Unxpected subtarget of type %s found in get_attribute_label. label=%s"
+            % (subtarget, label)
+        )
 
     return label
 
@@ -255,10 +263,13 @@ def ast_get_source_segment(code, node):
     ):
         return ast.original_get_source_segment(code, node)
 
-    if caller.function == "log":
+    if caller.function == "assignment_node_to_source_filename_list":
         return ""
 
-    raise Exception("ast_get_source_segment is not available with this Python version.")
+    raise Exception(
+        "ast_get_source_segment is not available with this Python version. (ver=%s.%s, caller=%s)"
+        % (sys.version_info.major, sys.version_info.minor, caller.function)
+    )
 
 
 # Overwrite it so we don't accidently use it
@@ -491,7 +502,9 @@ def unnormalize_filename(normalized_mozbuild_filename, normalized_filename):
     if normalized_filename[0] == "/":
         return normalized_filename
 
-    mozbuild_path = os.path.dirname(normalized_mozbuild_filename) + "/"
+    mozbuild_path = (
+        os.path.dirname(normalized_mozbuild_filename).replace(os.path.sep, "/") + "/"
+    )
     return normalized_filename.replace(mozbuild_path, "")
 
 
@@ -499,8 +512,10 @@ def normalize_filename(normalized_mozbuild_filename, filename):
     if filename[0] == "/":
         return filename
 
-    mozbuild_path = os.path.dirname(normalized_mozbuild_filename)
-    return os.path.join(mozbuild_path, filename)
+    mozbuild_path = os.path.dirname(normalized_mozbuild_filename).replace(
+        os.path.sep, "/"
+    )
+    return os.path.join(mozbuild_path, filename).replace(os.path.sep, "/")
 
 
 def get_mozbuild_file_search_order(
@@ -576,7 +591,9 @@ def get_mozbuild_file_search_order(
         raise Exception("If moz_yaml_dir or vendoring_dir are specified, both must be")
 
     # Step 1
-    while len(os.path.dirname(test_directory)) > 1:  # While we are not at '/'
+    while (
+        len(os.path.dirname(test_directory).replace(os.path.sep, "/")) > 1
+    ):  # While we are not at '/'
         containing_directory = os.path.dirname(test_directory)
 
         possible_normalized_mozbuild_filename = os.path.join(
@@ -633,8 +650,13 @@ def filenames_directory_is_in_filename_list(
         f("foo/bar/a.c", ["foo/b.c", "foo/bar/c.c"]) -> true
         f("foo/bar/a.c", ["foo/b.c", "foo/bar/baz/d.c"]) -> false
     """
-    path_list = set([os.path.dirname(f) for f in list_of_normalized_filenames])
-    return os.path.dirname(filename_normalized) in path_list
+    path_list = set(
+        [
+            os.path.dirname(f).replace(os.path.sep, "/")
+            for f in list_of_normalized_filenames
+        ]
+    )
+    return os.path.dirname(filename_normalized).replace(os.path.sep, "/") in path_list
 
 
 def find_all_posible_assignments_from_filename(source_assignments, filename_normalized):
@@ -709,6 +731,10 @@ def edit_moz_build_file_to_add_file(
       - dumping the ast out losing comments
     """
 
+    # Make sure that we only write in forward slashes
+    if "\\" in unnormalized_filename_to_add:
+        unnormalized_filename_to_add = unnormalized_filename_to_add.replace("\\", "/")
+
     # add the file into the list, and then sort it in the same way the moz.build validator
     # expects
     unnormalized_list_of_files.append(unnormalized_filename_to_add)
@@ -734,55 +760,55 @@ def edit_moz_build_file_to_add_file(
     # line.
     did_replace = False
 
-    # FileInput is a strange class that lets you edit a file in-place, but does so by hijacking
-    # stdout, so you just print() the output you want as you go through
-    file = fileinput.FileInput(normalized_mozbuild_filename, inplace=True)
-    for line in file:
-        if not did_replace and find_str in line:
-            did_replace = True
+    with open(normalized_mozbuild_filename, mode="r") as file:
+        with open(normalized_mozbuild_filename + ".new", mode="wb") as output:
+            for line in file:
+                if not did_replace and find_str in line:
+                    did_replace = True
 
-            # Okay, we found the line we need to edit, now we need to be ugly about it
-            # Grab the type of quote used in this moz.build file: single or double
-            quote_type = line[line.index(find_str) - 1]
+                    # Okay, we found the line we need to edit, now we need to be ugly about it
+                    # Grab the type of quote used in this moz.build file: single or double
+                    quote_type = line[line.index(find_str) - 1]
 
-            if "[" not in line:
-                # We'll want to put our new file onto its own line
-                newline_to_add = "\n"
-                # And copy the indentation of the line we're adding adjacent to
-                indent_value = line[0 : line.index(quote_type)]
-            else:
-                # This is frustrating, we have the start of the array here. We aren't
-                # going to be able to indent things onto a newline properly. We're just
-                # going to have to stick it in on the same line.
-                newline_to_add = ""
-                indent_value = ""
+                    if "[" not in line:
+                        # We'll want to put our new file onto its own line
+                        newline_to_add = "\n"
+                        # And copy the indentation of the line we're adding adjacent to
+                        indent_value = line[0 : line.index(quote_type)]
+                    else:
+                        # This is frustrating, we have the start of the array here. We aren't
+                        # going to be able to indent things onto a newline properly. We're just
+                        # going to have to stick it in on the same line.
+                        newline_to_add = ""
+                        indent_value = ""
 
-            find_str = "%s%s%s" % (quote_type, find_str, quote_type)
-            if replace_before:
-                replacement_tuple = (
-                    find_str,
-                    newline_to_add,
-                    indent_value,
-                    quote_type,
-                    unnormalized_filename_to_add,
-                    quote_type,
-                )
-                replace_str = "%s,%s%s%s%s%s" % replacement_tuple
-            else:
-                replacement_tuple = (
-                    quote_type,
-                    unnormalized_filename_to_add,
-                    quote_type,
-                    newline_to_add,
-                    indent_value,
-                    find_str,
-                )
-                replace_str = "%s%s%s,%s%s%s" % replacement_tuple
+                    find_str = "%s%s%s" % (quote_type, find_str, quote_type)
+                    if replace_before:
+                        replacement_tuple = (
+                            find_str,
+                            newline_to_add,
+                            indent_value,
+                            quote_type,
+                            unnormalized_filename_to_add,
+                            quote_type,
+                        )
+                        replace_str = "%s,%s%s%s%s%s" % replacement_tuple
+                    else:
+                        replacement_tuple = (
+                            quote_type,
+                            unnormalized_filename_to_add,
+                            quote_type,
+                            newline_to_add,
+                            indent_value,
+                            find_str,
+                        )
+                        replace_str = "%s%s%s,%s%s%s" % replacement_tuple
 
-            line = line.replace(find_str, replace_str)
+                    line = line.replace(find_str, replace_str)
 
-        print(line, end="")  # line has its own newline on it, don't add a second
-    file.close()
+                output.write((line.rstrip() + "\n").encode("utf-8"))
+
+    shutil.move(normalized_mozbuild_filename + ".new", normalized_mozbuild_filename)
 
 
 def edit_moz_build_file_to_remove_file(
@@ -797,38 +823,37 @@ def edit_moz_build_file_to_remove_file(
     )
     did_replace = False
 
-    # FileInput is a strange class that lets you edit a file in-place, but does so by hijacking
-    # stdout, so you just print() the output you want as you go through
-    file = fileinput.FileInput(normalized_mozbuild_filename, inplace=True)
-    for line in file:
-        if not did_replace and unnormalized_filename_to_remove in line:
-            did_replace = True
+    with open(normalized_mozbuild_filename, mode="r") as file:
+        with open(normalized_mozbuild_filename + ".new", mode="wb") as output:
+            for line in file:
+                if not did_replace and unnormalized_filename_to_remove in line:
+                    did_replace = True
 
-            # If the line consists of just a single source file on it, then we're in the clear
-            # we can just skip this line.
-            if simple_file_line.match(line):
-                # Do not output anything, just keep going.
-                continue
+                    # If the line consists of just a single source file on it, then we're in the
+                    # clear - we can just skip this line.
+                    if simple_file_line.match(line):
+                        # Do not output anything, just keep going.
+                        continue
 
-            # Okay, so the line is a little more complicated.
-            quote_type = line[line.index(unnormalized_filename_to_remove) - 1]
+                    # Okay, so the line is a little more complicated.
+                    quote_type = line[line.index(unnormalized_filename_to_remove) - 1]
 
-            if "[" in line or "]" in line:
-                find_str = "%s%s%s,*" % (
-                    quote_type,
-                    unnormalized_filename_to_remove,
-                    quote_type,
-                )
-                line = re.sub(find_str, "", line)
-            else:
-                raise Exception(
-                    "Got an unusual type of line we're trying to remove a file from:",
-                    line,
-                )
+                    if "[" in line or "]" in line:
+                        find_str = "%s%s%s,*" % (
+                            quote_type,
+                            unnormalized_filename_to_remove,
+                            quote_type,
+                        )
+                        line = re.sub(find_str, "", line)
+                    else:
+                        raise Exception(
+                            "Got an unusual type of line we're trying to remove a file from:",
+                            line,
+                        )
 
-        print(line, end="")
+                output.write((line.rstrip() + "\n").encode("utf-8"))
 
-    file.close()
+    shutil.move(normalized_mozbuild_filename + ".new", normalized_mozbuild_filename)
 
 
 def validate_directory_parameters(moz_yaml_dir, vendoring_dir):
@@ -896,9 +921,11 @@ def renormalize_filename(
         #   (c) because (b) started at the moz.build file's directory, it is not
         #       normalized to the gecko_root. Therefore we need to normalize it by
         #       prepending (a)
-        a = os.path.dirname(normalized_mozbuild_filename)
-        b = os.path.relpath(normalized_filename_to_act_on, start=a)
-        c = os.path.join(a, b)
+        a = os.path.dirname(normalized_mozbuild_filename).replace(os.path.sep, "/")
+        b = os.path.relpath(normalized_filename_to_act_on, start=a).replace(
+            os.path.sep, "/"
+        )
+        c = os.path.join(a, b).replace(os.path.sep, "/")
         normalized_filename_to_act_on = c
 
     return normalized_filename_to_act_on
@@ -1043,15 +1070,6 @@ def add_file_to_moz_build_file(
 
             guessed_list_containing_normalized_filenames = possible_assignments[
                 chosen_source_assignment_location
-            ]
-
-            # unnormalize filenames so we can edit the moz.build file. They rarely use full paths.
-            unnormalized_filename_to_add = unnormalize_filename(
-                normalized_mozbuild_filename, normalized_filename_to_add
-            )
-            unnormalized_list_of_files = [
-                unnormalize_filename(normalized_mozbuild_filename, f)
-                for f in guessed_list_containing_normalized_filenames
             ]
 
             # unnormalize filenames so we can edit the moz.build file. They rarely use full paths.

@@ -13,20 +13,23 @@
 
 #include <algorithm>
 
-#include "frontend/BytecodeCompilation.h"
-#include "frontend/BytecodeCompiler.h"
+#include "frontend/BytecodeCompilation.h"  // frontend::{CompileGlobalScriptToExtensibleStencil, FireOnNewScript, FireOnNewScripts}
+#include "frontend/BytecodeCompiler.h"  // frontend::ParseModuleToExtensibleStencil
 #include "frontend/CompilationStencil.h"  // frontend::{CompilationStencil, ExtensibleCompilationStencil, CompilationInput, CompilationGCOutput, BorrowingCompilationStencil}
 #include "frontend/ParserAtom.h"          // frontend::ParserAtomsTable
 #include "gc/GC.h"                        // gc::MergeRealms
 #include "jit/IonCompileTask.h"
 #include "jit/JitRuntime.h"
-#include "js/ContextOptions.h"      // JS::ContextOptions
+#include "js/CompileOptions.h"  // JS::CompileOptions, JS::DecodeOptions, JS::ReadOnlyCompileOptions
+#include "js/ContextOptions.h"  // JS::ContextOptions
+#include "js/experimental/JSStencil.h"
 #include "js/friend/StackLimits.h"  // js::ReportOverRecursed
 #include "js/GlobalObject.h"
 #include "js/HelperThreadAPI.h"
 #include "js/OffThreadScriptCompilation.h"  // JS::OffThreadToken, JS::OffThreadCompileCallback
 #include "js/SourceText.h"
 #include "js/Stack.h"
+#include "js/Transcoding.h"
 #include "js/UniquePtr.h"
 #include "js/Utility.h"
 #include "threading/CpuCount.h"
@@ -838,102 +841,62 @@ void ScriptDecodeTask::parse(JSContext* cx) {
   RootedScript resultScript(cx);
   Rooted<ScriptSourceObject*> sourceObject(cx);
 
-  if (options.useStencilXDR) {
-    // The buffer contains stencil.
-
-    stencilInput_ = cx->make_unique<frontend::CompilationInput>(options);
-    if (!stencilInput_) {
-      return;
-    }
-    if (!stencilInput_->initForGlobal(cx)) {
-      return;
-    }
-
-    stencil_ =
-        cx->make_unique<frontend::CompilationStencil>(stencilInput_->source);
-    if (!stencil_) {
-      return;
-    }
-
-    XDRStencilDecoder decoder(cx, range);
-    XDRResult res = decoder.codeStencil(stencilInput_->options, *stencil_);
-    if (!res.isOk()) {
-      stencil_.reset();
-      return;
-    }
-
-    if (!frontend::PrepareForInstantiate(cx, *stencilInput_, *stencil_,
-                                         gcOutput_)) {
-      stencil_.reset();
-    }
-
-    if (options.useOffThreadParseGlobal) {
-      (void)instantiateStencils(cx);
-    }
-
+  stencilInput_ = cx->make_unique<frontend::CompilationInput>(options);
+  if (!stencilInput_) {
+    return;
+  }
+  if (!stencilInput_->initForGlobal(cx)) {
     return;
   }
 
-  // The buffer contains JSScript.
-  auto decoder = js::MakeUnique<XDROffThreadDecoder>(
-      cx, &options, XDROffThreadDecoder::Type::Single,
-      /* sourceObjectOut = */ &sourceObject.get(), range);
-  if (!decoder) {
-    ReportOutOfMemory(cx);
+  stencil_ =
+      cx->make_unique<frontend::CompilationStencil>(stencilInput_->source);
+  if (!stencil_) {
     return;
   }
 
-  mozilla::DebugOnly<XDRResult> res = decoder->codeScript(&resultScript);
-  MOZ_ASSERT(bool(resultScript) == static_cast<const XDRResult&>(res).isOk());
-
-  if (sourceObject) {
-    sourceObjects.infallibleAppend(sourceObject);
+  XDRStencilDecoder decoder(cx, range);
+  JS::DecodeOptions options(stencilInput_->options);
+  XDRResult res = decoder.codeStencil(options, *stencil_);
+  if (!res.isOk()) {
+    stencil_.reset();
+    return;
   }
 
-  if (resultScript) {
-    scripts.infallibleAppend(resultScript);
+  if (!frontend::PrepareForInstantiate(cx, *stencilInput_, *stencil_,
+                                       gcOutput_)) {
+    stencil_.reset();
+  }
+
+  if (stencilInput_->options.useOffThreadParseGlobal) {
+    (void)instantiateStencils(cx);
   }
 }
 
-MultiScriptsDecodeTask::MultiScriptsDecodeTask(
+MultiStencilsDecodeTask::MultiStencilsDecodeTask(
     JSContext* cx, JS::TranscodeSources& sources,
     JS::OffThreadCompileCallback callback, void* callbackData)
-    : ParseTask(ParseTaskKind::MultiScriptsDecode, cx, callback, callbackData),
+    : ParseTask(ParseTaskKind::MultiStencilsDecode, cx, callback, callbackData),
       sources(&sources) {}
 
-void MultiScriptsDecodeTask::parse(JSContext* cx) {
+void MultiStencilsDecodeTask::parse(JSContext* cx) {
   MOZ_ASSERT(cx->isHelperThreadContext());
 
-  if (!scripts.reserve(sources->length()) ||
-      !sourceObjects.reserve(sources->length())) {
+  if (!stencils.reserve(sources->length())) {
     ReportOutOfMemory(cx);  // This sets |outOfMemory|.
     return;
   }
 
   for (auto& source : *sources) {
-    CompileOptions opts(cx, options);
-    opts.setFileAndLine(source.filename, source.lineno);
-
-    RootedScript resultScript(cx);
-    Rooted<ScriptSourceObject*> sourceObject(cx);
-
-    auto decoder = js::MakeUnique<XDROffThreadDecoder>(
-        cx, &opts, XDROffThreadDecoder::Type::Multi, &sourceObject.get(),
-        source.range);
-    if (!decoder) {
-      ReportOutOfMemory(cx);
-      return;
+    JS::DecodeOptions decodeOptions(options);
+    RefPtr<JS::Stencil> stencil;
+    if (JS::DecodeStencil(cx, decodeOptions, source.range,
+                          getter_AddRefs(stencil)) != JS::TranscodeResult::Ok) {
+      break;
     }
 
-    mozilla::DebugOnly<XDRResult> res = decoder->codeScript(&resultScript);
-    MOZ_ASSERT(bool(resultScript) == static_cast<const XDRResult&>(res).isOk());
-
-    if (sourceObject) {
-      sourceObjects.infallibleAppend(sourceObject);
-    }
-
-    if (resultScript) {
-      scripts.infallibleAppend(resultScript);
+    if (stencil) {
+      stencils.infallibleEmplaceBack(stencil.forget());
     } else {
       // If any decodes fail, don't process the rest. We likely are hitting OOM.
       break;
@@ -1300,9 +1263,6 @@ JS::OffThreadToken* js::StartOffThreadDecodeScript(
     JSContext* cx, const ReadOnlyCompileOptions& options,
     const JS::TranscodeRange& range, JS::OffThreadCompileCallback callback,
     void* callbackData) {
-  // XDR data must be Stencil format, or a parse-global must be available.
-  MOZ_RELEASE_ASSERT(options.useStencilXDR || options.useOffThreadParseGlobal);
-
   auto task =
       cx->make_unique<ScriptDecodeTask>(cx, range, callback, callbackData);
   if (!task) {
@@ -1312,25 +1272,17 @@ JS::OffThreadToken* js::StartOffThreadDecodeScript(
   return StartOffThreadParseTask(cx, std::move(task), options);
 }
 
-JS::OffThreadToken* js::StartOffThreadDecodeMultiScripts(
+JS::OffThreadToken* js::StartOffThreadDecodeMultiStencils(
     JSContext* cx, const ReadOnlyCompileOptions& options,
     JS::TranscodeSources& sources, JS::OffThreadCompileCallback callback,
     void* callbackData) {
-  auto task = cx->make_unique<MultiScriptsDecodeTask>(cx, sources, callback,
-                                                      callbackData);
+  auto task = cx->make_unique<MultiStencilsDecodeTask>(cx, sources, callback,
+                                                       callbackData);
   if (!task) {
     return nullptr;
   }
 
-  // NOTE: All uses of DecodeMulti are currently generated by non-incremental
-  //       XDR and therefore do not support the stencil format. As a result,
-  //       they must continue to use the off-thread-parse-global in order to
-  //       decode.
-  CompileOptions optionsCopy(cx, options);
-  optionsCopy.useStencilXDR = false;
-  optionsCopy.useOffThreadParseGlobal = true;
-
-  return StartOffThreadParseTask(cx, std::move(task), optionsCopy);
+  return StartOffThreadParseTask(cx, std::move(task), options);
 }
 
 void js::EnqueuePendingParseTasksAfterGC(JSRuntime* rt) {
@@ -2114,7 +2066,8 @@ UniquePtr<ParseTask> GlobalHelperThreadState::finishParseTaskCommon(
     for (auto& sourceObject : parseTask->sourceObjects) {
       RootedScriptSourceObject sso(cx, sourceObject);
 
-      if (!ScriptSourceObject::initFromOptions(cx, sso, parseTask->options)) {
+      const JS::InstantiateOptions instantiateOptions(parseTask->options);
+      if (!ScriptSourceObject::initFromOptions(cx, sso, instantiateOptions)) {
         return nullptr;
       }
 
@@ -2239,9 +2192,8 @@ JSScript* GlobalHelperThreadState::finishSingleParseTask(
 
     // The Debugger only needs to be told about the topmost script that was
     // compiled.
-    if (!parseTask->options.hideFromNewScriptInitial()) {
-      DebugAPI::onNewScript(cx, script);
-    }
+    const JS::InstantiateOptions instantiateOptions(parseTask->options);
+    frontend::FireOnNewScript(cx, instantiateOptions, script);
   } else {
     MOZ_ASSERT(parseTask->stencil_.get() ||
                parseTask->extensibleStencil_.get());
@@ -2256,8 +2208,6 @@ JSScript* GlobalHelperThreadState::finishSingleParseTask(
 
   // Start the incremental-XDR encoder.
   if (startEncoding == StartEncoding::Yes) {
-    MOZ_DIAGNOSTIC_ASSERT(parseTask->options.useStencilXDR);
-
     if (parseTask->stencil_) {
       auto initial = js::MakeUnique<frontend::ExtensibleCompilationStencil>(
           cx, *parseTask->stencilInput_);
@@ -2270,13 +2220,12 @@ JSScript* GlobalHelperThreadState::finishSingleParseTask(
       }
 
       if (!script->scriptSource()->startIncrementalEncoding(
-              cx, parseTask->options, std::move(initial))) {
+              cx, std::move(initial))) {
         return nullptr;
       }
     } else if (parseTask->extensibleStencil_) {
       if (!script->scriptSource()->startIncrementalEncoding(
-              cx, parseTask->options,
-              std::move(parseTask->extensibleStencil_))) {
+              cx, std::move(parseTask->extensibleStencil_))) {
         return nullptr;
       }
     }
@@ -2313,44 +2262,33 @@ GlobalHelperThreadState::finishCompileToStencilTask(JSContext* cx,
 
 bool GlobalHelperThreadState::finishMultiParseTask(
     JSContext* cx, ParseTaskKind kind, JS::OffThreadToken* token,
-    MutableHandle<ScriptVector> scripts) {
+    mozilla::Vector<RefPtr<JS::Stencil>>* stencils) {
+  MOZ_ASSERT(stencils);
   Rooted<UniquePtr<ParseTask>> parseTask(
       cx, finishParseTaskCommon(cx, kind, token));
   if (!parseTask) {
     return false;
   }
 
-  MOZ_ASSERT(parseTask->kind == ParseTaskKind::MultiScriptsDecode);
-  auto task = static_cast<MultiScriptsDecodeTask*>(parseTask.get().get());
+  MOZ_ASSERT(parseTask->kind == ParseTaskKind::MultiStencilsDecode);
+  auto task = static_cast<MultiStencilsDecodeTask*>(parseTask.get().get());
   size_t expectedLength = task->sources->length();
 
-  if (!scripts.reserve(parseTask->scripts.length())) {
+  if (!stencils->reserve(parseTask->stencils.length())) {
     ReportOutOfMemory(cx);
     return false;
   }
 
-  for (auto& script : parseTask->scripts) {
-    scripts.infallibleAppend(script);
+  for (auto& stencil : parseTask->stencils) {
+    stencils->infallibleEmplaceBack(stencil.forget());
   }
 
-  if (scripts.length() != expectedLength) {
-    // No error was reported, but fewer scripts produced than expected.
+  if (stencils->length() != expectedLength) {
+    // No error was reported, but fewer stencils produced than expected.
     // Assume we hit out of memory.
-    MOZ_ASSERT(false, "Expected more scripts");
+    MOZ_ASSERT(false, "Expected more stencils");
     ReportOutOfMemory(cx);
     return false;
-  }
-
-  // The Debugger only needs to be told about the topmost scripts that were
-  // compiled.
-  if (!parseTask->options.hideFromNewScriptInitial()) {
-    JS::RootedScript rooted(cx);
-    for (auto& script : scripts) {
-      MOZ_ASSERT(script->isGlobalCode());
-
-      rooted = script;
-      DebugAPI::onNewScript(cx, rooted);
-    }
   }
 
   return true;
@@ -2379,11 +2317,11 @@ JSScript* GlobalHelperThreadState::finishScriptDecodeTask(
   return script;
 }
 
-bool GlobalHelperThreadState::finishMultiScriptsDecodeTask(
+bool GlobalHelperThreadState::finishMultiStencilsDecodeTask(
     JSContext* cx, JS::OffThreadToken* token,
-    MutableHandle<ScriptVector> scripts) {
-  return finishMultiParseTask(cx, ParseTaskKind::MultiScriptsDecode, token,
-                              scripts);
+    mozilla::Vector<RefPtr<JS::Stencil>>* stencils) {
+  return finishMultiParseTask(cx, ParseTaskKind::MultiStencilsDecode, token,
+                              stencils);
 }
 
 JSObject* GlobalHelperThreadState::finishModuleParseTask(

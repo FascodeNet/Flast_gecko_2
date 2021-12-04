@@ -927,6 +927,10 @@ class Field extends _pdf_object.PDFObject {
     return false;
   }
 
+  _reset() {
+    this.value = this.valueAsString = this.defaultValue;
+  }
+
   _runActions(event) {
     const eventName = event.name;
 
@@ -2435,7 +2439,37 @@ class App extends _pdf_object.PDFObject {
 
   execDialog() {}
 
-  execMenuItem() {}
+  execMenuItem(item) {
+    switch (item) {
+      case "SaveAs":
+      case "FirstPage":
+      case "LastPage":
+      case "NextPage":
+      case "PrevPage":
+      case "ZoomViewIn":
+      case "ZoomViewOut":
+        this._send({
+          command: item
+        });
+
+        break;
+
+      case "FitPage":
+        this._send({
+          command: "zoom",
+          value: "page-fit"
+        });
+
+        break;
+
+      case "Print":
+        this._send({
+          command: "print"
+        });
+
+        break;
+    }
+  }
 
   getNthPlugInName() {}
 
@@ -2613,6 +2647,14 @@ class EventDispatcher {
         this._document.obj._dispatchDocEvent(event.name);
       } else if (id === "page") {
         this._document.obj._dispatchPageEvent(event.name, baseEvent.actions, baseEvent.pageNumber);
+      } else if (id === "app" && baseEvent.name === "ResetForm") {
+        for (const fieldId of baseEvent.ids) {
+          const obj = this._objects[fieldId];
+
+          if (obj) {
+            obj.obj._reset();
+          }
+        }
       }
 
       return;
@@ -4902,8 +4944,8 @@ Object.defineProperty(exports, "initSandbox", ({
 
 var _initialization = __w_pdfjs_require__(1);
 
-const pdfjsVersion = '2.11.243';
-const pdfjsBuild = '7fb653b19';
+const pdfjsVersion = '2.12.69';
+const pdfjsBuild = 'e788665a2';
 })();
 
 /******/ 	return __webpack_exports__;

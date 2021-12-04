@@ -37,6 +37,8 @@ namespace mozilla {
 class nsDisplayItem;
 class nsPaintedDisplayItem;
 class nsDisplayTransform;
+class nsDisplayListBuilder;
+struct DisplayItemClipChain;
 
 struct ActiveScrolledRoot;
 
@@ -119,9 +121,9 @@ class TransactionBuilder final {
 
   void ClearDisplayList(Epoch aEpoch, wr::WrPipelineId aPipeline);
 
-  void GenerateFrame(const VsyncId& aVsyncId);
+  void GenerateFrame(const VsyncId& aVsyncId, wr::RenderReasons aReasons);
 
-  void InvalidateRenderedFrame();
+  void InvalidateRenderedFrame(wr::RenderReasons aReasons);
 
   void SetDocumentView(const LayoutDeviceIntRect& aDocRect);
 
@@ -140,7 +142,7 @@ class TransactionBuilder final {
                 wr::Vec<uint8_t>& aBytes);
 
   void AddBlobImage(wr::BlobImageKey aKey, const ImageDescriptor& aDescriptor,
-                    wr::Vec<uint8_t>& aBytes,
+                    uint16_t aTileSize, wr::Vec<uint8_t>& aBytes,
                     const wr::DeviceIntRect& aVisibleRect);
 
   void AddExternalImageBuffer(ImageKey key, const ImageDescriptor& aDescriptor,
@@ -263,8 +265,8 @@ class WebRenderAPI final {
 
   void ClearAllCaches();
   void EnableNativeCompositor(bool aEnable);
-  void EnableMultithreading(bool aEnable);
   void SetBatchingLookback(uint32_t aCount);
+  void SetBool(wr::BoolParameter, bool value);
 
   void SetClearColor(const gfx::DeviceColor& aColor);
   void SetProfilerUI(const nsCString& aUIString);
@@ -684,6 +686,25 @@ class DisplayListBuilder final {
     mClipChainLeaf = aClipRect;
   }
 
+  // Used for opacity flattening. When we flatten away an opacity item,
+  // we push the opacity value onto the builder.
+  // Descendant items should pull the inherited opacity during
+  // their CreateWebRenderCommands implementation. This can only happen if all
+  // descendant items reported supporting this functionality, via
+  // nsDisplayItem::CanApplyOpacity.
+  float GetInheritedOpacity() { return mInheritedOpacity; }
+  void SetInheritedOpacity(float aOpacity) { mInheritedOpacity = aOpacity; }
+  const DisplayItemClipChain* GetInheritedClipChain() {
+    return mInheritedClipChain;
+  }
+  void PushInheritedClipChain(nsDisplayListBuilder* aBuilder,
+                              const DisplayItemClipChain* aClipChain);
+  void SetInheritedClipChain(const DisplayItemClipChain* aClipChain) {
+    mInheritedClipChain = aClipChain;
+  }
+
+  layers::DisplayItemCache* GetDisplayItemCache() { return mDisplayItemCache; }
+
   // A chain of RAII objects, each holding a (ASR, ViewID, SideBits) tuple of
   // data. The topmost object is pointed to by the mActiveFixedPosTracker
   // pointer in the wr::DisplayListBuilder.
@@ -750,6 +771,8 @@ class DisplayListBuilder final {
 
   layers::DisplayItemCache* mDisplayItemCache;
   Maybe<uint16_t> mCurrentCacheSlot;
+  float mInheritedOpacity = 1.0f;
+  const DisplayItemClipChain* mInheritedClipChain = nullptr;
 
   friend class WebRenderAPI;
   friend class SpaceAndClipChainHelper;

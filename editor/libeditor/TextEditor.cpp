@@ -269,6 +269,27 @@ nsresult TextEditor::HandleKeyPressEvent(WidgetKeyboardEvent* aKeyboardEvent) {
   return rv;
 }
 
+NS_IMETHODIMP TextEditor::InsertLineBreak() {
+  AutoEditActionDataSetter editActionData(*this, EditAction::eInsertLineBreak);
+  nsresult rv = editActionData.CanHandleAndMaybeDispatchBeforeInputEvent();
+  if (NS_FAILED(rv)) {
+    NS_WARNING_ASSERTION(rv == NS_ERROR_EDITOR_ACTION_CANCELED,
+                         "CanHandleAndMaybeDispatchBeforeInputEvent() failed");
+    return EditorBase::ToGenericNSResult(rv);
+  }
+
+  if (NS_WARN_IF(IsSingleLineEditor())) {
+    return NS_ERROR_FAILURE;
+  }
+
+  AutoPlaceholderBatch treatAsOneTransaction(*this,
+                                             ScrollSelectionIntoView::Yes);
+  rv = InsertLineBreakAsSubAction();
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "TextEditor::InsertLineBreakAsSubAction() failed");
+  return EditorBase::ToGenericNSResult(rv);
+}
+
 nsresult TextEditor::InsertLineBreakAsAction(nsIPrincipal* aPrincipal) {
   AutoEditActionDataSetter editActionData(*this, EditAction::eInsertLineBreak,
                                           aPrincipal);
@@ -558,11 +579,7 @@ nsresult TextEditor::InsertWithQuotationsAsSubAction(
 
   // Let the citer quote it for us:
   nsString quotedStuff;
-  nsresult rv = InternetCiter::GetCiteString(aQuotedText, quotedStuff);
-  if (NS_FAILED(rv)) {
-    NS_WARNING("InternetCiter::GetCiteString() failed");
-    return rv;
-  }
+  InternetCiter::GetCiteString(aQuotedText, quotedStuff);
 
   // It's best to put a blank line after the quoted text so that mails
   // written without thinking won't be so ugly.
@@ -584,7 +601,7 @@ nsresult TextEditor::InsertWithQuotationsAsSubAction(
   //     also in single line editor)?
   MaybeDoAutoPasswordMasking();
 
-  rv = InsertTextAsSubAction(quotedStuff, SelectionHandling::Delete);
+  nsresult rv = InsertTextAsSubAction(quotedStuff, SelectionHandling::Delete);
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                        "EditorBase::InsertTextAsSubAction() failed");
   return rv;

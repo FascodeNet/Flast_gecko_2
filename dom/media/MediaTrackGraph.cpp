@@ -432,13 +432,9 @@ bool MediaTrackGraphImpl::AudioTrackPresent() {
     }
   }
 
-  // XXX For some reason, there are race conditions when starting an audio input
-  // where we find no active audio tracks.  In any case, if we have an active
-  // audio input we should not allow a switch back to a SystemClockDriver
-  if (!audioTrackPresent && mDeviceTrackMap.Count() != 0) {
-    NS_WARNING("No audio tracks, but full-duplex audio is enabled!!!!!");
-    audioTrackPresent = true;
-  }
+  // We may not have audio input device when we only have AudioNodeTracks. But
+  // if audioTrackPresent is false, we must have no input device.
+  MOZ_DIAGNOSTIC_ASSERT_IF(!audioTrackPresent, mDeviceTrackMap.Count() == 0);
 
   return audioTrackPresent;
 }
@@ -839,6 +835,8 @@ void MediaTrackGraphImpl::OpenAudioInputImpl(CubebUtils::AudioDeviceID aID,
         ("%p OpenAudioInput: starting new AudioCallbackDriver(input) %p", this,
          driver));
     SwitchAtNextIteration(driver);
+  } else {
+    ReevaluateInputDevice();
   }
 }
 
@@ -916,6 +914,7 @@ void MediaTrackGraphImpl::CloseAudioInputImpl(CubebUtils::AudioDeviceID aID,
     LOG(LogLevel::Debug,
         ("%p NativeInputTrack %p for device %p still has consumer", this, track,
          aID));
+    ReevaluateInputDevice();
     return;
   }
 

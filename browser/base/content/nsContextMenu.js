@@ -133,7 +133,7 @@ class nsContextMenu {
         onEditable: this.onEditable,
         onSpellcheckable: this.onSpellcheckable,
         onPassword: this.onPassword,
-        srcUrl: this.mediaURL,
+        srcUrl: this.originalMediaURL,
         frameUrl: this.contentData ? this.contentData.docLocation : undefined,
         pageUrl: this.browser ? this.browser.currentURI.spec : undefined,
         linkText: this.linkTextStr,
@@ -188,6 +188,7 @@ class nsContextMenu {
     this.imageDescURL = context.imageDescURL;
     this.imageInfo = context.imageInfo;
     this.mediaURL = context.mediaURL || context.bgImageURL;
+    this.originalMediaURL = context.originalMediaURL || this.mediaURL;
     this.webExtBrowserType = context.webExtBrowserType;
 
     this.canSpellCheck = context.canSpellCheck;
@@ -285,7 +286,7 @@ class nsContextMenu {
     }
 
     if (this.contentData.spellInfo) {
-      this.spellSuggesions = this.contentData.spellInfo.spellSuggestions;
+      this.spellSuggestions = this.contentData.spellInfo.spellSuggestions;
     }
 
     if (context.shouldInitInlineSpellCheckerUIWithChildren) {
@@ -775,7 +776,7 @@ class nsContextMenu {
       var numsug = InlineSpellCheckerUI.addSuggestionsToMenu(
         suggestionsSeparator.parentNode,
         suggestionsSeparator,
-        this.spellSuggesions
+        this.spellSuggestions
       );
       this.showItem("spell-no-suggestions", numsug == 0);
     } else {
@@ -1300,7 +1301,11 @@ class nsContextMenu {
     if (SCREENSHOT_BROWSER_COMPONENT) {
       Services.obs.notifyObservers(window, "menuitem-screenshot", true);
     } else {
-      Services.obs.notifyObservers(null, "menuitem-screenshot-extension", true);
+      Services.obs.notifyObservers(
+        null,
+        "menuitem-screenshot-extension",
+        "contextMenu"
+      );
     }
   }
 
@@ -2098,7 +2103,7 @@ class nsContextMenu {
     var clipboard = Cc["@mozilla.org/widget/clipboardhelper;1"].getService(
       Ci.nsIClipboardHelper
     );
-    clipboard.copyString(this.mediaURL);
+    clipboard.copyString(this.originalMediaURL);
   }
 
   drmLearnMore(aEvent) {
@@ -2112,13 +2117,6 @@ class nsContextMenu {
       dest = "tab";
     }
     openTrustedLinkIn(drmInfoURL, dest);
-  }
-
-  get imageURL() {
-    if (this.onImage) {
-      return this.mediaURL;
-    }
-    return "";
   }
 
   // Formats the 'Search <engine> for "<selection or link text>"' context menu.

@@ -126,8 +126,9 @@ bool mozilla::fallocate(PRFileDesc* aFD, int64_t aLength) {
 
   PR_Seek64(aFD, oldpos, PR_SEEK_SET);
   return nWrite == 1;
-#  endif
+#  else
   return false;
+#  endif
 }
 
 void mozilla::ReadAheadLib(nsIFile* aFile) {
@@ -274,6 +275,9 @@ class ScopedMMap {
     }
     size = st.st_size;
     buf = (char*)mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (buf == MAP_FAILED) {
+      buf = nullptr;
+    }
   }
   ~ScopedMMap() {
     if (buf) {

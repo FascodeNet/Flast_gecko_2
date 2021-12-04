@@ -61,6 +61,10 @@ impl Streams {
         }
     }
 
+    pub fn is_stream_id_allowed(&self, stream_id: StreamId) -> bool {
+        self.remote_stream_limits[stream_id.stream_type()].is_allowed(stream_id)
+    }
+
     pub fn zero_rtt_rejected(&mut self) {
         self.send.clear();
         self.recv.clear();
@@ -230,7 +234,7 @@ impl Streams {
 
     pub fn lost(&mut self, token: &StreamRecoveryToken) {
         match token {
-            StreamRecoveryToken::Stream(st) => self.send.lost(&st),
+            StreamRecoveryToken::Stream(st) => self.send.lost(st),
             StreamRecoveryToken::ResetStream { stream_id } => self.send.reset_lost(*stream_id),
             StreamRecoveryToken::StreamDataBlocked { stream_id, limit } => {
                 self.send.blocked_lost(*stream_id, *limit)

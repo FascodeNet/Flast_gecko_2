@@ -13,13 +13,14 @@ const MAX_ORDINAL = 99;
 const SPLITCONSOLE_ENABLED_PREF = "devtools.toolbox.splitconsoleEnabled";
 const SPLITCONSOLE_HEIGHT_PREF = "devtools.toolbox.splitconsoleHeight";
 const DISABLE_AUTOHIDE_PREF = "ui.popup.disable_autohide";
+const FORCE_THEME_NOTIFICATION_PREF = "devtools.theme.force-auto-theme-info";
+const SHOW_THEME_NOTIFICATION_PREF = "devtools.theme.show-auto-theme-info";
 const HOST_HISTOGRAM = "DEVTOOLS_TOOLBOX_HOST";
 const CURRENT_THEME_SCALAR = "devtools.current_theme";
 const HTML_NS = "http://www.w3.org/1999/xhtml";
 const REGEX_4XX_5XX = /^[4,5]\d\d$/;
 
 var { Ci, Cc } = require("chrome");
-var promise = require("promise");
 const { debounce } = require("devtools/shared/debounce");
 const { throttle } = require("devtools/shared/throttle");
 const { safeAsyncMethod } = require("devtools/shared/async-utils");
@@ -42,9 +43,10 @@ const { BrowserLoader } = ChromeUtils.import(
   "resource://devtools/client/shared/browser-loader.js"
 );
 
-const { LocalizationHelper } = require("devtools/shared/l10n");
-const L10N = new LocalizationHelper(
-  "devtools/client/locales/toolbox.properties"
+const { MultiLocalizationHelper } = require("devtools/shared/l10n");
+const L10N = new MultiLocalizationHelper(
+  "devtools/client/locales/toolbox.properties",
+  "chrome://branding/locale/brand.properties"
 );
 
 loader.lazyRequireGetter(
@@ -317,7 +319,6 @@ function Toolbox(
   this.toggleSplitConsole = this.toggleSplitConsole.bind(this);
   this.toggleOptions = this.toggleOptions.bind(this);
   this.togglePaintFlashing = this.togglePaintFlashing.bind(this);
-  this.toggleDragging = this.toggleDragging.bind(this);
   this._onTargetAvailable = this._onTargetAvailable.bind(this);
   this._onTargetDestroyed = this._onTargetDestroyed.bind(this);
   this._onResourceAvailable = this._onResourceAvailable.bind(this);
@@ -521,10 +522,6 @@ Toolbox.prototype = {
     return this._toolPanels.get(this.currentToolId);
   },
 
-  toggleDragging: function() {
-    this.doc.querySelector("window").classList.toggle("dragging");
-  },
-
   /**
    * Get the current top level target the toolbox is debugging.
    *
@@ -696,7 +693,8 @@ Toolbox.prototype = {
       // Attach to a new top-level target.
       // For now, register these event listeners only on the top level target
       targetFront.on("frame-update", this._updateFrames);
-      targetFront.on("inspect-object", this._onInspectObject);
+      const consoleFront = await targetFront.getFront("console");
+      consoleFront.on("inspectObject", this._onInspectObject);
     }
 
     // Walker listeners allow to monitor DOM Mutation breakpoint updates.
@@ -713,14 +711,27 @@ Toolbox.prototype = {
       // These methods expect the target to be attached, which is guaranteed by the time
       // _onTargetAvailable is called by the targetCommand.
       await this._listFrames();
+      // The target may have been destroyed while calling _listFrames if we navigate quickly
+      if (targetFront.isDestroyed()) {
+        return;
+      }
       await this.initPerformance();
     }
   },
 
   _onTargetDestroyed({ targetFront }) {
     if (targetFront.isTopLevel) {
-      this.target.off("inspect-object", this._onInspectObject);
-      this.target.off("frame-update", this._updateFrames);
+      const consoleFront = targetFront.getCachedFront("console");
+      // If the target has already been destroyed, its console front will
+      // also already be destroyed and so we won't be able to retrieve it.
+      // Nor is it important to clear its listener as fronts automatically clears
+      // all their listeners on destroy.
+      if (consoleFront) {
+        consoleFront.off("inspectObject", this._onInspectObject);
+      }
+      targetFront.off("frame-update", this._updateFrames);
+    } else if (this.selection) {
+      this.selection.onTargetDestroyed(targetFront);
     }
 
     if (this.hostType !== Toolbox.HostType.PAGE) {
@@ -735,6 +746,58 @@ Toolbox.prototype = {
       "wrong-resume-order",
       "",
       box.PRIORITY_WARNING_HIGH
+    );
+  },
+
+  _showAutoThemeNotification() {
+    // Skip the notification when:
+    if (
+      // - Firefox is not using a dark color scheme.
+      !Services.appinfo.chromeColorSchemeIsDark &&
+      // - The test preference to bypasse the dark-color-scheme check is false.
+      !Services.prefs.getBoolPref(FORCE_THEME_NOTIFICATION_PREF, false)
+    ) {
+      return;
+    }
+
+    // Only show the notification for users with the auto theme.
+    if (Services.prefs.getCharPref("devtools.theme") !== "auto") {
+      return;
+    }
+
+    // Do not show the notification again if it was previously dismissed.
+    if (!Services.prefs.getBoolPref(SHOW_THEME_NOTIFICATION_PREF, false)) {
+      return;
+    }
+
+    // Show the notification.
+    const box = this.getNotificationBox();
+    const brandShorterName = Services.strings
+      .createBundle("chrome://branding/locale/brand.properties")
+      .GetStringFromName("brandShorterName");
+
+    box.appendNotification(
+      L10N.getFormatStr("toolbox.autoThemeNotification", brandShorterName),
+      "auto-theme-notification",
+      "",
+      box.PRIORITY_NEW,
+      [
+        {
+          label: L10N.getStr("toolbox.autoThemeNotification.settingsButton"),
+          callback: async () => {
+            const { panelDoc } = await this.selectTool("options");
+            panelDoc.querySelector("#devtools-theme-box").scrollIntoView();
+            // Emit a test event to avoid unhandled promise rejections in tests.
+            this.emitForTests("test-theme-settings-opened");
+          },
+        },
+      ],
+      evt => {
+        if (evt === "removed") {
+          // Flip the preference when the notification is dismissed.
+          Services.prefs.setBoolPref(SHOW_THEME_NOTIFICATION_PREF, false);
+        }
+      }
     );
   },
 
@@ -844,8 +907,12 @@ Toolbox.prototype = {
       this._mountReactComponent();
       this._buildDockOptions();
       this._buildTabs();
+
+      // Forward configuration flags to the DevTools server.
       this._applyCacheSettings();
       this._applyServiceWorkersTestingSettings();
+      this._applyNewPerfPanelEnabled();
+
       this._addWindowListeners();
       this._addChromeEventHandlerEvents();
 
@@ -904,7 +971,7 @@ Toolbox.prototype = {
 
       // Wait until the original tool is selected so that the split
       // console input will receive focus.
-      let splitConsolePromise = promise.resolve();
+      let splitConsolePromise = Promise.resolve();
       if (Services.prefs.getBoolPref(SPLITCONSOLE_ENABLED_PREF)) {
         splitConsolePromise = this.openSplitConsole();
         this.telemetry.addEventProperty(
@@ -926,7 +993,7 @@ Toolbox.prototype = {
         );
       }
 
-      await promise.all([
+      await Promise.all([
         splitConsolePromise,
         framesPromise,
         onResourcesWatched,
@@ -955,6 +1022,8 @@ Toolbox.prototype = {
       }
 
       await this.initHarAutomation();
+
+      this._showAutoThemeNotification();
 
       this.emit("ready");
       this._resolveIsOpen();
@@ -2097,6 +2166,23 @@ Toolbox.prototype = {
   },
 
   /**
+   * When the new performance panel is enabled, the profiler and recorder will
+   * not react to console.profile calls. The server should instead log a message
+   * to warn the user that the API has no effect.
+   *
+   * Forward the value of the new perf panel preference so that the server can
+   * decide to warn or not.
+   */
+  _applyNewPerfPanelEnabled: function() {
+    this.commands.targetConfigurationCommand.updateConfiguration({
+      isNewPerfPanelEnabled: Services.prefs.getBoolPref(
+        "devtools.performance.new-panel-enabled",
+        false
+      ),
+    });
+  },
+
+  /**
    * Update the visibility of the buttons.
    */
   updateToolboxButtonsVisibility() {
@@ -2520,7 +2606,7 @@ Toolbox.prototype = {
         }
 
         // Wait till the panel is fully ready and fire 'ready' events.
-        promise.resolve(built).then(panel => {
+        Promise.resolve(built).then(panel => {
           this._toolPanels.set(id, panel);
 
           // Make sure to decorate panel object with event API also in case
@@ -2661,12 +2747,12 @@ Toolbox.prototype = {
         this.focusTool(id);
 
         // Return the existing panel in order to have a consistent return value.
-        return promise.resolve(panel);
+        return Promise.resolve(panel);
       }
       // Otherwise, if there is no panel instance, it is still loading,
       // so we are racing another call to selectTool with the same id.
       return this.once("select").then(() =>
-        promise.resolve(this._toolPanels.get(id))
+        Promise.resolve(this._toolPanels.get(id))
       );
     }
 
@@ -2884,7 +2970,7 @@ Toolbox.prototype = {
     if (this._lastFocusedElement) {
       this._lastFocusedElement.focus();
     }
-    return promise.resolve();
+    return Promise.resolve();
   },
 
   /**
@@ -2901,7 +2987,7 @@ Toolbox.prototype = {
         : this.openSplitConsole();
     }
 
-    return promise.resolve();
+    return Promise.resolve();
   },
 
   /**
@@ -3127,9 +3213,9 @@ Toolbox.prototype = {
 
   _listFrames: async function(event) {
     if (!this.target.getTrait("frames")) {
-      // We are not targetting a regular BrowsingContextTargetActor
+      // We are not targetting a regular WindowGlobalTargetActor
       // it can be either an addon or browser toolbox actor
-      return promise.resolve();
+      return Promise.resolve();
     }
 
     try {
@@ -3222,7 +3308,10 @@ Toolbox.prototype = {
     if (!this.debouncedToolbarUpdate) {
       this.debouncedToolbarUpdate = debounce(
         () => {
-          this.component.setToolboxButtons(this.toolbarButtons);
+          // Toolbox may have been destroyed in the meantime
+          if (this.component) {
+            this.component.setToolboxButtons(this.toolbarButtons);
+          }
           this.debouncedToolbarUpdate = null;
         },
         200,
@@ -3586,10 +3675,6 @@ Toolbox.prototype = {
     }
   },
 
-  _onInspectObject: function(packet) {
-    this.inspectObjectActor(packet.objectActor, packet.inspectFromAnnotation);
-  },
-
   _onToolSelected: function() {
     this._refreshHostTitle();
 
@@ -3599,6 +3684,13 @@ Toolbox.prototype = {
 
     // Calling setToolboxButtons in case the visibility of a button changed.
     this.component.setToolboxButtons(this.toolbarButtons);
+  },
+
+  /**
+   * Listener for "inspectObject" event on console top level target actor.
+   */
+  _onInspectObject(packet) {
+    this.inspectObjectActor(packet.objectActor, packet.inspectFromAnnotation);
   },
 
   inspectObjectActor: async function(objectActor, inspectFromAnnotation) {
@@ -3727,12 +3819,9 @@ Toolbox.prototype = {
         this._onToolbarArrowKeypress
       );
       this.ReactDOM.unmountComponentAtNode(this._componentMount);
+      this.component = null;
       this._componentMount = null;
       this._tabBar = null;
-    }
-    if (this._nodePicker) {
-      this._nodePicker.stop();
-      this._nodePicker = null;
     }
     this.destroyHarAutomation();
 
@@ -3808,6 +3897,12 @@ Toolbox.prototype = {
         settleAll(outstanding)
           .catch(console.error)
           .then(async () => {
+            // Destroy the node picker *after* destroying the panel,
+            // which may still try to access it. (And might spawn a new one)
+            if (this._nodePicker) {
+              this._nodePicker.destroy();
+              this._nodePicker = null;
+            }
             this.selection.destroy();
             this.selection = null;
 
@@ -3824,6 +3919,8 @@ Toolbox.prototype = {
 
             this._removeWindowListeners();
             this._removeChromeEventHandlerEvents();
+
+            this._store = null;
 
             // Notify toolbox-host-manager that the host can be destroyed.
             this.emit("toolbox-unload");
@@ -3848,6 +3945,9 @@ Toolbox.prototype = {
             this._host = null;
             this._win = null;
             this._toolPanels.clear();
+            this.descriptorFront = null;
+            this.resourceCommand = null;
+            this.commands = null;
 
             // Force GC to prevent long GC pauses when running tests and to free up
             // memory in general when the toolbox is closed.

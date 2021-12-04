@@ -8,8 +8,8 @@ const { ActorClassWithSpec } = require("devtools/shared/protocol");
 
 const Resources = require("devtools/server/actors/resources/index");
 const {
-  WatchedDataHelpers,
-} = require("devtools/server/actors/watcher/WatchedDataHelpers.jsm");
+  SessionDataHelpers,
+} = require("devtools/server/actors/watcher/SessionDataHelpers.jsm");
 const { STATES: THREAD_STATES } = require("devtools/server/actors/thread");
 const {
   RESOURCES,
@@ -17,7 +17,8 @@ const {
   TARGET_CONFIGURATION,
   THREAD_CONFIGURATION,
   XHR_BREAKPOINTS,
-} = WatchedDataHelpers.SUPPORTED_DATA;
+  EVENT_BREAKPOINTS,
+} = SessionDataHelpers.SUPPORTED_DATA;
 
 loader.lazyRequireGetter(
   this,
@@ -45,7 +46,8 @@ module.exports = function(targetType, targetActorSpec, implementation) {
      *        Set to true if this function is called just after a new document (and its
      *        associated target) is created.
      */
-    async addWatcherDataEntry(type, entries, isDocumentCreation = false) {
+    // eslint-disable-next-line complexity
+    async addSessionDataEntry(type, entries, isDocumentCreation = false) {
       if (type == RESOURCES) {
         await this._watchTargetResources(entries);
       } else if (type == BREAKPOINTS) {
@@ -60,13 +62,13 @@ module.exports = function(targetType, targetActorSpec, implementation) {
         const isTargetCreation =
           this.threadActor.state == THREAD_STATES.DETACHED;
         if (isTargetCreation && !this.targetType.endsWith("worker")) {
-          // If addWatcherDataEntry is called during target creation, attach the
+          // If addSessionDataEntry is called during target creation, attach the
           // thread actor automatically and pass the initial breakpoints.
           // However, do not attach the thread actor for Workers. They use a codepath
           // which releases the worker on `attach`. For them, the client will call `attach`. (bug 1691986)
           await this.threadActor.attach({ breakpoints: entries });
         } else {
-          // If addWatcherDataEntry is called for an existing target, set the new
+          // If addSessionDataEntry is called for an existing target, set the new
           // breakpoints on the already running thread actor.
           await Promise.all(
             entries.map(({ location, options }) =>
@@ -75,7 +77,7 @@ module.exports = function(targetType, targetActorSpec, implementation) {
           );
         }
       } else if (type == TARGET_CONFIGURATION) {
-        // Only BrowsingContextTargetActor implements updateTargetConfiguration,
+        // Only WindowGlobalTargetActor implements updateTargetConfiguration,
         // skip this data entry update for other targets.
         if (typeof this.updateTargetConfiguration == "function") {
           const options = {};
@@ -126,10 +128,24 @@ module.exports = function(targetType, targetActorSpec, implementation) {
             this.threadActor.setXHRBreakpoint(path, method)
           )
         );
+      } else if (type == EVENT_BREAKPOINTS) {
+        // Same as comments for XHR breakpoints. See lines 109-112
+        if (typeof this.attach == "function") {
+          this.attach();
+        }
+
+        // Same as comments for XHR breakpoints. See lines 117-118
+        if (
+          this.threadActor.state == THREAD_STATES.DETACHED &&
+          !this.targetType.endsWith("worker")
+        ) {
+          this.threadActor.attach();
+        }
+        await this.threadActor.setActiveEventBreakpoints(entries);
       }
     },
 
-    removeWatcherDataEntry(type, entries) {
+    removeSessionDataEntry(type, entries) {
       if (type == RESOURCES) {
         return this._unwatchTargetResources(entries);
       } else if (type == BREAKPOINTS) {
@@ -200,15 +216,6 @@ module.exports = function(targetType, targetActorSpec, implementation) {
       }
       return this._styleSheetManager;
     },
-
-    destroy() {
-      if (this._styleSheetManager) {
-        this._styleSheetManager.destroy();
-        this._styleSheetManager = null;
-      }
-
-      implementation.destroy.call(this);
-    },
   };
   // Use getOwnPropertyDescriptors in order to prevent calling getter from implementation
   Object.defineProperties(
@@ -222,6 +229,16 @@ module.exports = function(targetType, targetActorSpec, implementation) {
 
     if (typeof implementation.initialize == "function") {
       implementation.initialize.apply(this, arguments);
+    }
+  };
+  proto.destroy = function() {
+    if (this._styleSheetManager) {
+      this._styleSheetManager.destroy();
+      this._styleSheetManager = null;
+    }
+
+    if (typeof implementation.destroy == "function") {
+      implementation.destroy.apply(this, arguments);
     }
   };
   return ActorClassWithSpec(targetActorSpec, proto);

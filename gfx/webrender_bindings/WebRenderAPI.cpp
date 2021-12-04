@@ -276,12 +276,13 @@ void TransactionBuilder::ClearDisplayList(Epoch aEpoch,
   wr_transaction_clear_display_list(mTxn, aEpoch, aPipelineId);
 }
 
-void TransactionBuilder::GenerateFrame(const VsyncId& aVsyncId) {
-  wr_transaction_generate_frame(mTxn, aVsyncId.mId);
+void TransactionBuilder::GenerateFrame(const VsyncId& aVsyncId,
+                                       wr::RenderReasons aReasons) {
+  wr_transaction_generate_frame(mTxn, aVsyncId.mId, aReasons);
 }
 
-void TransactionBuilder::InvalidateRenderedFrame() {
-  wr_transaction_invalidate_rendered_frame(mTxn);
+void TransactionBuilder::InvalidateRenderedFrame(wr::RenderReasons aReasons) {
+  wr_transaction_invalidate_rendered_frame(mTxn, aReasons);
 }
 
 bool TransactionBuilder::IsEmpty() const {
@@ -565,12 +566,12 @@ void WebRenderAPI::EnableNativeCompositor(bool aEnable) {
   wr_api_enable_native_compositor(mDocHandle, aEnable);
 }
 
-void WebRenderAPI::EnableMultithreading(bool aEnable) {
-  wr_api_enable_multithreading(mDocHandle, aEnable);
-}
-
 void WebRenderAPI::SetBatchingLookback(uint32_t aCount) {
   wr_api_set_batching_lookback(mDocHandle, aCount);
+}
+
+void WebRenderAPI::SetBool(wr::BoolParameter aKey, bool aValue) {
+  wr_api_set_bool(mDocHandle, aKey, aValue);
 }
 
 void WebRenderAPI::SetClearColor(const gfx::DeviceColor& aColor) {
@@ -817,10 +818,11 @@ void TransactionBuilder::AddImage(ImageKey key,
 
 void TransactionBuilder::AddBlobImage(BlobImageKey key,
                                       const ImageDescriptor& aDescriptor,
+                                      uint16_t aTileSize,
                                       wr::Vec<uint8_t>& aBytes,
                                       const wr::DeviceIntRect& aVisibleRect) {
-  wr_resource_updates_add_blob_image(mTxn, key, &aDescriptor, &aBytes.inner,
-                                     aVisibleRect);
+  wr_resource_updates_add_blob_image(mTxn, key, &aDescriptor, aTileSize,
+                                     &aBytes.inner, aVisibleRect);
 }
 
 void TransactionBuilder::AddExternalImage(ImageKey key,
@@ -1656,6 +1658,20 @@ already_AddRefed<gfxContext> DisplayListBuilder::GetTextContext(
 
   RefPtr<gfxContext> tmp = mCachedContext;
   return tmp.forget();
+}
+
+void DisplayListBuilder::PushInheritedClipChain(
+    nsDisplayListBuilder* aBuilder, const DisplayItemClipChain* aClipChain) {
+  if (!aClipChain || mInheritedClipChain == aClipChain) {
+    return;
+  }
+  if (!mInheritedClipChain) {
+    mInheritedClipChain = aClipChain;
+    return;
+  }
+
+  mInheritedClipChain =
+      aBuilder->CreateClipChainIntersection(mInheritedClipChain, aClipChain);
 }
 
 }  // namespace wr

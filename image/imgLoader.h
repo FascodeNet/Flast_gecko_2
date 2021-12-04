@@ -83,8 +83,8 @@ class imgCacheEntry {
 
   void UpdateLoadTime();
 
-  int32_t GetExpiryTime() const { return mExpiryTime; }
-  void SetExpiryTime(int32_t aExpiryTime) {
+  uint32_t GetExpiryTime() const { return mExpiryTime; }
+  void SetExpiryTime(uint32_t aExpiryTime) {
     mExpiryTime = aExpiryTime;
     Touch();
   }
@@ -130,7 +130,7 @@ class imgCacheEntry {
   uint32_t mDataSize;
   int32_t mTouchedTime;
   uint32_t mLoadTime;
-  int32_t mExpiryTime;
+  uint32_t mExpiryTime;
   nsExpirationState mExpirationState;
   bool mMustValidate : 1;
   bool mEvicted : 1;
@@ -369,6 +369,12 @@ class imgLoader final : public imgILoader,
       imgRequestProxy** aProxyRequest, nsIPrincipal* aLoadingPrincipal,
       mozilla::CORSMode, bool aLinkPreload, bool* aNewChannelCreated);
 
+  void NotifyObserversForCachedImage(imgCacheEntry* aEntry, imgRequest* request,
+                                     nsIURI* aURI,
+                                     nsIReferrerInfo* aReferrerInfo,
+                                     mozilla::dom::Document* aLoadingDocument,
+                                     nsIPrincipal* aLoadingPrincipal,
+                                     mozilla::CORSMode);
   // aURI may be different from imgRequest's URI in the case of blob URIs, as we
   // can share requests with different URIs.
   nsresult CreateNewProxyForRequest(imgRequest* aRequest, nsIURI* aURI,

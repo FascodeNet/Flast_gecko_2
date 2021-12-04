@@ -140,6 +140,7 @@ EXPORTS += [
 
 EXPORTS.mozilla += [
     "BasicEvents.h",
+    "ColorScheme.h",
     "CommandList.h",
     "ContentCache.h",
     "ContentEvents.h",
@@ -174,6 +175,7 @@ EXPORTS.mozilla.widget += [
     "ScreenManager.h",
     "ThemeChangeKind.h",
     "WidgetMessageUtils.h",
+    "WindowOcclusionState.h",
 ]
 
 UNIFIED_SOURCES += [
@@ -198,6 +200,8 @@ UNIFIED_SOURCES += [
     "nsHTMLFormatConverter.cpp",
     "nsIWidgetListener.cpp",
     "nsNativeBasicTheme.cpp",
+    # Android non-native theme is built on all platforms for RDM.
+    "nsNativeBasicThemeAndroid.cpp",
     "nsPrimitiveHelpers.cpp",
     "nsPrintSettingsImpl.cpp",
     "nsSoundProxy.cpp",

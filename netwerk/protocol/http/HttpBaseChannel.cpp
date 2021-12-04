@@ -23,8 +23,10 @@
 #include "mozilla/DebugOnly.h"
 #include "mozilla/InputStreamLengthHelper.h"
 #include "mozilla/NullPrincipal.h"
+#include "mozilla/PermissionManager.h"
 #include "mozilla/Components.h"
 #include "mozilla/StaticPrefs_browser.h"
+#include "mozilla/StaticPrefs_fission.h"
 #include "mozilla/StaticPrefs_security.h"
 #include "mozilla/Telemetry.h"
 #include "mozilla/Tokenizer.h"
@@ -91,6 +93,7 @@
 #include "mozilla/RemoteLazyInputStreamUtils.h"
 #include "mozilla/net/SFVService.h"
 #include "mozilla/dom/ContentChild.h"
+#include "nsQueryObject.h"
 
 namespace mozilla {
 namespace net {
@@ -207,7 +210,8 @@ HttpBaseChannel::HttpBaseChannel()
       mCachedOpaqueResponseBlockingPref(
           StaticPrefs::browser_opaqueResponseBlocking()),
       mBlockOpaqueResponseAfterSniff(false),
-      mCheckIsOpaqueResponseAllowedAfterSniff(false) {
+      mCheckIsOpaqueResponseAllowedAfterSniff(false),
+      mDummyChannelForImageCache(false) {
   StoreApplyConversion(true);
   StoreAllowSTS(true);
   StoreTracingEnabled(true);
@@ -274,7 +278,6 @@ void HttpBaseChannel::ReleaseMainThreadOnlyReferences() {
 
   nsTArray<nsCOMPtr<nsISupports>> arrayToRelease;
   arrayToRelease.AppendElement(mLoadGroup.forget());
-  arrayToRelease.AppendElement(mLoadInfo.forget());
   arrayToRelease.AppendElement(mCallbacks.forget());
   arrayToRelease.AppendElement(mProgressSink.forget());
   arrayToRelease.AppendElement(mPrincipal.forget());
@@ -431,8 +434,7 @@ HttpBaseChannel::GetStatus(nsresult* aStatus) {
 NS_IMETHODIMP
 HttpBaseChannel::GetLoadGroup(nsILoadGroup** aLoadGroup) {
   NS_ENSURE_ARG_POINTER(aLoadGroup);
-  *aLoadGroup = mLoadGroup;
-  NS_IF_ADDREF(*aLoadGroup);
+  *aLoadGroup = do_AddRef(mLoadGroup).take();
   return NS_OK;
 }
 
@@ -539,8 +541,7 @@ HttpBaseChannel::GetURI(nsIURI** aURI) {
 NS_IMETHODIMP
 HttpBaseChannel::GetOwner(nsISupports** aOwner) {
   NS_ENSURE_ARG_POINTER(aOwner);
-  *aOwner = mOwner;
-  NS_IF_ADDREF(*aOwner);
+  *aOwner = do_AddRef(mOwner).take();
   return NS_OK;
 }
 
@@ -559,7 +560,7 @@ HttpBaseChannel::SetLoadInfo(nsILoadInfo* aLoadInfo) {
 
 NS_IMETHODIMP
 HttpBaseChannel::GetLoadInfo(nsILoadInfo** aLoadInfo) {
-  NS_IF_ADDREF(*aLoadInfo = mLoadInfo);
+  *aLoadInfo = do_AddRef(mLoadInfo).take();
   return NS_OK;
 }
 
@@ -570,8 +571,7 @@ HttpBaseChannel::GetIsDocument(bool* aIsDocument) {
 
 NS_IMETHODIMP
 HttpBaseChannel::GetNotificationCallbacks(nsIInterfaceRequestor** aCallbacks) {
-  *aCallbacks = mCallbacks;
-  NS_IF_ADDREF(*aCallbacks);
+  *aCallbacks = do_AddRef(mCallbacks).take();
   return NS_OK;
 }
 
@@ -608,7 +608,7 @@ HttpBaseChannel::GetContentType(nsACString& aContentType) {
 
 NS_IMETHODIMP
 HttpBaseChannel::SetContentType(const nsACString& aContentType) {
-  if (mListener || LoadWasOpened()) {
+  if (mListener || LoadWasOpened() || mDummyChannelForImageCache) {
     if (!mResponseHead) return NS_ERROR_NOT_AVAILABLE;
 
     nsAutoCString contentTypeBuf, charsetBuf;
@@ -756,8 +756,13 @@ HttpBaseChannel::GetContentLength(int64_t* aContentLength) {
 
 NS_IMETHODIMP
 HttpBaseChannel::SetContentLength(int64_t value) {
-  MOZ_ASSERT_UNREACHABLE("HttpBaseChannel::SetContentLength");
-  return NS_ERROR_NOT_IMPLEMENTED;
+  if (!mDummyChannelForImageCache) {
+    MOZ_ASSERT_UNREACHABLE("HttpBaseChannel::SetContentLength");
+    return NS_ERROR_NOT_IMPLEMENTED;
+  }
+  MOZ_ASSERT(mResponseHead);
+  mResponseHead->SetContentLength(value);
+  return NS_OK;
 }
 
 NS_IMETHODIMP
@@ -789,8 +794,7 @@ HttpBaseChannel::Open(nsIInputStream** aStream) {
 NS_IMETHODIMP
 HttpBaseChannel::GetUploadStream(nsIInputStream** stream) {
   NS_ENSURE_ARG_POINTER(stream);
-  *stream = mUploadStream;
-  NS_IF_ADDREF(*stream);
+  *stream = do_AddRef(mUploadStream).take();
   return NS_OK;
 }
 
@@ -1272,8 +1276,7 @@ HttpBaseChannel::DoApplyContentConversions(nsIStreamListener* aNextListener,
       if (val) LOG(("Unknown content encoding '%s', ignoring\n", val));
     }
   }
-  *aNewNextListener = nextListener;
-  NS_IF_ADDREF(*aNewNextListener);
+  *aNewNextListener = do_AddRef(nextListener).take();
   return NS_OK;
 }
 
@@ -2116,15 +2119,14 @@ nsresult HttpBaseChannel::GetTopWindowURI(nsIURI* aURIBeingLoaded,
 #endif
     }
   }
-  NS_IF_ADDREF(*aTopWindowURI = mTopWindowURI);
+  *aTopWindowURI = do_AddRef(mTopWindowURI).take();
   return rv;
 }
 
 NS_IMETHODIMP
 HttpBaseChannel::GetDocumentURI(nsIURI** aDocumentURI) {
   NS_ENSURE_ARG_POINTER(aDocumentURI);
-  *aDocumentURI = mDocumentURI;
-  NS_IF_ADDREF(*aDocumentURI);
+  *aDocumentURI = do_AddRef(mDocumentURI).take();
   return NS_OK;
 }
 
@@ -2210,7 +2212,7 @@ nsresult HttpBaseChannel::ProcessCrossOriginEmbedderPolicyHeader() {
       mLoadInfo->GetLoadingEmbedderPolicy() !=
           nsILoadInfo::EMBEDDER_POLICY_NULL &&
       resultPolicy != nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
-    return NS_ERROR_BLOCKED_BY_POLICY;
+    return NS_ERROR_DOM_COEP_FAILED;
   }
 
   return NS_OK;
@@ -2226,15 +2228,14 @@ nsresult HttpBaseChannel::ProcessCrossOriginResourcePolicyHeader() {
   }
 
   // We only apply this for resources.
-  if (mLoadInfo->GetExternalContentPolicyType() ==
-          ExtContentPolicy::TYPE_DOCUMENT ||
-      mLoadInfo->GetExternalContentPolicyType() ==
-          ExtContentPolicy::TYPE_WEBSOCKET) {
+  auto extContentPolicyType = mLoadInfo->GetExternalContentPolicyType();
+  if (extContentPolicyType == ExtContentPolicy::TYPE_DOCUMENT ||
+      extContentPolicyType == ExtContentPolicy::TYPE_WEBSOCKET ||
+      extContentPolicyType == ExtContentPolicy::TYPE_SAVEAS_DOWNLOAD) {
     return NS_OK;
   }
 
-  if (mLoadInfo->GetExternalContentPolicyType() ==
-      ExtContentPolicy::TYPE_SUBDOCUMENT) {
+  if (extContentPolicyType == ExtContentPolicy::TYPE_SUBDOCUMENT) {
     // COEP pref off, skip CORP checking for subdocument.
     if (!StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy()) {
       return NS_OK;
@@ -2309,6 +2310,56 @@ nsresult HttpBaseChannel::ProcessCrossOriginResourcePolicyHeader() {
   return NS_OK;
 }
 
+// Called when a document request responds with a `Cross-Origin-Opener-Policy`
+// header to add a `highValueCOOP` permission to the permissions database, and
+// make loads of that origin isolated.
+static void AddHighValueCOOPPermission(nsIPrincipal* aResultPrincipal) {
+  RefPtr<PermissionManager> perms = PermissionManager::GetInstance();
+  if (NS_WARN_IF(!perms)) {
+    return;
+  }
+
+  // We can't act on non-content principals, so if the load was sandboxed, try
+  // to use the unsandboxed precursor principal to add the highValueCOOP
+  // permission.
+  nsCOMPtr<nsIPrincipal> resultOrPrecursor(aResultPrincipal);
+  if (!aResultPrincipal->GetIsContentPrincipal()) {
+    resultOrPrecursor = aResultPrincipal->GetPrecursorPrincipal();
+    if (!resultOrPrecursor) {
+      return;
+    }
+  }
+
+  // Use the site-origin principal as we want to add the permission for the
+  // entire site, rather than a specific subdomain, as process isolation acts on
+  // a site granularity.
+  nsAutoCString siteOrigin;
+  if (NS_FAILED(resultOrPrecursor->GetSiteOrigin(siteOrigin))) {
+    return;
+  }
+
+  nsCOMPtr<nsIPrincipal> sitePrincipal =
+      BasePrincipal::CreateContentPrincipal(siteOrigin);
+  if (!sitePrincipal || !sitePrincipal->GetIsContentPrincipal()) {
+    return;
+  }
+
+  MOZ_LOG(dom::gProcessIsolationLog, LogLevel::Verbose,
+          ("Adding HighValue COOP Permission for site '%s'", siteOrigin.get()));
+
+  // XXX: Would be nice if we could use `TimeStamp` here, but there's
+  // unfortunately no convenient way to recover a time in milliseconds since the
+  // unix epoch from `TimeStamp`.
+  int64_t expirationTime =
+      (PR_Now() / PR_USEC_PER_MSEC) +
+      (int64_t(StaticPrefs::fission_highValue_coop_expiration()) *
+       PR_MSEC_PER_SEC);
+  Unused << perms->AddFromPrincipal(
+      sitePrincipal, mozilla::dom::kHighValueCOOPPermission,
+      nsIPermissionManager::ALLOW_ACTION, nsIPermissionManager::EXPIRE_TIME,
+      expirationTime);
+}
+
 // See https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
 // This method runs steps 1-4 of the algorithm to compare
 // cross-origin-opener policies
@@ -2337,6 +2388,8 @@ static bool CompareCrossOriginOpenerPolicies(
 // This runs steps 1-5 of the algorithm when navigating a top level document.
 // See https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
 nsresult HttpBaseChannel::ComputeCrossOriginOpenerPolicyMismatch() {
+  MOZ_ASSERT(XRE_IsParentProcess());
+
   StoreHasCrossOriginOpenerPolicyMismatch(false);
   if (!StaticPrefs::browser_tabs_remote_useCrossOriginOpenerPolicy()) {
     return NS_OK;
@@ -2363,12 +2416,21 @@ nsresult HttpBaseChannel::ComputeCrossOriginOpenerPolicyMismatch() {
     return NS_OK;
   }
 
+  nsCOMPtr<nsIPrincipal> resultOrigin;
+  nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
+      this, getter_AddRefs(resultOrigin));
+
   // Get the policy of the active document, and the policy for the result.
   nsILoadInfo::CrossOriginOpenerPolicy documentPolicy = ctx->GetOpenerPolicy();
   nsILoadInfo::CrossOriginOpenerPolicy resultPolicy =
       nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
   Unused << ComputeCrossOriginOpenerPolicy(documentPolicy, &resultPolicy);
   mComputedCrossOriginOpenerPolicy = resultPolicy;
+
+  // Add a permission to mark this site as high-value into the permission DB.
+  if (resultPolicy != nsILoadInfo::OPENER_POLICY_UNSAFE_NONE) {
+    AddHighValueCOOPPermission(resultOrigin);
+  }
 
   // If bc's popup sandboxing flag set is not empty and potentialCOOP is
   // non-null, then navigate bc to a network error and abort these steps.
@@ -2377,21 +2439,19 @@ nsresult HttpBaseChannel::ComputeCrossOriginOpenerPolicyMismatch() {
     LOG((
         "HttpBaseChannel::ComputeCrossOriginOpenerPolicyMismatch network error "
         "for non empty sandboxing and non null COOP"));
-    return NS_ERROR_BLOCKED_BY_POLICY;
+    return NS_ERROR_DOM_COOP_FAILED;
   }
 
   // In xpcshell-tests we don't always have a current window global
-  if (!ctx->Canonical()->GetCurrentWindowGlobal()) {
+  RefPtr<mozilla::dom::WindowGlobalParent> currentWindowGlobal =
+      ctx->Canonical()->GetCurrentWindowGlobal();
+  if (!currentWindowGlobal) {
     return NS_OK;
   }
 
   // We use the top window principal as the documentOrigin
   nsCOMPtr<nsIPrincipal> documentOrigin =
-      ctx->Canonical()->GetCurrentWindowGlobal()->DocumentPrincipal();
-  nsCOMPtr<nsIPrincipal> resultOrigin;
-
-  nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
-      this, getter_AddRefs(resultOrigin));
+      currentWindowGlobal->DocumentPrincipal();
 
   bool compareResult = CompareCrossOriginOpenerPolicies(
       documentPolicy, documentOrigin, resultPolicy, resultOrigin);
@@ -2434,12 +2494,24 @@ nsresult HttpBaseChannel::ComputeCrossOriginOpenerPolicyMismatch() {
     return NS_OK;
   }
 
-  if (!ctx->Canonical()->GetCurrentWindowGlobal()->IsInitialDocument()) {
+  if (!currentWindowGlobal->IsInitialDocument()) {
     StoreHasCrossOriginOpenerPolicyMismatch(true);
     return NS_OK;
   }
 
   return NS_OK;
+}
+
+nsresult HttpBaseChannel::ProcessCrossOriginSecurityHeaders() {
+  nsresult rv = ProcessCrossOriginEmbedderPolicyHeader();
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  rv = ProcessCrossOriginResourcePolicyHeader();
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+  return ComputeCrossOriginOpenerPolicyMismatch();
 }
 
 enum class Report { Error, Warning };
@@ -3284,6 +3356,20 @@ HttpBaseChannel::SetBeConservative(bool aBeConservative) {
 }
 
 NS_IMETHODIMP
+HttpBaseChannel::GetBypassProxy(bool* aBypassProxy) {
+  NS_ENSURE_ARG_POINTER(aBypassProxy);
+
+  *aBypassProxy = LoadBypassProxy();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+HttpBaseChannel::SetBypassProxy(bool aBypassProxy) {
+  StoreBypassProxy(aBypassProxy);
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 HttpBaseChannel::GetIsTRRServiceChannel(bool* aIsTRRServiceChannel) {
   NS_ENSURE_ARG_POINTER(aIsTRRServiceChannel);
 
@@ -3321,7 +3407,7 @@ HttpBaseChannel::SetTlsFlags(uint32_t aTlsFlags) {
 NS_IMETHODIMP
 HttpBaseChannel::GetApiRedirectToURI(nsIURI** aResult) {
   NS_ENSURE_ARG_POINTER(aResult);
-  NS_IF_ADDREF(*aResult = mAPIRedirectToURI);
+  *aResult = do_AddRef(mAPIRedirectToURI).take();
   return NS_OK;
 }
 
@@ -3425,7 +3511,8 @@ HttpBaseChannel::GetFetchCacheMode(uint32_t* aFetchCacheMode) {
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_NO_STORE;
   } else if (ContainsAllFlags(mLoadFlags, LOAD_BYPASS_CACHE)) {
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_RELOAD;
-  } else if (ContainsAllFlags(mLoadFlags, VALIDATE_ALWAYS)) {
+  } else if (ContainsAllFlags(mLoadFlags, VALIDATE_ALWAYS) ||
+             LoadForceValidateCacheContent()) {
     *aFetchCacheMode = nsIHttpChannelInternal::FETCH_CACHE_MODE_NO_CACHE;
   } else if (ContainsAllFlags(
                  mLoadFlags,
@@ -3632,30 +3719,6 @@ void HttpBaseChannel::ClearConsoleReports() {
   mReportCollector->ClearConsoleReports();
 }
 
-nsIPrincipal* HttpBaseChannel::GetURIPrincipal() {
-  if (mPrincipal) {
-    return mPrincipal;
-  }
-
-  nsIScriptSecurityManager* securityManager =
-      nsContentUtils::GetSecurityManager();
-
-  if (!securityManager) {
-    LOG(("HttpBaseChannel::GetURIPrincipal: No security manager [this=%p]",
-         this));
-    return nullptr;
-  }
-
-  securityManager->GetChannelURIPrincipal(this, getter_AddRefs(mPrincipal));
-  if (!mPrincipal) {
-    LOG(("HttpBaseChannel::GetURIPrincipal: No channel principal [this=%p]",
-         this));
-    return nullptr;
-  }
-
-  return mPrincipal;
-}
-
 bool HttpBaseChannel::IsNavigation() {
   return LoadForceMainDocumentChannel() || (mLoadFlags & LOAD_DOCUMENT_URI);
 }
@@ -3852,17 +3915,7 @@ already_AddRefed<nsILoadInfo> HttpBaseChannel::CloneLoadInfoForRedirect(
     newLoadInfo->ResetSandboxedNullPrincipalID();
   }
 
-  nsCString remoteAddress;
-  Unused << GetRemoteAddress(remoteAddress);
-  nsCOMPtr<nsIURI> referrer;
-  if (mReferrerInfo) {
-    referrer = mReferrerInfo->GetComputedReferrer();
-  }
-
-  nsCOMPtr<nsIRedirectHistoryEntry> entry =
-      new nsRedirectHistoryEntry(GetURIPrincipal(), referrer, remoteAddress);
-
-  newLoadInfo->AppendRedirectHistoryEntry(entry, isInternalRedirect);
+  newLoadInfo->AppendRedirectHistoryEntry(this, isInternalRedirect);
 
   return newLoadInfo.forget();
 }
@@ -4094,18 +4147,18 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
   nsCOMPtr<nsITimedChannel> oldTimedChannel(
       do_QueryInterface(static_cast<nsIHttpChannel*>(this)));
   if (oldTimedChannel) {
-    config.timedChannel = Some(dom::TimedChannelInfo());
-    config.timedChannel->timingEnabled() = LoadTimingEnabled();
-    config.timedChannel->redirectCount() = mRedirectCount;
-    config.timedChannel->internalRedirectCount() = mInternalRedirectCount;
-    config.timedChannel->asyncOpen() = mAsyncOpenTime;
-    config.timedChannel->channelCreation() = mChannelCreationTimestamp;
-    config.timedChannel->redirectStart() = mRedirectStartTimeStamp;
-    config.timedChannel->redirectEnd() = mRedirectEndTimeStamp;
-    config.timedChannel->initiatorType() = mInitiatorType;
-    config.timedChannel->allRedirectsSameOrigin() =
+    config.timedChannelInfo = Some(dom::TimedChannelInfo());
+    config.timedChannelInfo->timingEnabled() = LoadTimingEnabled();
+    config.timedChannelInfo->redirectCount() = mRedirectCount;
+    config.timedChannelInfo->internalRedirectCount() = mInternalRedirectCount;
+    config.timedChannelInfo->asyncOpen() = mAsyncOpenTime;
+    config.timedChannelInfo->channelCreation() = mChannelCreationTimestamp;
+    config.timedChannelInfo->redirectStart() = mRedirectStartTimeStamp;
+    config.timedChannelInfo->redirectEnd() = mRedirectEndTimeStamp;
+    config.timedChannelInfo->initiatorType() = mInitiatorType;
+    config.timedChannelInfo->allRedirectsSameOrigin() =
         LoadAllRedirectsSameOrigin();
-    config.timedChannel->allRedirectsPassTimingAllowCheck() =
+    config.timedChannelInfo->allRedirectsPassTimingAllowCheck() =
         LoadAllRedirectsPassTimingAllowCheck();
     // Execute the timing allow check to determine whether
     // to report the redirect timing info
@@ -4115,20 +4168,23 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
     if (loadInfo->GetExternalContentPolicyType() !=
         ExtContentPolicy::TYPE_DOCUMENT) {
       nsCOMPtr<nsIPrincipal> principal = loadInfo->GetLoadingPrincipal();
-      config.timedChannel->timingAllowCheckForPrincipal() =
+      config.timedChannelInfo->timingAllowCheckForPrincipal() =
           Some(oldTimedChannel->TimingAllowCheck(principal));
     }
 
-    config.timedChannel->allRedirectsPassTimingAllowCheck() =
+    config.timedChannelInfo->allRedirectsPassTimingAllowCheck() =
         LoadAllRedirectsPassTimingAllowCheck();
-    config.timedChannel->launchServiceWorkerStart() = mLaunchServiceWorkerStart;
-    config.timedChannel->launchServiceWorkerEnd() = mLaunchServiceWorkerEnd;
-    config.timedChannel->dispatchFetchEventStart() = mDispatchFetchEventStart;
-    config.timedChannel->dispatchFetchEventEnd() = mDispatchFetchEventEnd;
-    config.timedChannel->handleFetchEventStart() = mHandleFetchEventStart;
-    config.timedChannel->handleFetchEventEnd() = mHandleFetchEventEnd;
-    config.timedChannel->responseStart() = mTransactionTimings.responseStart;
-    config.timedChannel->responseEnd() = mTransactionTimings.responseEnd;
+    config.timedChannelInfo->launchServiceWorkerStart() =
+        mLaunchServiceWorkerStart;
+    config.timedChannelInfo->launchServiceWorkerEnd() = mLaunchServiceWorkerEnd;
+    config.timedChannelInfo->dispatchFetchEventStart() =
+        mDispatchFetchEventStart;
+    config.timedChannelInfo->dispatchFetchEventEnd() = mDispatchFetchEventEnd;
+    config.timedChannelInfo->handleFetchEventStart() = mHandleFetchEventStart;
+    config.timedChannelInfo->handleFetchEventEnd() = mHandleFetchEventEnd;
+    config.timedChannelInfo->responseStart() =
+        mTransactionTimings.responseStart;
+    config.timedChannelInfo->responseEnd() = mTransactionTimings.responseEnd;
   }
 
   if (aPreserveMethod) {
@@ -4187,46 +4243,50 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
 
   // Transfer the timing data (if we are dealing with an nsITimedChannel).
   nsCOMPtr<nsITimedChannel> newTimedChannel(do_QueryInterface(newChannel));
-  if (config.timedChannel && newTimedChannel) {
-    newTimedChannel->SetTimingEnabled(config.timedChannel->timingEnabled());
+  if (config.timedChannelInfo && newTimedChannel) {
+    newTimedChannel->SetTimingEnabled(config.timedChannelInfo->timingEnabled());
 
     // If we're an internal redirect, or a document channel replacement,
     // then we shouldn't record any new timing for this and just copy
     // over the existing values.
     bool shouldHideTiming = aReason != ReplacementReason::Redirect;
     if (shouldHideTiming) {
-      newTimedChannel->SetRedirectCount(config.timedChannel->redirectCount());
-      int8_t newCount = config.timedChannel->internalRedirectCount() + 1;
-      newTimedChannel->SetInternalRedirectCount(
-          std::max(newCount, config.timedChannel->internalRedirectCount()));
-    } else {
-      int8_t newCount = config.timedChannel->redirectCount() + 1;
       newTimedChannel->SetRedirectCount(
-          std::max(newCount, config.timedChannel->redirectCount()));
+          config.timedChannelInfo->redirectCount());
+      int32_t newCount = config.timedChannelInfo->internalRedirectCount() + 1;
+      newTimedChannel->SetInternalRedirectCount(std::max(
+          newCount, static_cast<int32_t>(
+                        config.timedChannelInfo->internalRedirectCount())));
+    } else {
+      int32_t newCount = config.timedChannelInfo->redirectCount() + 1;
+      newTimedChannel->SetRedirectCount(std::max(
+          newCount,
+          static_cast<int32_t>(config.timedChannelInfo->redirectCount())));
       newTimedChannel->SetInternalRedirectCount(
-          config.timedChannel->internalRedirectCount());
+          config.timedChannelInfo->internalRedirectCount());
     }
 
     if (shouldHideTiming) {
-      if (!config.timedChannel->channelCreation().IsNull()) {
+      if (!config.timedChannelInfo->channelCreation().IsNull()) {
         newTimedChannel->SetChannelCreation(
-            config.timedChannel->channelCreation());
+            config.timedChannelInfo->channelCreation());
       }
 
-      if (!config.timedChannel->asyncOpen().IsNull()) {
-        newTimedChannel->SetAsyncOpen(config.timedChannel->asyncOpen());
+      if (!config.timedChannelInfo->asyncOpen().IsNull()) {
+        newTimedChannel->SetAsyncOpen(config.timedChannelInfo->asyncOpen());
       }
     }
 
     // If the RedirectStart is null, we will use the AsyncOpen value of the
     // previous channel (this is the first redirect in the redirects chain).
-    if (config.timedChannel->redirectStart().IsNull()) {
+    if (config.timedChannelInfo->redirectStart().IsNull()) {
       // Only do this for real redirects.  Internal redirects should be hidden.
       if (!shouldHideTiming) {
-        newTimedChannel->SetRedirectStart(config.timedChannel->asyncOpen());
+        newTimedChannel->SetRedirectStart(config.timedChannelInfo->asyncOpen());
       }
     } else {
-      newTimedChannel->SetRedirectStart(config.timedChannel->redirectStart());
+      newTimedChannel->SetRedirectStart(
+          config.timedChannelInfo->redirectStart());
     }
 
     // For internal redirects just propagate the last redirect end time
@@ -4234,41 +4294,41 @@ HttpBaseChannel::CloneReplacementChannelConfig(bool aPreserveMethod,
     // end time.
     TimeStamp newRedirectEnd;
     if (shouldHideTiming) {
-      newRedirectEnd = config.timedChannel->redirectEnd();
+      newRedirectEnd = config.timedChannelInfo->redirectEnd();
     } else {
-      newRedirectEnd = config.timedChannel->responseEnd();
+      newRedirectEnd = config.timedChannelInfo->responseEnd();
     }
     newTimedChannel->SetRedirectEnd(newRedirectEnd);
 
-    newTimedChannel->SetInitiatorType(config.timedChannel->initiatorType());
+    newTimedChannel->SetInitiatorType(config.timedChannelInfo->initiatorType());
 
     nsCOMPtr<nsILoadInfo> loadInfo = newChannel->LoadInfo();
     MOZ_ASSERT(loadInfo);
 
     newTimedChannel->SetAllRedirectsSameOrigin(
-        config.timedChannel->allRedirectsSameOrigin());
+        config.timedChannelInfo->allRedirectsSameOrigin());
 
-    if (config.timedChannel->timingAllowCheckForPrincipal()) {
+    if (config.timedChannelInfo->timingAllowCheckForPrincipal()) {
       newTimedChannel->SetAllRedirectsPassTimingAllowCheck(
-          config.timedChannel->allRedirectsPassTimingAllowCheck() &&
-          *config.timedChannel->timingAllowCheckForPrincipal());
+          config.timedChannelInfo->allRedirectsPassTimingAllowCheck() &&
+          *config.timedChannelInfo->timingAllowCheckForPrincipal());
     }
 
     // Propagate service worker measurements across redirects.  The
     // PeformanceResourceTiming.workerStart API expects to see the
     // worker start time after a redirect.
     newTimedChannel->SetLaunchServiceWorkerStart(
-        config.timedChannel->launchServiceWorkerStart());
+        config.timedChannelInfo->launchServiceWorkerStart());
     newTimedChannel->SetLaunchServiceWorkerEnd(
-        config.timedChannel->launchServiceWorkerEnd());
+        config.timedChannelInfo->launchServiceWorkerEnd());
     newTimedChannel->SetDispatchFetchEventStart(
-        config.timedChannel->dispatchFetchEventStart());
+        config.timedChannelInfo->dispatchFetchEventStart());
     newTimedChannel->SetDispatchFetchEventEnd(
-        config.timedChannel->dispatchFetchEventEnd());
+        config.timedChannelInfo->dispatchFetchEventEnd());
     newTimedChannel->SetHandleFetchEventStart(
-        config.timedChannel->handleFetchEventStart());
+        config.timedChannelInfo->handleFetchEventStart());
     newTimedChannel->SetHandleFetchEventEnd(
-        config.timedChannel->handleFetchEventEnd());
+        config.timedChannelInfo->handleFetchEventEnd());
   }
 
   nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(newChannel);
@@ -4335,7 +4395,7 @@ HttpBaseChannel::ReplacementChannelConfig::ReplacementChannelConfig(
   privateBrowsing = aInit.privateBrowsing();
   method = aInit.method();
   referrerInfo = aInit.referrerInfo();
-  timedChannel = aInit.timedChannel();
+  timedChannelInfo = aInit.timedChannelInfo();
   if (RemoteLazyInputStreamChild* actor =
           static_cast<RemoteLazyInputStreamChild*>(aInit.uploadStreamChild())) {
     uploadStreamLength = actor->Size();
@@ -4359,7 +4419,7 @@ HttpBaseChannel::ReplacementChannelConfig::Serialize(
   config.privateBrowsing() = privateBrowsing;
   config.method() = method;
   config.referrerInfo() = referrerInfo;
-  config.timedChannel() = timedChannel;
+  config.timedChannelInfo() = timedChannelInfo;
   if (uploadStream) {
     RemoteLazyStream ipdlStream;
     RemoteLazyInputStreamUtils::SerializeInputStream(
@@ -4430,9 +4490,9 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
   // Check whether or not this was a cross-domain redirect.
   nsCOMPtr<nsITimedChannel> newTimedChannel(do_QueryInterface(newChannel));
   bool sameOriginWithOriginalUri = SameOriginWithOriginalUri(newURI);
-  if (config.timedChannel && newTimedChannel) {
+  if (config.timedChannelInfo && newTimedChannel) {
     newTimedChannel->SetAllRedirectsSameOrigin(
-        config.timedChannel->allRedirectsSameOrigin() &&
+        config.timedChannelInfo->allRedirectsSameOrigin() &&
         sameOriginWithOriginalUri);
   }
 
@@ -4588,6 +4648,10 @@ nsresult HttpBaseChannel::SetupReplacementChannel(nsIURI* newURI,
     for (auto& data : mPreferredCachedAltDataTypes) {
       cacheInfoChan->PreferAlternativeDataType(data.type(), data.contentType(),
                                                data.deliverAltData());
+    }
+
+    if (LoadForceValidateCacheContent()) {
+      Unused << cacheInfoChan->SetForceValidateCacheContent(true);
     }
   }
 
@@ -5592,6 +5656,13 @@ bool HttpBaseChannel::Http3Allowed() const {
   return !mUpgradeProtocolCallback && isDirectOrNoProxy &&
          !(mCaps & NS_HTTP_BE_CONSERVATIVE) && !LoadBeConservative() &&
          LoadAllowHttp3();
+}
+
+void HttpBaseChannel::SetDummyChannelForImageCache() {
+  mDummyChannelForImageCache = true;
+  MOZ_ASSERT(!mResponseHead,
+             "SetDummyChannelForImageCache should only be called once");
+  mResponseHead = MakeUnique<nsHttpResponseHead>();
 }
 
 }  // namespace net

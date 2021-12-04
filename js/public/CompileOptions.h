@@ -52,6 +52,7 @@
 #ifndef js_CompileOptions_h
 #define js_CompileOptions_h
 
+#include "mozilla/Assertions.h"       // MOZ_ASSERT
 #include "mozilla/MemoryReporting.h"  // mozilla::MallocSizeOf
 
 #include <stddef.h>  // size_t
@@ -71,6 +72,9 @@ enum class AsmJSOption : uint8_t {
   DisabledByDebugger,
 };
 
+class JS_PUBLIC_API InstantiateOptions;
+class JS_PUBLIC_API DecodeOptions;
+
 /**
  * The common base class for the CompileOptions hierarchy.
  *
@@ -78,6 +82,8 @@ enum class AsmJSOption : uint8_t {
  * compilation unit to another.
  */
 class JS_PUBLIC_API TransitiveCompileOptions {
+  friend class JS_PUBLIC_API DecodeOptions;
+
  protected:
   /**
    * The Web Platform allows scripts to be loaded from arbitrary cross-origin
@@ -114,6 +120,17 @@ class JS_PUBLIC_API TransitiveCompileOptions {
   // See also SetFilenameValidationCallback.
   bool skipFilenameValidation_ = false;
 
+  bool hideScriptFromDebugger_ = false;
+
+  // If set, this script will be hidden from the debugger. The requirement
+  // is that once compilation is finished, a call to UpdateDebugMetadata will
+  // be made, which will update the SSO with the appropiate debug metadata,
+  // and expose the script to the debugger (if hideScriptFromDebugger_ isn't
+  // set)
+  bool deferDebugMetadata_ = false;
+
+  friend class JS_PUBLIC_API InstantiateOptions;
+
  public:
   // POD options.
   bool selfHostingMode = false;
@@ -123,17 +140,6 @@ class JS_PUBLIC_API TransitiveCompileOptions {
   bool discardSource = false;
   bool sourceIsLazy = false;
   bool allowHTMLComments = true;
-  bool hideScriptFromDebugger = false;
-
-  // If set, this script will be hidden from the debugger. The requirement
-  // is that once compilation is finished, a call to UpdateDebugMetadata will
-  // be made, which will update the SSO with the appropiate debug metadata,
-  // and expose the script to the debugger (if hideScriptFromDebugger isn't set)
-  bool deferDebugMetadata = false;
-
-  bool hideFromNewScriptInitial() const {
-    return deferDebugMetadata || hideScriptFromDebugger;
-  }
 
   bool nonSyntacticScope = false;
   bool privateClassFields = false;
@@ -142,16 +148,30 @@ class JS_PUBLIC_API TransitiveCompileOptions {
 
   bool classStaticBlocks = false;
 
-  // True if transcoding to XDR should use Stencil instead of JSScripts.
-  bool useStencilXDR = false;
-
   // True if off-thread parsing should use a parse GlobalObject in order to
   // directly allocate to the GC from a helper thread. If false, transfer the
   // CompilationStencil back to main thread before allocating GC objects.
   bool useOffThreadParseGlobal = true;
 
-  // When decoding from XDR, borrow ImmutableScriptData from the XDR buffer
-  // instead of copying out of it.
+  // When decoding from XDR into a Stencil, directly reference data in the
+  // buffer (where possible) instead of copying it. This is an optional
+  // performance optimization, and may also reduce memory if the buffer is going
+  // remain alive anyways.
+  //
+  // NOTE: The XDR buffer must remain alive as long as the Stencil does. Special
+  //       care must be taken that there are no addition shared references to
+  //       the Stencil.
+  //
+  // NOTE: Instantiated GC things may still outlive the buffer as long as the
+  //       Stencil was cleaned up. This is covers a typical case where a decoded
+  //       Stencil is instantiated once and then thrown away.
+  bool borrowBuffer = false;
+
+  // Similar to `borrowBuffer`, but additionally the JSRuntime may directly
+  // reference data in the buffer for JS bytecode. The `borrowBuffer` flag must
+  // be set if this is set. This can be a memory optimization in multi-process
+  // architectures where a (read-only) XDR buffer is mapped into multiple
+  // processes.
   //
   // NOTE: When using this mode, the XDR buffer must live until JS_Shutdown is
   // called. There is currently no mechanism to release the data sooner.
@@ -182,7 +202,6 @@ class JS_PUBLIC_API TransitiveCompileOptions {
   bool mutedErrors() const { return mutedErrors_; }
   bool forceFullParse() const { return forceFullParse_; }
   bool forceStrictMode() const { return forceStrictMode_; }
-  bool skipFilenameValidation() const { return skipFilenameValidation_; }
   bool sourcePragmas() const { return sourcePragmas_; }
   const char* filename() const { return filename_; }
   const char* introducerFilename() const { return introducerFilename_; }
@@ -377,8 +396,13 @@ class MOZ_STACK_CLASS JS_PUBLIC_API CompileOptions final
     return *this;
   }
 
-  CompileOptions& setdeferDebugMetadata(bool v = true) {
-    deferDebugMetadata = v;
+  CompileOptions& setDeferDebugMetadata(bool v = true) {
+    deferDebugMetadata_ = v;
+    return *this;
+  }
+
+  CompileOptions& setHideScriptFromDebugger(bool v = true) {
+    hideScriptFromDebugger_ = v;
     return *this;
   }
 
@@ -423,6 +447,81 @@ class MOZ_STACK_CLASS JS_PUBLIC_API CompileOptions final
 
   CompileOptions(const CompileOptions& rhs) = delete;
   CompileOptions& operator=(const CompileOptions& rhs) = delete;
+};
+
+/**
+ * Subset of CompileOptions fields used while instantiating Stencils.
+ */
+class JS_PUBLIC_API InstantiateOptions {
+ public:
+  bool skipFilenameValidation = false;
+  bool hideScriptFromDebugger = false;
+  bool deferDebugMetadata = false;
+
+  InstantiateOptions() = default;
+
+  explicit InstantiateOptions(const ReadOnlyCompileOptions& options)
+      : skipFilenameValidation(options.skipFilenameValidation_),
+        hideScriptFromDebugger(options.hideScriptFromDebugger_),
+        deferDebugMetadata(options.deferDebugMetadata_) {}
+
+  void copyTo(CompileOptions& options) const {
+    options.skipFilenameValidation_ = skipFilenameValidation;
+    options.hideScriptFromDebugger_ = hideScriptFromDebugger;
+    options.deferDebugMetadata_ = deferDebugMetadata;
+  }
+
+  bool hideFromNewScriptInitial() const {
+    return deferDebugMetadata || hideScriptFromDebugger;
+  }
+
+#ifdef DEBUG
+  // Assert that all fields have default value.
+  //
+  // This can be used when instantiation is performed as separate step than
+  // compile-to-stencil, and CompileOptions isn't available there.
+  void assertDefault() const {
+    MOZ_ASSERT(skipFilenameValidation == false);
+    MOZ_ASSERT(hideScriptFromDebugger == false);
+    MOZ_ASSERT(deferDebugMetadata == false);
+  }
+#endif
+};
+
+/**
+ * Subset of CompileOptions fields used while decoding Stencils.
+ */
+class JS_PUBLIC_API DecodeOptions {
+ public:
+  bool borrowBuffer = false;
+  bool usePinnedBytecode = false;
+
+  const char* introducerFilename = nullptr;
+
+  // See `TransitiveCompileOptions::introductionType` field for details.
+  const char* introductionType = nullptr;
+
+  unsigned introductionLineno = 0;
+  uint32_t introductionOffset = 0;
+
+  DecodeOptions() = default;
+
+  explicit DecodeOptions(const ReadOnlyCompileOptions& options)
+      : borrowBuffer(options.borrowBuffer),
+        usePinnedBytecode(options.usePinnedBytecode),
+        introducerFilename(options.introducerFilename()),
+        introductionType(options.introductionType),
+        introductionLineno(options.introductionLineno),
+        introductionOffset(options.introductionOffset) {}
+
+  void copyTo(CompileOptions& options) const {
+    options.borrowBuffer = borrowBuffer;
+    options.usePinnedBytecode = usePinnedBytecode;
+    options.introducerFilename_ = introducerFilename;
+    options.introductionType = introductionType;
+    options.introductionLineno = introductionLineno;
+    options.introductionOffset = introductionOffset;
+  }
 };
 
 }  // namespace JS

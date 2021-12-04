@@ -9,6 +9,7 @@
 #include "mozilla/dom/BasicRenderingContext2D.h"
 #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
 #include "mozilla/dom/HTMLCanvasElement.h"
+#include "mozilla/intl/Bidi.h"
 #include "mozilla/gfx/Rect.h"
 #include "mozilla/gfx/2D.h"
 #include "mozilla/Attributes.h"
@@ -19,8 +20,8 @@
 #include "FilterDescription.h"
 #include "gfx2DGlue.h"
 #include "nsICanvasRenderingContextInternal.h"
-#include "nsBidi.h"
 #include "nsColor.h"
+#include "nsIFrame.h"
 
 class gfxFontGroup;
 class nsGlobalWindowInner;
@@ -422,16 +423,12 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
   virtual void SetOpaqueValueFromOpaqueAttr(bool aOpaqueAttrValue) override;
   bool GetIsOpaque() override { return mOpaque; }
   NS_IMETHOD Reset() override;
-  already_AddRefed<Layer> GetCanvasLayer(nsDisplayListBuilder* aBuilder,
-                                         Layer* aOldLayer,
-                                         LayerManager* aManager) override;
 
   bool UpdateWebRenderCanvasData(nsDisplayListBuilder* aBuilder,
                                  WebRenderCanvasData* aCanvasData) override;
 
   bool InitializeCanvasRenderer(nsDisplayListBuilder* aBuilder,
                                 CanvasRenderer* aRenderer) override;
-  virtual bool ShouldForceInactiveLayer(LayerManager* aManager) override;
   void MarkContextClean() override;
   void MarkContextCleanForFrameCapture() override;
   bool IsContextCleanForFrameCapture() override;
@@ -801,7 +798,7 @@ class CanvasRenderingContext2D final : public nsICanvasRenderingContextInternal,
 
   nsTArray<RegionInfo> mHitRegionsOptions;
 
-  nsBidi mBidiEngine;
+  mozilla::intl::Bidi mBidiEngine;
 
   /**
    * Returns true if a shadow should be drawn along with a

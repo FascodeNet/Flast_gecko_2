@@ -23,7 +23,6 @@ namespace mozilla {
 
 namespace layers {
 
-class CanvasLayer;
 class ImageClient;
 class ImageContainer;
 class WebRenderBridgeChild;
@@ -101,7 +100,7 @@ class WebRenderCommandBuilder final {
       nsDisplayList* aDisplayList, nsDisplayItem* aWrappingItem,
       nsDisplayListBuilder* aDisplayListBuilder,
       const StackingContextHelper& aSc, wr::DisplayListBuilder& aBuilder,
-      wr::IpcResourceUpdateQueue& aResources);
+      wr::IpcResourceUpdateQueue& aResources, bool aNewClipList = true);
 
   // aWrappingItem has to be non-null.
   void DoGroupingForDisplayList(nsDisplayList* aDisplayList,

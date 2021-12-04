@@ -49,9 +49,7 @@ endif
 
 # Without -j > 1, make will not pass jobserver info down to cargo. Force
 # one job when requested as a special case.
-ifeq (1,$(MOZ_PARALLEL_BUILD))
-cargo_build_flags += -j1
-endif
+cargo_build_flags += $(filter -j1,$(MAKEFLAGS))
 
 # We also need to rebuild the rust stdlib so that it's instrumented. Because
 # build-std is still pretty experimental, we need to explicitly request
@@ -59,6 +57,31 @@ endif
 ifdef MOZ_TSAN
 cargo_build_flags += -Zbuild-std=std,panic_abort
 RUSTFLAGS += -Zsanitizer=thread
+endif
+
+rustflags_sancov =
+ifdef LIBFUZZER
+ifndef MOZ_TSAN
+ifndef FUZZING_JS_FUZZILLI
+# These options should match what is implicitly enabled for `clang -fsanitize=fuzzer`
+#   here: https://github.com/llvm/llvm-project/blob/release/13.x/clang/lib/Driver/SanitizerArgs.cpp#L422
+#
+#  -sanitizer-coverage-inline-8bit-counters      Increments 8-bit counter for every edge.
+#  -sanitizer-coverage-level=4                   Enable coverage for all blocks, critical edges, and indirect calls.
+#  -sanitizer-coverage-trace-compares            Tracing of CMP and similar instructions.
+#  -sanitizer-coverage-pc-table                  Create a static PC table.
+#
+# In TSan builds, we must not pass any of these, because sanitizer coverage is incompatible with TSan.
+#
+# sancov legacy pass was removed in rustc 1.57 and replaced by sancov-module
+ifeq (1,$(words $(filter 1.53.% 1.54.% 1.55.% 1.56.%,$(RUSTC_VERSION))))
+rustflags_sancov += -Cpasses=sancov
+else
+rustflags_sancov += -Cpasses=sancov-module
+endif
+rustflags_sancov += -Cllvm-args=-sanitizer-coverage-inline-8bit-counters -Cllvm-args=-sanitizer-coverage-level=4 -Cllvm-args=-sanitizer-coverage-trace-compares -Cllvm-args=-sanitizer-coverage-pc-table
+endif
+endif
 endif
 
 # These flags are passed via `cargo rustc` and only apply to the final rustc
@@ -69,11 +92,14 @@ ifndef MOZ_DEBUG_RUST
 # Enable link-time optimization for release builds, but not when linking
 # gkrust_gtest. And not when doing cross-language LTO.
 ifndef MOZ_LTO_RUST_CROSS
+# Never enable when sancov is enabled to work around https://github.com/rust-lang/rust/issues/90300.
+ifndef rustflags_sancov
 ifeq (,$(findstring gkrust_gtest,$(RUST_LIBRARY_FILE)))
 cargo_rustc_flags += -Clto
 endif
 # We need -Cembed-bitcode=yes for all crates when using -Clto.
 RUSTFLAGS += -Cembed-bitcode=yes
+endif
 endif
 endif
 endif
@@ -89,24 +115,6 @@ ifneq (,$(filter thumbv7neon-,$(RUST_TARGET)))
 # but we're not using a thumbv7neon target, where it's already the default.
 # (CPUs with neon have 32 FPU registers available)
 rustflags_neon += -C target_feature=+neon,-d16
-endif
-endif
-
-rustflags_sancov =
-ifdef LIBFUZZER
-ifndef MOZ_TSAN
-ifndef FUZZING_JS_FUZZILLI
-# These options should match what is implicitly enabled for `clang -fsanitize=fuzzer`
-#   here: https://github.com/llvm/llvm-project/blob/release/8.x/clang/lib/Driver/SanitizerArgs.cpp#L354
-#
-#  -sanitizer-coverage-inline-8bit-counters      Increments 8-bit counter for every edge.
-#  -sanitizer-coverage-level=4                   Enable coverage for all blocks, critical edges, and indirect calls.
-#  -sanitizer-coverage-trace-compares            Tracing of CMP and similar instructions.
-#  -sanitizer-coverage-pc-table                  Create a static PC table.
-#
-# In TSan builds, we must not pass any of these, because sanitizer coverage is incompatible with TSan.
-rustflags_sancov += -Cpasses=sancov -Cllvm-args=-sanitizer-coverage-inline-8bit-counters -Cllvm-args=-sanitizer-coverage-level=4 -Cllvm-args=-sanitizer-coverage-trace-compares -Cllvm-args=-sanitizer-coverage-pc-table
-endif
 endif
 endif
 
@@ -394,6 +402,13 @@ ifdef RUST_LIBRARY_FILE
 
 ifdef RUST_LIBRARY_FEATURES
 rust_features_flag := --features '$(RUST_LIBRARY_FEATURES)'
+endif
+
+ifeq (WASI,$(OS_ARCH))
+# The rust wasi target defaults to statically link the wasi crt, but when we
+# build static libraries from rust and link them with C/C++ code, we also link
+# a wasi crt, which may conflict with rust's.
+force-cargo-library-build: CARGO_RUSTCFLAGS += -C target-feature=-crt-static
 endif
 
 # Assume any system libraries rustc links against are already in the target's LIBS.

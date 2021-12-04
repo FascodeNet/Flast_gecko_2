@@ -56,7 +56,6 @@ linux1804-64-qr/opt:
         - web-platform-tests-wdspec-headless
         - linux-talos-flex
         - talos
-        - raptor-firefox
         - browsertime
 
 linux1804-64-shippable-qr/opt:
@@ -74,7 +73,6 @@ linux1804-64-shippable-qr/opt:
         - linux-talos-flex
         - talos
         - talos-profiling
-        - raptor-firefox
         - browsertime
         - browsertime-profiling
 
@@ -132,58 +130,57 @@ windows7-32-shippable-qr/opt:
 windows10-32-shippable-qr/opt:
     build-platform: win32-shippable/opt
     test-sets:
-        - awsy
         - browsertime
-        - desktop-screenshot-capture
-        - raptor-chrome
-        - raptor-firefox
-        - web-platform-tests
-        - web-platform-tests-wdspec-headless
         - windows-talos
 
 windows10-32-qr/opt:
     build-platform: win32/opt
     test-sets:
-        - awsy
         - browsertime
-        - desktop-screenshot-capture
-        - raptor-firefox
-        - web-platform-tests
-        - web-platform-tests-wdspec-headless
         - windows-talos
-
-windows10-32-qr/debug:
-    build-platform: win32/debug
-    test-sets:
-        - web-platform-tests
-        - windows-7-tests
 
 windows10-32-2004-shippable-qr/opt:
     build-platform: win32-shippable/opt
     test-sets:
+        - awsy
+        - desktop-screenshot-capture
+        - web-platform-tests
+        - web-platform-tests-wdspec-headless
         - windows32-2004-tests
+
 
 windows10-32-2004-qr/opt:
     build-platform: win32/opt
     test-sets:
+        - awsy
+        - desktop-screenshot-capture
+        - web-platform-tests
+        - web-platform-tests-wdspec-headless
         - windows32-2004-tests
 
 windows10-32-2004-qr/debug:
     build-platform: win32/debug
     test-sets:
+        - web-platform-tests
+        - windows-7-tests
         - windows32-2004-tests
+        - windows10-32-2004-failure-tests
+
+windows10-32-2004-mingwclang-qr/debug:
+    build-platform: win32-mingwclang/debug
+    test-sets:
+        - mingwclang-win32-tests-debug
+
+windows10-32-2004-mingwclang-qr/opt:
+    build-platform: win32-mingwclang/opt
+    test-sets:
+        - mingwclang-tests-opt
 
 # win64
-windows10-64-ccov-qr/opt:
-    build-platform: win64-ccov/opt
-    test-sets:
-        - windows10-64-ccov-tests  # For Bug 1723531 but without what has been migrated in Bug X so far
-
 windows10-64-qr/opt:
     build-platform: win64/opt
     test-sets:
         - windows-talos
-        - raptor-firefox
         - browsertime
 
 windows10-aarch64-qr/opt:
@@ -194,37 +191,13 @@ windows10-aarch64-qr/opt:
 windows10-64-ref-hw-2017-qr/opt:
     build-platform: win64-shippable/opt
     test-sets:
-        - raptor-firefox
-        - browsertime
         - talos-ref-hw
 
 windows10-64-shippable-qr/opt:
     build-platform: win64-shippable/opt
     test-sets:
         - windows-talos
-        - raptor-chrome
-        - raptor-firefox
         - browsertime
-
-windows10-64-mingwclang-qr/debug:
-    build-platform: win64-mingwclang/debug
-    test-sets:
-        - mingwclang-tests-debug
-
-windows10-64-mingwclang-qr/opt:
-    build-platform: win64-mingwclang/opt
-    test-sets:
-        - mingwclang-tests-opt
-
-windows10-32-mingwclang-qr/debug:
-    build-platform: win32-mingwclang/debug
-    test-sets:
-        - mingwclang-win32-tests-debug
-
-windows10-32-mingwclang-qr/opt:
-    build-platform: win32-mingwclang/opt
-    test-sets:
-        - mingwclang-tests-opt
 
 # win10-64 2004
 windows10-64-2004-ccov-qr/opt:
@@ -249,6 +222,7 @@ windows10-64-2004-qr/opt:
         - web-platform-tests-wdspec-headless
         - windows10-2004-tests
         - windows10-64-2004-failure-tests
+        - talos-xperf
 
 windows10-64-2004-shippable-qr/opt:
     build-platform: win64-shippable/opt
@@ -260,6 +234,7 @@ windows10-64-2004-shippable-qr/opt:
         - web-platform-tests-wdspec-headless
         - windows10-2004-tests
         - windows10-64-2004-failure-tests
+        - talos-xperf
 
 windows10-64-2004-devedition-qr/opt:
     build-platform: win64-devedition/opt
@@ -272,6 +247,16 @@ windows10-64-2004-asan-qr/opt:
     build-platform: win64-asan/opt
     test-sets:
         - windows10-2004-tests
+
+windows10-64-2004-mingwclang-qr/debug:
+    build-platform: win64-mingwclang/debug
+    test-sets:
+        - mingwclang-tests-debug
+
+windows10-64-2004-mingwclang-qr/opt:
+    build-platform: win64-mingwclang/opt
+    test-sets:
+        - mingwclang-tests-opt
 
 ##
 # MacOS X platforms (matching /macosx.*/)
@@ -286,7 +271,6 @@ macosx1100-64-shippable-qr/opt:
     test-sets:
         - macosx1100-64-jittests
         - macosx1100-64-qr-tests
-        - macosx1100-64-qr-failure-tests
         # - macosx64-talos
         # - browsertime-high-priority
         # - raptor-firefox
@@ -300,8 +284,6 @@ macosx1015-64-shippable-qr/opt:
         - desktop-screenshot-capture
         - macosx1015-64-qr-tests
         - macosx64-talos
-        - raptor-chrome
-        - raptor-firefox
         - raptor-firefox-power
         - talos-profiling
         - web-platform-tests
@@ -318,7 +300,6 @@ macosx1015-64-qr/opt:
     build-platform: macosx64/opt
     test-sets:
         - desktop-screenshot-capture
-        - macosx1015-64-qr-failure-tests
         - macosx1015-64-qr-tests
         - web-platform-tests
         - web-platform-tests-backlog

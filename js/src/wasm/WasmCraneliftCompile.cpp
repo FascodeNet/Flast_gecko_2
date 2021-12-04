@@ -47,21 +47,21 @@ static inline SymbolicAddress ToSymbolicAddress(BD_SymbolicAddress bd) {
     case BD_SymbolicAddress::RefFunc:
       return SymbolicAddress::RefFunc;
     case BD_SymbolicAddress::MemoryGrow:
-      return SymbolicAddress::MemoryGrow;
+      return SymbolicAddress::MemoryGrowM32;
     case BD_SymbolicAddress::MemorySize:
-      return SymbolicAddress::MemorySize;
+      return SymbolicAddress::MemorySizeM32;
     case BD_SymbolicAddress::MemoryCopy:
-      return SymbolicAddress::MemCopy32;
+      return SymbolicAddress::MemCopyM32;
     case BD_SymbolicAddress::MemoryCopyShared:
-      return SymbolicAddress::MemCopyShared32;
+      return SymbolicAddress::MemCopySharedM32;
     case BD_SymbolicAddress::DataDrop:
       return SymbolicAddress::DataDrop;
     case BD_SymbolicAddress::MemoryFill:
-      return SymbolicAddress::MemFill32;
+      return SymbolicAddress::MemFillM32;
     case BD_SymbolicAddress::MemoryFillShared:
-      return SymbolicAddress::MemFillShared32;
+      return SymbolicAddress::MemFillSharedM32;
     case BD_SymbolicAddress::MemoryInit:
-      return SymbolicAddress::MemInit32;
+      return SymbolicAddress::MemInitM32;
     case BD_SymbolicAddress::TableCopy:
       return SymbolicAddress::TableCopy;
     case BD_SymbolicAddress::ElemDrop:
@@ -99,11 +99,11 @@ static inline SymbolicAddress ToSymbolicAddress(BD_SymbolicAddress bd) {
     case BD_SymbolicAddress::PostBarrier:
       return SymbolicAddress::PostBarrierFiltering;
     case BD_SymbolicAddress::WaitI32:
-      return SymbolicAddress::WaitI32;
+      return SymbolicAddress::WaitI32M32;
     case BD_SymbolicAddress::WaitI64:
-      return SymbolicAddress::WaitI64;
+      return SymbolicAddress::WaitI64M32;
     case BD_SymbolicAddress::Wake:
-      return SymbolicAddress::Wake;
+      return SymbolicAddress::WakeM32;
     case BD_SymbolicAddress::Limit:
       break;
   }
@@ -443,11 +443,11 @@ bool env_has_memory(const CraneliftModuleEnvironment* env) {
 }
 
 size_t env_num_types(const CraneliftModuleEnvironment* env) {
-  return env->env->types.length();
+  return env->env->types->length();
 }
 const FuncType* env_type(const CraneliftModuleEnvironment* env,
                          size_t typeIndex) {
-  return &env->env->types[typeIndex].funcType();
+  return &(*env->env->types)[typeIndex].funcType();
 }
 
 size_t env_num_funcs(const CraneliftModuleEnvironment* env) {
@@ -482,7 +482,7 @@ bool env_func_is_import(const CraneliftModuleEnvironment* env,
 
 const FuncType* env_signature(const CraneliftModuleEnvironment* env,
                               size_t funcTypeIndex) {
-  return &env->env->types[funcTypeIndex].funcType();
+  return &(*env->env->types)[funcTypeIndex].funcType();
 }
 
 const TypeIdDesc* env_signature_id(const CraneliftModuleEnvironment* env,
@@ -521,6 +521,8 @@ bool wasm::CraneliftCompileFunctions(const ModuleEnvironment& moduleEnv,
   TempAllocator alloc(&lifo);
   JitContext jitContext(&alloc);
   WasmMacroAssembler masm(alloc, moduleEnv);
+  AutoCreatedBy acb(masm, "wasm::CraneliftCompileFunctions");
+
   MOZ_ASSERT(IsCompilingWasm());
 
   // Swap in already-allocated empty vectors to avoid malloc/free.

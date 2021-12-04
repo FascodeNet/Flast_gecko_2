@@ -7,6 +7,7 @@
 /* import-globals-from ../PlacesUIUtils.jsm */
 /* import-globals-from ../../../../toolkit/components/places/PlacesUtils.jsm */
 /* import-globals-from ../../../../toolkit/components/places/PlacesTransactions.jsm */
+/* import-globals-from ./places.js */
 
 /**
  * Represents an insertion point within a container where we can insert
@@ -72,12 +73,6 @@ PlacesInsertionPoint.prototype = {
 
 function PlacesController(aView) {
   this._view = aView;
-  XPCOMUtils.defineLazyServiceGetter(
-    this,
-    "clipboard",
-    "@mozilla.org/widget/clipboard;1",
-    "nsIClipboard"
-  );
   XPCOMUtils.defineLazyGetter(this, "profileName", function() {
     return Services.dirsvc.get("ProfD", Ci.nsIFile).leafName;
   });
@@ -168,6 +163,7 @@ PlacesController.prototype = {
         return this._hasRemovableSelection();
       case "cmd_copy":
       case "placesCmd_copy":
+      case "placesCmd_showInFolder":
         return this._view.hasSelection;
       case "cmd_paste":
       case "placesCmd_paste":
@@ -178,7 +174,7 @@ PlacesController.prototype = {
         // Of course later paste() should ignore any invalid data.
         return (
           canInsert &&
-          this.clipboard.hasDataMatchingFlavors(
+          Services.clipboard.hasDataMatchingFlavors(
             [
               ...PlacesUIUtils.PLACES_FLAVORS,
               PlacesUtils.TYPE_X_MOZ_URL,
@@ -327,6 +323,30 @@ PlacesController.prototype = {
         );
         break;
       }
+      case "placesCmd_showInFolder":
+        // Open containing folder in left pane bookmark tree
+        let currentNode = this._view.selectedNode;
+        if (this._view.parentElement.id.includes("Panel")) {
+          // We're in the sidebar - clear the search box first
+          let searchBox = document.getElementById("search-box");
+          searchBox.value = "";
+          searchBox.doCommand();
+          // And go to the node
+          this._view.selectItems([currentNode.bookmarkGuid], true);
+        } else {
+          PlacesUtils.bookmarks
+            .fetch(currentNode.bookmarkGuid, null, { includePath: true })
+            .then(b => {
+              let containers = b.path.map(obj => {
+                return obj.guid;
+              });
+              // selectLeftPane looks for literal "AllBookmarks" as a "built-in"
+              containers.splice(0, 0, "AllBookmarks");
+              PlacesOrganizer.selectLeftPaneContainerByHierarchy(containers);
+              this._view.selectItems([currentNode.bookmarkGuid], false);
+            });
+        }
+        break;
     }
   },
 
@@ -571,11 +591,17 @@ PlacesController.prototype = {
           !PlacesUIUtils.loadBookmarksInBackground &&
           !PlacesUIUtils.loadBookmarksInTabs &&
           this._view.singleClickOpens;
+        let hideIfNotSearch =
+          item.getAttribute("hide-if-not-search") == "true" &&
+          (!this._view.selectedNode ||
+            !this._view.selectedNode.parent ||
+            !PlacesUtils.nodeIsQuery(this._view.selectedNode.parent));
 
         let shouldHideItem =
           hideIfNoIP ||
           hideIfPrivate ||
           hideIfSingleClickOpens ||
+          hideIfNotSearch ||
           !this._shouldShowMenuItem(item, metadata);
         item.hidden = item.disabled = shouldHideItem;
 
@@ -1056,7 +1082,7 @@ PlacesController.prototype = {
       );
       xferable.init(null);
       xferable.addDataFlavor(PlacesUtils.TYPE_X_MOZ_PLACE_ACTION);
-      this.clipboard.getData(xferable, Ci.nsIClipboard.kGlobalClipboard);
+      Services.clipboard.getData(xferable, Ci.nsIClipboard.kGlobalClipboard);
       xferable.getTransferData(PlacesUtils.TYPE_X_MOZ_PLACE_ACTION, action);
       [action, actionOwner] = action.value
         .QueryInterface(Ci.nsISupportsString)
@@ -1079,7 +1105,7 @@ PlacesController.prototype = {
   _releaseClipboardOwnership: function PC__releaseClipboardOwnership() {
     if (this.cutNodes.length) {
       // This clears the logical clipboard, doesn't remove data.
-      this.clipboard.emptyClipboard(Ci.nsIClipboard.kGlobalClipboard);
+      Services.clipboard.emptyClipboard(Ci.nsIClipboard.kGlobalClipboard);
     }
   },
 
@@ -1092,7 +1118,11 @@ PlacesController.prototype = {
     const TYPE = "text/x-moz-place-empty";
     xferable.addDataFlavor(TYPE);
     xferable.setTransferData(TYPE, PlacesUtils.toISupportsString(""));
-    this.clipboard.setData(xferable, null, Ci.nsIClipboard.kGlobalClipboard);
+    Services.clipboard.setData(
+      xferable,
+      null,
+      Ci.nsIClipboard.kGlobalClipboard
+    );
   },
 
   _populateClipboard: function PC__populateClipboard(aNodes, aAction) {
@@ -1152,7 +1182,7 @@ PlacesController.prototype = {
     );
 
     if (hasData) {
-      this.clipboard.setData(
+      Services.clipboard.setData(
         xferable,
         aAction == "cut" ? this : null,
         Ci.nsIClipboard.kGlobalClipboard
@@ -1238,7 +1268,7 @@ PlacesController.prototype = {
       PlacesUtils.TYPE_UNICODE,
     ].forEach(type => xferable.addDataFlavor(type));
 
-    this.clipboard.getData(xferable, Ci.nsIClipboard.kGlobalClipboard);
+    Services.clipboard.getData(xferable, Ci.nsIClipboard.kGlobalClipboard);
 
     // Now get the clipboard contents, in the best available flavor.
     let data = {},
@@ -1345,9 +1375,9 @@ PlacesController.prototype = {
     ]);
 
     const flags =
-      Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_0 +
-      Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_1 +
-      Services.prompt.BUTTON_POS_0_DEFAULT;
+      Services.prompt.BUTTON_TITLE_IS_STRING * Services.prompt.BUTTON_POS_0 +
+      Services.prompt.BUTTON_TITLE_CANCEL * Services.prompt.BUTTON_POS_1 +
+      Services.prompt.BUTTON_POS_1_DEFAULT;
 
     let bag = await Services.prompt.asyncConfirmEx(
       window.browsingContext,
@@ -1355,13 +1385,13 @@ PlacesController.prototype = {
       title,
       body,
       flags,
-      null,
       forget,
+      null,
       null,
       null,
       false
     );
-    if (!(bag.getProperty("buttonNumClicked") === 1)) {
+    if (bag.getProperty("buttonNumClicked") !== 0) {
       return;
     }
 

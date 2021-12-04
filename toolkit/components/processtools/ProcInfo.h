@@ -20,6 +20,13 @@ namespace ipc {
 class GeckoChildProcessHost;
 }
 
+/**
+ * Return the number of milliseconds of CPU time used since process start.
+ *
+ * @return NS_OK on success.
+ */
+nsresult GetCpuTimeSinceProcessStartInMs(uint64_t* aResult);
+
 // Process types. When updating this enum, please make sure to update
 // WebIDLProcType, ChromeUtils::RequestProcInfo and ProcTypeToWebIDL to
 // mirror the changes.
@@ -60,6 +67,7 @@ struct ThreadInfo {
   uint64_t cpuUser = 0;
   // System time in ns.
   uint64_t cpuKernel = 0;
+  uint64_t cpuCycleCount = 0;
 };
 
 // Info on a DOM window.
@@ -105,14 +113,13 @@ struct ProcInfo {
   nsCString origin;
   // Process filename (without the path name).
   nsString filename;
-  // RSS in bytes.
-  int64_t residentSetSize = 0;
-  // Unshared resident size in bytes.
-  int64_t residentUniqueSize = 0;
+  // Memory size in bytes.
+  uint64_t memory = 0;
   // User time in ns.
   uint64_t cpuUser = 0;
   // System time in ns.
   uint64_t cpuKernel = 0;
+  uint64_t cpuCycleCount = 0;
   // Threads owned by this process.
   CopyableTArray<ThreadInfo> threads;
   // DOM windows represented by this process.
@@ -212,10 +219,10 @@ nsresult CopySysProcInfoToDOM(const ProcInfo& source, T* dest) {
   // Copy system info.
   dest->mPid = source.pid;
   dest->mFilename.Assign(source.filename);
-  dest->mResidentSetSize = source.residentSetSize;
-  dest->mResidentUniqueSize = source.residentUniqueSize;
+  dest->mMemory = source.memory;
   dest->mCpuUser = source.cpuUser;
   dest->mCpuKernel = source.cpuKernel;
+  dest->mCpuCycleCount = source.cpuCycleCount;
 
   // Copy thread info.
   mozilla::dom::Sequence<mozilla::dom::ThreadInfoDictionary> threads;
@@ -227,6 +234,7 @@ nsresult CopySysProcInfoToDOM(const ProcInfo& source, T* dest) {
     }
     thread->mCpuUser = entry.cpuUser;
     thread->mCpuKernel = entry.cpuKernel;
+    thread->mCpuCycleCount = entry.cpuCycleCount;
     thread->mTid = entry.tid;
     thread->mName.Assign(entry.name);
   }

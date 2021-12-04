@@ -69,14 +69,6 @@ void BaseCompiler::freeF64(RegF64 r) { ra.freeF64(r); }
 void BaseCompiler::freeV128(RegV128 r) { ra.freeV128(r); }
 #endif
 
-void BaseCompiler::free(RegI32 r) { freeI32(r); }
-void BaseCompiler::free(RegI64 r) { freeI64(r); }
-void BaseCompiler::free(RegF32 r) { freeF32(r); }
-void BaseCompiler::free(RegF64 r) { freeF64(r); }
-#ifdef ENABLE_WASM_SIMD
-void BaseCompiler::free(RegV128 r) { freeV128(r); }
-#endif
-
 void BaseCompiler::freeAny(AnyReg r) {
   switch (r.tag) {
     case AnyReg::I32:
@@ -104,6 +96,48 @@ void BaseCompiler::freeAny(AnyReg r) {
   }
 }
 
+template <>
+inline void BaseCompiler::free<RegI32>(RegI32 r) {
+  freeI32(r);
+}
+
+template <>
+inline void BaseCompiler::free<RegI64>(RegI64 r) {
+  freeI64(r);
+}
+
+template <>
+inline void BaseCompiler::free<RegRef>(RegRef r) {
+  freeRef(r);
+}
+
+template <>
+inline void BaseCompiler::free<RegPtr>(RegPtr r) {
+  freePtr(r);
+}
+
+template <>
+inline void BaseCompiler::free<RegF32>(RegF32 r) {
+  freeF32(r);
+}
+
+template <>
+inline void BaseCompiler::free<RegF64>(RegF64 r) {
+  freeF64(r);
+}
+
+#ifdef ENABLE_WASM_SIMD
+template <>
+inline void BaseCompiler::free<RegV128>(RegV128 r) {
+  freeV128(r);
+}
+#endif
+
+template <>
+inline void BaseCompiler::free<AnyReg>(AnyReg r) {
+  freeAny(r);
+}
+
 void BaseCompiler::freeI64Except(RegI64 r, RegI32 except) {
 #ifdef JS_PUNBOX64
   MOZ_ASSERT(r.reg == except);
@@ -126,11 +160,37 @@ void BaseCompiler::maybeFree(RegI64 r) {
   }
 }
 
+void BaseCompiler::maybeFree(RegF32 r) {
+  if (r.isValid()) {
+    freeF32(r);
+  }
+}
+
 void BaseCompiler::maybeFree(RegF64 r) {
   if (r.isValid()) {
     freeF64(r);
   }
 }
+
+void BaseCompiler::maybeFree(RegRef r) {
+  if (r.isValid()) {
+    freeRef(r);
+  }
+}
+
+void BaseCompiler::maybeFree(RegPtr r) {
+  if (r.isValid()) {
+    freePtr(r);
+  }
+}
+
+#ifdef ENABLE_WASM_SIMD128
+void BaseCompiler::maybeFree(RegV128 r) {
+  if (r.isValid()) {
+    freeV128(r);
+  }
+}
+#endif
 
 void BaseCompiler::needI32NoSync(RegI32 r) {
   MOZ_ASSERT(isAvailableI32(r));
@@ -151,6 +211,13 @@ void BaseCompiler::need2xI64(RegI64 r0, RegI64 r1) {
 }
 
 RegI32 BaseCompiler::fromI64(RegI64 r) { return RegI32(lowPart(r)); }
+
+RegI32 BaseCompiler::maybeFromI64(RegI64 r) {
+  if (!r.isValid()) {
+    return RegI32::Invalid();
+  }
+  return fromI64(r);
+}
 
 #ifdef JS_PUNBOX64
 RegI64 BaseCompiler::fromI32(RegI32 r) { return RegI64(Register64(r)); }
@@ -246,6 +313,12 @@ inline RegV128 BaseCompiler::pop<RegV128>() {
 }
 #endif
 
+// RegPtr values can't be pushed, hence can't be popped.
+template <>
+inline RegPtr BaseCompiler::need<RegPtr>() {
+  return needPtr();
+}
+
 void BaseCompiler::needResultRegisters(ResultType type, ResultRegKind which) {
   if (type.empty()) {
     return;
@@ -292,10 +365,8 @@ void BaseCompiler::needResultRegisters(ResultType type, ResultRegKind which) {
   }
 }
 
-#ifdef JS_CODEGEN_X64
-void BaseCompiler::maskResultRegisters(ResultType type) {
-  MOZ_ASSERT(JitOptions.spectreIndexMasking);
-
+#ifdef JS_64BIT
+void BaseCompiler::widenInt32ResultRegisters(ResultType type) {
   if (type.empty()) {
     return;
   }
@@ -303,7 +374,7 @@ void BaseCompiler::maskResultRegisters(ResultType type) {
   for (ABIResultIter iter(type); !iter.done(); iter.next()) {
     ABIResult result = iter.cur();
     if (result.inRegister() && result.type().kind() == ValType::I32) {
-      masm.movl(result.gpr(), result.gpr());
+      masm.widenInt32(result.gpr());
     }
   }
 }
@@ -378,10 +449,8 @@ void BaseCompiler::captureResultRegisters(ResultType type) {
 
 void BaseCompiler::captureCallResultRegisters(ResultType type) {
   captureResultRegisters(type);
-#ifdef JS_CODEGEN_X64
-  if (JitOptions.spectreIndexMasking) {
-    maskResultRegisters(type);
-  }
+#ifdef JS_64BIT
+  widenInt32ResultRegisters(type);
 #endif
 }
 
@@ -408,6 +477,10 @@ Control& BaseCompiler::controlItem(uint32_t relativeDepth) {
 }
 
 Control& BaseCompiler::controlOutermost() { return iter_.controlOutermost(); }
+
+LabelKind BaseCompiler::controlKind(uint32_t relativeDepth) {
+  return iter_.controlKind(relativeDepth);
+}
 
 }  // namespace wasm
 }  // namespace js

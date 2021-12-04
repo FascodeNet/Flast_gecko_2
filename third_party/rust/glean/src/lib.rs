@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![deny(broken_intra_doc_links)]
+#![deny(rustdoc::broken_intra_doc_links)]
 #![deny(missing_docs)]
 
 //! Glean is a modern approach for recording and sending Telemetry data.
@@ -52,7 +52,7 @@ pub use glean_core::{
     metrics::{Datetime, DistributionData, MemoryUnit, RecordedEvent, TimeUnit, TimerId},
     traits, CommonMetricData, Error, ErrorType, Glean, HistogramType, Lifetime, Result,
 };
-use private::RecordedExperimentData;
+pub use private::RecordedExperimentData;
 
 mod configuration;
 mod core_metrics;
@@ -357,10 +357,7 @@ fn initialize_internal(
     Some(init_handle)
 }
 
-/// Shuts down Glean.
-///
-/// This currently only attempts to shut down the
-/// internal dispatcher.
+/// Shuts down Glean in an orderly fashion.
 pub fn shutdown() {
     if global_glean().is_none() {
         log::warn!("Shutdown called before Glean is initialized");
@@ -379,6 +376,13 @@ pub fn shutdown() {
     if let Err(e) = dispatcher::shutdown() {
         log::error!("Can't shutdown dispatcher thread: {:?}", e);
     }
+
+    // Be sure to call this _after_ draining the dispatcher
+    crate::with_glean(|glean| {
+        if let Err(e) = glean.persist_ping_lifetime_data() {
+            log::error!("Can't persist ping lifetime data: {:?}", e);
+        }
+    });
 }
 
 /// Unblock the global dispatcher to start processing queued tasks.
@@ -420,7 +424,7 @@ fn block_on_dispatcher() {
         was_initialize_called(),
         "initialize was never called. Can't block on the dispatcher queue."
     );
-    dispatcher::block_on_queue()
+    dispatcher::block_on_queue().unwrap();
 }
 
 /// Checks if [`initialize`] was ever called.
@@ -642,8 +646,7 @@ pub fn handle_client_inactive() {
 
 /// TEST ONLY FUNCTION.
 /// Checks if an experiment is currently active.
-#[allow(dead_code)]
-pub(crate) fn test_is_experiment_active(experiment_id: String) -> bool {
+pub fn test_is_experiment_active(experiment_id: String) -> bool {
     block_on_dispatcher();
     with_glean(|glean| glean.test_is_experiment_active(experiment_id.to_owned()))
 }
@@ -651,8 +654,7 @@ pub(crate) fn test_is_experiment_active(experiment_id: String) -> bool {
 /// TEST ONLY FUNCTION.
 /// Returns the [`RecordedExperimentData`] for the given `experiment_id` or panics if
 /// the id isn't found.
-#[allow(dead_code)]
-pub(crate) fn test_get_experiment_data(experiment_id: String) -> RecordedExperimentData {
+pub fn test_get_experiment_data(experiment_id: String) -> RecordedExperimentData {
     block_on_dispatcher();
     with_glean(|glean| {
         let json_data = glean
@@ -782,6 +784,14 @@ pub fn set_source_tags(tags: Vec<String>) {
 /// Returns a timestamp corresponding to "now" with millisecond precision.
 pub fn get_timestamp_ms() -> u64 {
     glean_core::get_timestamp_ms()
+}
+
+/// Dispatches a request to the database to persist ping-lifetime data to disk.
+pub fn persist_ping_lifetime_data() {
+    crate::launch_with_glean(|glean| {
+        // This is async, we can't get the Error back to the caller.
+        let _ = glean.persist_ping_lifetime_data();
+    });
 }
 
 #[cfg(test)]

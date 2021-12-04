@@ -46,8 +46,6 @@
 #include "nsCOMPtr.h"
 #include "nsContentUtils.h"
 #include "nsIAsyncInputStream.h"
-#include "nsIBFCacheEntry.h"
-#include "mozilla/dom/Document.h"
 #include "nsIEventTarget.h"
 #include "nsIFileStreams.h"
 #include "nsNetCID.h"
@@ -130,7 +128,7 @@ void MaybeCollectGarbageOnIPCMessage() {
   }
 
   nsJSContext::GarbageCollectNow(JS::GCReason::DOM_IPC);
-  nsJSContext::CycleCollectNow();
+  nsJSContext::CycleCollectNow(CCReason::API);
 #endif  // BUILD_GC_ON_IPC_MESSAGES
 }
 
@@ -903,7 +901,7 @@ nsresult GetFileHandleResult(const RefPtr<IDBFileRequest>& aFileRequest,
   }
 
   nsString tmpString;
-  Tie(rv, encoding) = encoding->Decode(data, tmpString);
+  Tie(rv, Ignore) = encoding->Decode(data, tmpString);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return NS_ERROR_DOM_FILEHANDLE_UNKNOWN_ERR;
   }
@@ -2784,12 +2782,12 @@ nsresult BackgroundRequestChild::PreprocessHelper::ProcessStream() {
       blobInputStream->GetInternalStream();
   MOZ_ASSERT(internalInputStream);
 
-  QM_TRY(
-      SnappyUncompressStructuredCloneData(*internalInputStream, *mCloneData));
+  QM_TRY(MOZ_TO_RESULT(
+      SnappyUncompressStructuredCloneData(*internalInputStream, *mCloneData)));
 
   mState = State::Finishing;
 
-  QM_TRY(mOwningEventTarget->Dispatch(this, NS_DISPATCH_NORMAL));
+  QM_TRY(MOZ_TO_RESULT(mOwningEventTarget->Dispatch(this, NS_DISPATCH_NORMAL)));
 
   return NS_OK;
 }

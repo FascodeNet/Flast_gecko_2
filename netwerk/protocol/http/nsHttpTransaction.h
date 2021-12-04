@@ -56,7 +56,8 @@ class nsHttpTransaction final : public nsAHttpTransaction,
                                 public nsIInputStreamCallback,
                                 public nsIOutputStreamCallback,
                                 public ARefBase,
-                                public nsITimerCallback {
+                                public nsITimerCallback,
+                                public nsINamed {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSAHTTPTRANSACTION
@@ -64,6 +65,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   NS_DECL_NSIINPUTSTREAMCALLBACK
   NS_DECL_NSIOUTPUTSTREAMCALLBACK
   NS_DECL_NSITIMERCALLBACK
+  NS_DECL_NSINAMED
 
   nsHttpTransaction();
 
@@ -270,6 +272,7 @@ class nsHttpTransaction final : public nsAHttpTransaction,
     TRANSACTION_RESTART_HTTPS_RR_FAST_FALLBACK,
     TRANSACTION_RESTART_HTTP3_FAST_FALLBACK,
     TRANSACTION_RESTART_OTHERS,
+    TRANSACTION_RESTART_PROTOCOL_VERSION_ALERT,
   };
   void SetRestartReason(TRANSACTION_RESTART_REASON aReason);
 
@@ -545,6 +548,9 @@ class nsHttpTransaction final : public nsAHttpTransaction,
   nsTHashMap<nsUint32HashKey, uint32_t> mEchRetryCounterMap;
 
   bool mSupportsHTTP3 = false;
+
+  bool mEarlyDataWasAvailable = false;
+  bool ShouldRestartOn0RttError(nsresult reason);
 };
 
 }  // namespace net

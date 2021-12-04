@@ -332,8 +332,8 @@ Function un.GetCommonDirectory
   Push $0   ; Save $0
 
   ; This gets C:\ProgramData or the equivalent.
-  ; 0x23 is CSIDL_COMMON_APPDATA, see CreateUpdateDir in common.nsh.
-  System::Call "Shell32::SHGetSpecialFolderPathW(p 0, t.r0, i 0x23, i 0)"
+  ${GetCommonAppDataFolder} $0
+
   ; Add our subdirectory, this is hardcoded as grandparent of the update directory in
   ; several other places.
   StrCpy $0 "$0\Mozilla"
@@ -496,6 +496,7 @@ Section "Uninstall"
   ${un.RegCleanFileHandler}  ".webm"  "FirefoxHTML-$AppUserModelID"
   ${un.RegCleanFileHandler}  ".svg"   "FirefoxHTML-$AppUserModelID"
   ${un.RegCleanFileHandler}  ".webp"  "FirefoxHTML-$AppUserModelID"
+  ${un.RegCleanFileHandler}  ".avif"  "FirefoxHTML-$AppUserModelID"
 
   SetShellVarContext all  ; Set SHCTX to HKLM
   ${un.GetSecondInstallPath} "Software\Mozilla" $R9

@@ -19,6 +19,11 @@ const {
 
 const browsingContextAttachedObserverByWatcher = new Map();
 
+const isEveryFrameTargetEnabled = Services.prefs.getBoolPref(
+  "devtools.every-frame-target.enabled",
+  false
+);
+
 /**
  * Force creating targets for all existing BrowsingContext, that, for a given Watcher Actor.
  *
@@ -28,7 +33,7 @@ const browsingContextAttachedObserverByWatcher = new Map();
 async function createTargets(watcher) {
   // Go over all existing BrowsingContext in order to:
   // - Force the instantiation of a DevToolsFrameChild
-  // - Have the DevToolsFrameChild to spawn the BrowsingContextTargetActor
+  // - Have the DevToolsFrameChild to spawn the WindowGlobalTargetActor
 
   // If we have a browserElement, set the watchedByDevTools flag on its related browsing context
   // TODO: We should also set the flag for the "parent process" browsing context when we're
@@ -129,7 +134,7 @@ async function createTargetForBrowsingContext({
         watcherActorID: watcher.actorID,
         connectionPrefix: watcher.conn.prefix,
         browserId: watcher.browserId,
-        watchedData: watcher.watchedData,
+        sessionData: watcher.sessionData,
       });
   } catch (e) {
     console.warn(
@@ -209,7 +214,7 @@ function destroyTargets(watcher) {
  * @param Array<Object> entries
  *        The values to be added to this type of data
  */
-async function addWatcherDataEntry({ watcher, type, entries }) {
+async function addSessionDataEntry({ watcher, type, entries }) {
   const browsingContexts = getWatchingBrowsingContexts(watcher);
   const promises = [];
   for (const browsingContext of browsingContexts) {
@@ -220,7 +225,7 @@ async function addWatcherDataEntry({ watcher, type, entries }) {
 
     const promise = browsingContext.currentWindowGlobal
       .getActor("DevToolsFrame")
-      .addWatcherDataEntry({
+      .addSessionDataEntry({
         watcherActorID: watcher.actorID,
         browserId: watcher.browserId,
         type,
@@ -235,9 +240,9 @@ async function addWatcherDataEntry({ watcher, type, entries }) {
 /**
  * Notify all existing frame targets that some data entries have been removed
  *
- * See addWatcherDataEntry for argument documentation.
+ * See addSessionDataEntry for argument documentation.
  */
-function removeWatcherDataEntry({ watcher, type, entries }) {
+function removeSessionDataEntry({ watcher, type, entries }) {
   const browsingContexts = getWatchingBrowsingContexts(watcher);
   for (const browsingContext of browsingContexts) {
     logWindowGlobal(
@@ -247,7 +252,7 @@ function removeWatcherDataEntry({ watcher, type, entries }) {
 
     browsingContext.currentWindowGlobal
       .getActor("DevToolsFrame")
-      .removeWatcherDataEntry({
+      .removeSessionDataEntry({
         watcherActorID: watcher.actorID,
         browserId: watcher.browserId,
         type,
@@ -259,8 +264,8 @@ function removeWatcherDataEntry({ watcher, type, entries }) {
 module.exports = {
   createTargets,
   destroyTargets,
-  addWatcherDataEntry,
-  removeWatcherDataEntry,
+  addSessionDataEntry,
+  removeSessionDataEntry,
 };
 
 /**
@@ -307,10 +312,11 @@ function getWatchingBrowsingContexts(watcher) {
  *        Browser Element and any of its (nested) children iframes.
  */
 function getFilteredRemoteBrowsingContext(browserElement) {
-  return getAllRemoteBrowsingContexts(
-    browserElement?.browsingContext
-  ).filter(browsingContext =>
-    shouldNotifyWindowGlobal(browsingContext, browserElement?.browserId)
+  return getAllRemoteBrowsingContexts(browserElement?.browsingContext).filter(
+    browsingContext =>
+      shouldNotifyWindowGlobal(browsingContext, browserElement?.browserId, {
+        acceptNonRemoteFrame: isEveryFrameTargetEnabled,
+      })
   );
 }
 

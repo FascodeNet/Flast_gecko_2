@@ -98,6 +98,11 @@ bool Gecko_MediaFeatures_ShouldAvoidNativeTheme(const Document* aDocument) {
   return aDocument->ShouldAvoidNativeTheme();
 }
 
+bool Gecko_MediaFeatures_UseOverlayScrollbars(const Document* aDocument) {
+  nsPresContext* pc = aDocument->GetPresContext();
+  return pc && pc->UseOverlayScrollbars();
+}
+
 static nsDeviceContext* GetDeviceContextFor(const Document* aDocument) {
   nsPresContext* pc = aDocument->GetPresContext();
   if (!pc) {
@@ -254,17 +259,23 @@ bool Gecko_MediaFeatures_PrefersReducedMotion(const Document* aDocument) {
 
 StylePrefersColorScheme Gecko_MediaFeatures_PrefersColorScheme(
     const Document* aDocument) {
-  return aDocument->PrefersColorScheme();
+  return aDocument->PreferredColorScheme() == ColorScheme::Dark
+             ? StylePrefersColorScheme::Dark
+             : StylePrefersColorScheme::Light;
 }
 
+// Neither Linux, Windows, nor Mac have a way to indicate that low contrast is
+// preferred so we use the presence of an accessibility theme or forced colors
+// as a signal.
 StylePrefersContrast Gecko_MediaFeatures_PrefersContrast(
     const Document* aDocument) {
   if (nsContentUtils::ShouldResistFingerprinting(aDocument)) {
     return StylePrefersContrast::NoPreference;
   }
-  // Neither Linux, Windows, nor Mac have a way to indicate that low contrast is
-  // preferred so we use the presence of an accessibility theme as a signal.
   if (!!LookAndFeel::GetInt(LookAndFeel::IntID::UseAccessibilityTheme, 0)) {
+    return StylePrefersContrast::More;
+  }
+  if (!PreferenceSheet::PrefsFor(*aDocument).mUseDocumentColors) {
     return StylePrefersContrast::More;
   }
   return StylePrefersContrast::NoPreference;

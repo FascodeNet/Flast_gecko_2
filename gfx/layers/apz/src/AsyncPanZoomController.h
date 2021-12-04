@@ -1137,12 +1137,6 @@ class AsyncPanZoomController {
   };
 
   /**
-   * Get the current layout viewport of the scrollable frame corresponding to
-   * this APZC.
-   */
-  CSSRect GetCurrentAsyncLayoutViewport(AsyncTransformConsumer aMode) const;
-
-  /**
    * Get the current scroll offset of the scrollable frame corresponding
    * to this APZC, including the effects of any asynchronous panning and
    * zooming, in ParentLayer pixels.
@@ -1201,7 +1195,7 @@ class AsyncPanZoomController {
     return mScrollMetadata.GetMetrics().GetCompositionBounds();
   }
 
-  LayoutDeviceToLayerScale2D GetCumulativeResolution() const {
+  LayoutDeviceToLayerScale GetCumulativeResolution() const {
     RecursiveMutexAutoLock lock(mRecursiveMutex);
     return mScrollMetadata.GetMetrics().GetCumulativeResolution();
   }
@@ -1252,7 +1246,7 @@ class AsyncPanZoomController {
   CSSPoint GetEffectiveScrollOffset(
       AsyncTransformConsumer aMode,
       const RecursiveMutexAutoLock& aProofOfLock) const;
-  CSSToParentLayerScale2D GetEffectiveZoom(
+  CSSToParentLayerScale GetEffectiveZoom(
       AsyncTransformConsumer aMode,
       const RecursiveMutexAutoLock& aProofOfLock) const;
 
@@ -1706,14 +1700,6 @@ class AsyncPanZoomController {
    */
   void SetTestAsyncZoom(const LayerToParentLayerScale& aZoom);
 
-  void MarkAsyncTransformAppliedToContent() {
-    mAsyncTransformAppliedToContent = true;
-  }
-
-  bool GetAsyncTransformAppliedToContent() const {
-    return mAsyncTransformAppliedToContent;
-  }
-
   LayersId GetLayersId() const { return mLayersId; }
 
   bool IsAsyncZooming() const {
@@ -1735,9 +1721,6 @@ class AsyncPanZoomController {
   // Extra zoom to include in the aync zoom for testing
   LayerToParentLayerScale mTestAsyncZoom;
   uint8_t mTestAttributeAppliers;
-  // Flag to track whether or not the APZ transform is not used. This
-  // flag is recomputed for every composition frame.
-  bool mAsyncTransformAppliedToContent;
   // Flag to track whether or not this APZC has ever async key scrolled.
   bool mTestHasAsyncKeyScrolled;
 

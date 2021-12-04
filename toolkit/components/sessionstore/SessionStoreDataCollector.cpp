@@ -6,6 +6,7 @@
 
 #include "mozilla/dom/SessionStoreDataCollector.h"
 
+#include "mozilla/Assertions.h"
 #include "mozilla/PresShell.h"
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/dom/BrowsingContext.h"
@@ -17,6 +18,7 @@
 #include "mozilla/dom/WindowGlobalParent.h"
 
 #include "nsGenericHTMLElement.h"
+#include "nsIContentInlines.h"
 
 namespace mozilla::dom {
 
@@ -24,11 +26,18 @@ NS_IMPL_CYCLE_COLLECTION(SessionStoreDataCollector, mWindowChild, mTimer)
 
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(SessionStoreDataCollector)
   NS_INTERFACE_MAP_ENTRY(nsITimerCallback)
+  NS_INTERFACE_MAP_ENTRY(nsINamed)
   NS_INTERFACE_MAP_ENTRY_AMBIGUOUS(nsISupports, nsITimerCallback)
 NS_INTERFACE_MAP_END
 
 NS_IMPL_CYCLE_COLLECTING_ADDREF(SessionStoreDataCollector)
 NS_IMPL_CYCLE_COLLECTING_RELEASE(SessionStoreDataCollector)
+
+NS_IMETHODIMP
+SessionStoreDataCollector::GetName(nsACString& aName) {
+  aName.AssignLiteral("SessionStoreDataCollector");
+  return NS_OK;
+}
 
 NS_IMETHODIMP
 SessionStoreDataCollector::Notify(nsITimer* aTimer) {
@@ -115,15 +124,20 @@ void SessionStoreDataCollector::Collect() {
   if (mInputChanged) {
     maybeFormData.emplace();
     auto& formData = maybeFormData.ref();
-    SessionStoreUtils::CollectFormData(document, formData);
+    uint32_t size = SessionStoreUtils::CollectFormData(document, formData);
 
     Element* body = document->GetBody();
-    if (document->HasFlag(NODE_IS_EDITABLE) && body) {
+    if (body && body->IsInDesignMode()) {
       IgnoredErrorResult result;
       body->GetInnerHTML(formData.innerHTML(), result);
+      size += formData.innerHTML().Length();
       if (!result.Failed()) {
         formData.hasData() = true;
       }
+    }
+
+    if (size > StaticPrefs::browser_sessionstore_dom_form_max_limit()) {
+      maybeFormData = Nothing();
     }
   }
 

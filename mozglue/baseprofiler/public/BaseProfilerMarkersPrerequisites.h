@@ -176,10 +176,6 @@ class MOZ_STACK_CLASS ProfilerStringView {
     return mStringView;
   }
 
-  [[nodiscard]] constexpr const CHAR* Data() const {
-    return mStringView.data();
-  }
-
   [[nodiscard]] constexpr size_t Length() const { return mStringView.length(); }
 
   [[nodiscard]] constexpr bool IsLiteral() const {
@@ -190,9 +186,10 @@ class MOZ_STACK_CLASS ProfilerStringView {
   }
   // No `IsOwned...()` because it's a secret, only used internally!
 
-  [[nodiscard]] operator Span<const CHAR>() const {
-    return Span<const CHAR>(Data(), Length());
+  [[nodiscard]] Span<const CHAR> AsSpan() const {
+    return Span<const CHAR>(mStringView.data(), mStringView.length());
   }
+  [[nodiscard]] operator Span<const CHAR>() const { return AsSpan(); }
 
  private:
   enum class Ownership { Literal, Reference, OwnedThroughStringView };
@@ -387,6 +384,14 @@ class MarkerTiming {
     return static_cast<uint8_t>(mPhase);
   }
 
+  // This is a constructor for Rust FFI bindings. It must not be used outside of
+  // this! Please see the other static constructors above.
+  static void UnsafeConstruct(MarkerTiming* aMarkerTiming,
+                              const TimeStamp& aStartTime,
+                              const TimeStamp& aEndTime, Phase aPhase) {
+    new (aMarkerTiming) MarkerTiming{aStartTime, aEndTime, aPhase};
+  }
+
  private:
   friend ProfileBufferEntryWriter::Serializer<MarkerTiming>;
   friend ProfileBufferEntryReader::Deserializer<MarkerTiming>;
@@ -501,6 +506,11 @@ class MarkerStack {
   static MarkerStack TakeBacktrace(
       UniquePtr<ProfileChunkedBuffer>&& aExternalChunkedBuffer) {
     return MarkerStack(std::move(aExternalChunkedBuffer));
+  }
+
+  // Construct with the given capture options.
+  static MarkerStack WithCaptureOptions(StackCaptureOptions aCaptureOptions) {
+    return MarkerStack(aCaptureOptions);
   }
 
   [[nodiscard]] StackCaptureOptions CaptureOptions() const {
@@ -749,6 +759,11 @@ class MarkerSchema {
   template <typename... Locations>
   explicit MarkerSchema(Location aLocation, Locations... aLocations)
       : mLocations{aLocation, aLocations...} {}
+
+  // Alternative constructor for MarkerSchema.
+  explicit MarkerSchema(const mozilla::MarkerSchema::Location* aLocations,
+                        size_t aLength)
+      : mLocations(aLocations, aLocations + aLength) {}
 
   // Marker schema for types that have special frontend handling.
   // Nothing else should be set in this case.

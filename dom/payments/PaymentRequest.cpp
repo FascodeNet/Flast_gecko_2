@@ -95,7 +95,7 @@ bool PaymentRequest::PrefEnabled(JSContext* aCx, JSObject* aObj) {
   }
   nsAutoCString locale;
   LocaleService::GetInstance()->GetAppLocaleAsBCP47(locale);
-  mozilla::intl::Locale loc = mozilla::intl::Locale(locale);
+  mozilla::intl::MozLocale loc = mozilla::intl::MozLocale(locale);
   if (!(loc.GetLanguage() == "en" && loc.GetRegion() == "US")) {
     return false;
   }
@@ -610,10 +610,17 @@ already_AddRefed<PaymentRequest> PaymentRequest::Constructor(
     return nullptr;
   }
 
-  // Get the top level principal
-  RefPtr<Document> topLevelDoc = doc->GetTopLevelContentDocumentIfSameProcess();
-  MOZ_ASSERT(topLevelDoc);
-  nsCOMPtr<nsIPrincipal> topLevelPrincipal = topLevelDoc->NodePrincipal();
+  // Get the top same process document
+  nsCOMPtr<Document> topSameProcessDoc = doc;
+  topSameProcessDoc = doc;
+  while (topSameProcessDoc) {
+    nsCOMPtr<Document> parent = topSameProcessDoc->GetInProcessParentDocument();
+    if (!parent || !parent->IsContentDocument()) {
+      break;
+    }
+    topSameProcessDoc = parent;
+  }
+  nsCOMPtr<nsIPrincipal> topLevelPrincipal = topSameProcessDoc->NodePrincipal();
 
   // Check payment methods and details
   IsValidMethodData(aGlobal.Context(), aMethodData, aRv);
@@ -783,7 +790,6 @@ void PaymentRequest::RespondShowPayment(const nsAString& aMethodName,
                                         const nsAString& aPayerEmail,
                                         const nsAString& aPayerPhone,
                                         ErrorResult&& aResult) {
-  MOZ_ASSERT(mAcceptPromise || mResponse);
   MOZ_ASSERT(mState == eInteractive);
 
   if (aResult.Failed()) {
@@ -798,12 +804,17 @@ void PaymentRequest::RespondShowPayment(const nsAString& aMethodName,
   if (mResponse) {
     mResponse->RespondRetry(aMethodName, mShippingOption, mShippingAddress,
                             aDetails, aPayerName, aPayerEmail, aPayerPhone);
-  } else {
+  } else if (mAcceptPromise) {
     RefPtr<PaymentResponse> paymentResponse = new PaymentResponse(
         GetOwner(), this, mId, aMethodName, mShippingOption, mShippingAddress,
         aDetails, aPayerName, aPayerEmail, aPayerPhone);
     mResponse = paymentResponse;
     mAcceptPromise->MaybeResolve(paymentResponse);
+  } else {
+    // mAccpetPromise could be nulled through document activity changed. And
+    // there is nothing to do here.
+    mState = eClosed;
+    return;
   }
 
   mState = eClosed;
@@ -868,18 +879,21 @@ void PaymentRequest::RespondAbortPayment(bool aSuccess) {
     return;
   }
 
-  MOZ_ASSERT(mAbortPromise);
-  MOZ_ASSERT(mState == eInteractive);
+  if (mState != eInteractive) {
+    return;
+  }
 
-  if (aSuccess) {
-    mAbortPromise->MaybeResolve(JS::UndefinedHandleValue);
-    mAbortPromise = nullptr;
-    ErrorResult abortResult;
-    abortResult.ThrowAbortError("The PaymentRequest is aborted");
-    RejectShowPayment(std::move(abortResult));
-  } else {
-    mAbortPromise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR);
-    mAbortPromise = nullptr;
+  if (mAbortPromise) {
+    if (aSuccess) {
+      mAbortPromise->MaybeResolve(JS::UndefinedHandleValue);
+      mAbortPromise = nullptr;
+      ErrorResult abortResult;
+      abortResult.ThrowAbortError("The PaymentRequest is aborted");
+      RejectShowPayment(std::move(abortResult));
+    } else {
+      mAbortPromise->MaybeReject(NS_ERROR_DOM_INVALID_STATE_ERR);
+      mAbortPromise = nullptr;
+    }
   }
 }
 

@@ -2,7 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at <http://mozilla.org/MPL/2.0/>. */
 
-const { LocalizationHelper } = require("devtools/shared/l10n");
+const { MultiLocalizationHelper } = require("devtools/shared/l10n");
 
 loader.lazyRequireGetter(
   this,
@@ -23,8 +23,13 @@ loader.lazyRequireGetter(
   true
 );
 
-const DBG_STRINGS_URI = "devtools/client/locales/debugger.properties";
-const L10N = new LocalizationHelper(DBG_STRINGS_URI);
+const DBG_STRINGS_URI = [
+  "devtools/client/locales/debugger.properties",
+  // These are used in the AppErrorBoundary component
+  "devtools/client/locales/startup.properties",
+  "devtools/client/locales/components.properties",
+];
+const L10N = new MultiLocalizationHelper(...DBG_STRINGS_URI);
 
 async function getNodeFront(gripOrFront, toolbox) {
   // Given a NodeFront
@@ -64,15 +69,6 @@ class DebuggerPanel {
     this._store = store;
     this._selectors = selectors;
     this._client = client;
-
-    this.panelWin.document.addEventListener(
-      "drag:start",
-      this.toolbox.toggleDragging
-    );
-    this.panelWin.document.addEventListener(
-      "drag:end",
-      this.toolbox.toggleDragging
-    );
 
     registerStoreObserver(this._store, this._onDebuggerStateChange.bind(this));
 
@@ -187,6 +183,19 @@ class DebuggerPanel {
 
   getMappedExpression(expression) {
     return this._actions.getMappedExpression(expression);
+  }
+
+  /**
+   * Return the source-mapped variables for the current scope.
+   * @returns {{[String]: String} | null} A dictionary mapping original variable names to generated
+   * variable names if map scopes is enabled, otherwise null.
+   */
+  getMappedVariables() {
+    if (!this._selectors.isMapScopesEnabled(this._getState())) {
+      return null;
+    }
+    const thread = this._selectors.getCurrentThread(this._getState());
+    return this._selectors.getSelectedScopeMappings(this._getState(), thread);
   }
 
   isPaused() {

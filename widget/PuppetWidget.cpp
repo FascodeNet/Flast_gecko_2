@@ -228,26 +228,6 @@ void PuppetWidget::Resize(double aWidth, double aHeight, bool aRepaint) {
   }
 }
 
-nsresult PuppetWidget::ConfigureChildren(
-    const nsTArray<Configuration>& aConfigurations) {
-  for (uint32_t i = 0; i < aConfigurations.Length(); ++i) {
-    const Configuration& configuration = aConfigurations[i];
-    PuppetWidget* w = static_cast<PuppetWidget*>(configuration.mChild.get());
-    NS_ASSERTION(w->GetParent() == this, "Configured widget is not a child");
-    w->SetWindowClipRegion(configuration.mClipRegion, true);
-    LayoutDeviceIntRect bounds = w->GetBounds();
-    if (bounds.Size() != configuration.mBounds.Size()) {
-      w->Resize(configuration.mBounds.X(), configuration.mBounds.Y(),
-                configuration.mBounds.Width(), configuration.mBounds.Height(),
-                true);
-    } else if (bounds.TopLeft() != configuration.mBounds.TopLeft()) {
-      w->Move(configuration.mBounds.X(), configuration.mBounds.Y());
-    }
-    w->SetWindowClipRegion(configuration.mClipRegion, false);
-  }
-  return NS_OK;
-}
-
 void PuppetWidget::SetFocus(Raise aRaise, CallerType aCallerType) {
   if (aRaise == Raise::Yes && mBrowserChild) {
     mBrowserChild->SendRequestFocus(true, aCallerType);
@@ -514,14 +494,14 @@ nsresult PuppetWidget::ClearNativeTouchSequence(nsIObserver* aObserver) {
 nsresult PuppetWidget::SynthesizeNativePenInput(
     uint32_t aPointerId, TouchPointerState aPointerState,
     LayoutDeviceIntPoint aPoint, double aPressure, uint32_t aRotation,
-    int32_t aTiltX, int32_t aTiltY, nsIObserver* aObserver) {
+    int32_t aTiltX, int32_t aTiltY, int32_t aButton, nsIObserver* aObserver) {
   AutoObserverNotifier notifier(aObserver, "peninput");
   if (!mBrowserChild) {
     return NS_ERROR_FAILURE;
   }
-  mBrowserChild->SendSynthesizeNativePenInput(aPointerId, aPointerState, aPoint,
-                                              aPressure, aRotation, aTiltX,
-                                              aTiltY, notifier.SaveObserver());
+  mBrowserChild->SendSynthesizeNativePenInput(
+      aPointerId, aPointerState, aPoint, aPressure, aRotation, aTiltX, aTiltY,
+      aButton, notifier.SaveObserver());
   return NS_OK;
 }
 
@@ -609,7 +589,7 @@ WindowRenderer* PuppetWidget::GetWindowRenderer() {
     // can do drawing in this process.
     MOZ_ASSERT(!mBrowserChild ||
                mBrowserChild->IsLayersConnected() != Some(true));
-    mWindowRenderer = CreateBasicLayerManager();
+    mWindowRenderer = CreateFallbackRenderer();
   }
 
   return mWindowRenderer;

@@ -45,7 +45,6 @@ include "mozilla/ipc/TransportSecurityInfoUtils.h";
 include "mozilla/ipc/URIUtils.h";
 
 using mozilla::gfx::Matrix4x4 from "mozilla/gfx/Matrix.h";
-using mozilla::gfx::MaybeMatrix4x4 from "mozilla/gfx/Matrix.h";
 using mozilla::gfx::SurfaceFormat from "mozilla/gfx/Types.h";
 using mozilla::LayoutDeviceIntPoint from "Units.h";
 using mozilla::LayoutDevicePoint from "Units.h";
@@ -57,7 +56,6 @@ using struct mozilla::layers::ScrollableLayerGuid from "mozilla/layers/Scrollabl
 using struct mozilla::layers::ZoomConstraints from "mozilla/layers/ZoomConstraints.h";
 using mozilla::layers::LayersId from "mozilla/layers/LayersTypes.h";
 using mozilla::layers::LayersObserverEpoch from "mozilla/layers/LayersTypes.h";
-using mozilla::layers::MaybeZoomConstraints from "mozilla/layers/ZoomConstraints.h";
 using mozilla::layers::GeckoContentController_TapType from "mozilla/layers/GeckoContentControllerTypes.h";
 using ScrollableLayerGuid::ViewID from "mozilla/layers/ScrollableLayerGuid.h";
 using struct mozilla::void_t from "mozilla/ipc/IPCCore.h";
@@ -168,6 +166,9 @@ struct PrintPreviewResultInfo
   bool hasSelection;
   // Whether there's a selection in the previewed page, excluding its subframes.
   bool hasSelfSelection;
+  // If present, indicates if the page should be printed landscape when true or
+  // portrait when false;
+  bool? printLandscape;
 };
 
 /**
@@ -229,7 +230,9 @@ parent:
      * parent process to start painting the new document, if it's still painting
      * the old one.
      */
-    [Priority=mediumhigh] async DidUnsuppressPainting();
+    [Priority=control] async DidUnsuppressPainting();
+
+    async DidUnsuppressPaintingNormalPriority();
 
     /**
      * When child sends this message, parent should move focus to
@@ -526,6 +529,7 @@ parent:
                                    uint32_t aRotation,
                                    int32_t aTiltX,
                                    int32_t aTiltY,
+                                   int32_t aButton,
                                    uint64_t aObserverId);
     async SynthesizeNativeTouchpadDoubleTap(LayoutDeviceIntPoint aPoint,
                                             uint32_t aModifierFlags);
@@ -709,7 +713,7 @@ child:
 
     async SizeModeChanged(nsSizeMode sizeMode);
 
-    async ChildToParentMatrix(MaybeMatrix4x4 aMatrix,
+    async ChildToParentMatrix(Matrix4x4? aMatrix,
                               ScreenRect aRemoteDocumentRect);
 
     async SetIsUnderHiddenEmbedderElement(bool aIsUnderHiddenEmbedderElement);
